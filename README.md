@@ -1,4 +1,4 @@
-# PAPA
+# PAPA 2.0
 
 A native C++20 port of Mandiant's [CAPA](https://github.com/mandiant/capa). 
 
