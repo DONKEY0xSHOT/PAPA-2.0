@@ -7,7 +7,7 @@ The motivation is simple - CAPA's analysis is excellent, but it's slow. PAPA kee
 ## Advantages
 
 - **Full CAPA rule syntax**
-- **Compatible JSON Output**
+- **CAPA-Compatible JSON Output**
 - **No runtime** - A single native executable!
 - **Much better performance : )**
 - **Minimal dependencies** - only Zydis for disassembly and doctest for unit testing
