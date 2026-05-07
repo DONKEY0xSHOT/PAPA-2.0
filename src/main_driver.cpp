@@ -1,0 +1,276 @@
+#include "papa/main_driver.h"
+
+#include "papa/capabilities/common.h"
+#include "papa/capabilities/static_.h"
+#include "papa/exceptions.h"
+#include "papa/features/extractors/papa_native/backend.h"
+#include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/pefile_extractor.h"
+#include "papa/loader.h"
+#include "papa/pe/pe_image.h"
+#include "papa/pe/pe_parser.h"
+#include "papa/render/json.h"
+#include "papa/render/result_document.h"
+#include "papa/render/text.h"
+#include "papa/rules/ruleset.h"
+#include "papa/version.h"
+
+#include <cstddef>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+namespace papa::cli {
+
+namespace {
+
+constexpr std::string_view kUsage =
+    "Usage: papa [OPTIONS] <sample>\n"
+    "\n"
+    "Options:\n"
+    "  -r, --rules <dir>   Rule directory (default: data/rules)\n"
+    "  -j, --json          Emit JSON output\n"
+    "  -v, --verbose       Verbose text output\n"
+    "      --vverbose      Most verbose text output, includes rule sources\n"
+    "  -o, --output <path> Write report to a file instead of stdout\n"
+    "  -q, --quiet         Suppress informational messages on stderr\n"
+    "  -h, --help          Show this message and exit\n"
+    "      --version       Print version information and exit\n"
+    "\n"
+    "Examples:\n"
+    "  papa sample.exe -r capa-rules-9.4.0\n"
+    "  papa sample.exe -j -o report.json -r capa-rules-9.4.0\n";
+
+// Slurp the whole file into an owned buffer
+// Returns an empty optional on any IO failure
+// Specific errors are surfaced separately by the caller via stderr
+[[nodiscard]] std::optional<std::vector<std::byte>>
+read_entire_file(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto sz = std::filesystem::file_size(path, ec);
+    if (ec) { return std::nullopt; }
+
+    std::vector<std::byte> buf;
+    buf.resize(static_cast<std::size_t>(sz));
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) { return std::nullopt; }
+    ifs.read(reinterpret_cast<char*>(buf.data()),
+             static_cast<std::streamsize>(buf.size()));
+    if (ifs.gcount() != static_cast<std::streamsize>(buf.size())) {
+        return std::nullopt;
+    }
+    return buf;
+}
+
+[[nodiscard]] std::string join_argv(int argc, const char* const* argv) {
+    std::ostringstream oss;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) { oss << ' '; }
+        oss << argv[i];
+    }
+    return oss.str();
+}
+
+}  // namespace
+
+ParseResult parse_args(int argc, const char* const* argv) {
+    ParseResult res;
+    Args& a = res.args;
+
+    for (int i = 0; i < argc; ++i) {
+        const std::string_view arg{argv[i]};
+
+        if (arg == "--help" || arg == "-h") { a.show_help = true; continue; }
+        if (arg == "--version")             { a.show_version = true; continue; }
+        if (arg == "--quiet" || arg == "-q") { a.quiet = true; continue; }
+        if (arg == "--json"  || arg == "-j") { a.output = OutputMode::kJson; continue; }
+        if (arg == "--verbose" || arg == "-v") {
+            // -v on its own gives verbose
+            // --vverbose has its own branch below
+            a.output = OutputMode::kVerbose;
+            continue;
+        }
+        if (arg == "--vverbose" || arg == "-vv") {
+            a.output = OutputMode::kVverbose;
+            continue;
+        }
+        if (arg == "--rules" || arg == "-r") {
+            if (i + 1 >= argc) {
+                res.error     = "--rules requires a directory argument";
+                res.exit_code = kExitUsage;
+                return res;
+            }
+            a.rules_dir = argv[++i];
+            continue;
+        }
+        if (arg == "--output" || arg == "-o") {
+            if (i + 1 >= argc) {
+                res.error     = "--output requires a path argument";
+                res.exit_code = kExitUsage;
+                return res;
+            }
+            a.output_path = argv[++i];
+            continue;
+        }
+
+        // First non-flag positional is the sample path
+        if (a.sample_path.empty() && !arg.empty() && arg.front() != '-') {
+            a.sample_path = std::filesystem::path(std::string(arg));
+            continue;
+        }
+
+        res.error     = std::string("unrecognized argument: ").append(arg);
+        res.exit_code = kExitUsage;
+        return res;
+    }
+    return res;
+}
+
+int run(const Args& args) {
+    if (args.show_version) {
+        std::cout << version::banner() << '\n';
+        return kExitOk;
+    }
+    if (args.show_help) {
+        std::cout << version::banner() << "\n\n" << kUsage;
+        return kExitOk;
+    }
+
+    if (args.sample_path.empty()) {
+        std::cerr << "error: missing sample path\n\n" << kUsage;
+        return kExitUsage;
+    }
+    if (!std::filesystem::exists(args.sample_path)) {
+        std::cerr << "error: sample not found: " << args.sample_path << '\n';
+        return kExitMissingFile;
+    }
+
+    const auto sample_buf_opt = read_entire_file(args.sample_path);
+    if (!sample_buf_opt.has_value()) {
+        std::cerr << "error: cannot read sample: " << args.sample_path << '\n';
+        return kExitMissingFile;
+    }
+    const auto& sample_buf = *sample_buf_opt;
+
+    auto image = pe::PeParser::parse_file(args.sample_path);
+    if (!image) {
+        std::cerr << "error: not a parseable PE file: "
+                  << image.error().detail << '\n';
+        return kExitInvalidFileType;
+    }
+
+    if (!std::filesystem::exists(args.rules_dir)) {
+        std::cerr << "error: rules directory not found: " << args.rules_dir
+                  << '\n';
+        return kExitInvalidRule;
+    }
+    auto ruleset = rules::RuleSet::from_directory(args.rules_dir);
+    if (!ruleset) {
+        std::cerr << "error: failed to load rules: "
+                  << ruleset.error().detail << '\n';
+        return kExitInvalidRule;
+    }
+
+    // First-pass file-only check for static-limitation rules
+    {
+        features::extractors::PefileFeatureExtractor pe_only(*image);
+        auto file_caps = capabilities::find_file_capabilities(*ruleset, pe_only);
+        if (!file_caps) {
+            std::cerr << "error: file-scope match failed: "
+                      << file_caps.error().detail << '\n';
+            return kExitUnexpectedFailure;
+        }
+        if (capabilities::has_static_limitation(*ruleset, *file_caps)) {
+            if (!args.quiet) {
+                std::cerr << "static-only limitation rule matched; "
+                          << "consider dynamic analysis\n";
+            }
+            // The user still gets a report containing the limitation hit
+            // but the code-extractor pass is skipped because results would be misleading
+            std::vector<std::string> rules_paths{args.rules_dir.string()};
+            auto meta = collect_metadata(
+                std::span<const std::byte>(sample_buf),
+                args.sample_path,
+                std::string{},
+                std::move(rules_paths),
+                *image,
+                capabilities::static_::StaticCapabilities{},
+                pe_only);
+            auto doc = render::build_document(std::move(meta), *ruleset, file_caps->matches);
+            if (args.output == OutputMode::kJson) {
+                render::json::render(doc, std::cout, /*pretty=*/true);
+                std::cout << '\n';
+            } else {
+                render::text::render(doc, std::cout, render::text::Verbosity::kDefault);
+            }
+            return kExitFileLimitation;
+        }
+    }
+
+    // Full code pipeline
+    auto backend = features::extractors::papa_native::PapaNativeBackend::build(*image);
+    if (!backend) {
+        std::cerr << "error: backend build failed: "
+                  << backend.error().detail << '\n';
+        return kExitUnexpectedFailure;
+    }
+    features::extractors::papa_native::PapaNativeStaticExtractor extractor(
+        std::move(*backend));
+
+    auto caps = capabilities::static_::find_static_capabilities(*ruleset, extractor);
+    if (!caps) {
+        std::cerr << "error: capability discovery failed: "
+                  << caps.error().detail << '\n';
+        return kExitUnexpectedFailure;
+    }
+
+    std::vector<std::string> rules_paths{args.rules_dir.string()};
+    auto meta = collect_metadata(
+        std::span<const std::byte>(sample_buf),
+        args.sample_path,
+        std::string{},
+        std::move(rules_paths),
+        *image,
+        *caps,
+        extractor);
+    auto doc = render::build_document(std::move(meta), *ruleset, caps->all_matches);
+
+    // Route the report to a file when --output was given, otherwise stdout
+    std::ofstream file_out;
+    std::ostream* out = &std::cout;
+    if (!args.output_path.empty()) {
+        file_out.open(args.output_path, std::ios::binary);
+        if (!file_out) {
+            std::cerr << "error: cannot open output path: "
+                      << args.output_path << '\n';
+            return kExitUnexpectedFailure;
+        }
+        out = &file_out;
+    }
+
+    switch (args.output) {
+        case OutputMode::kJson:
+            render::json::render(doc, *out, /*pretty=*/true);
+            (*out) << '\n';
+            break;
+        case OutputMode::kVerbose:
+            render::text::render(doc, *out, render::text::Verbosity::kVerbose);
+            break;
+        case OutputMode::kVverbose:
+            render::text::render(doc, *out, render::text::Verbosity::kVverbose);
+            break;
+        case OutputMode::kDefault:
+            render::text::render(doc, *out, render::text::Verbosity::kDefault);
+            break;
+    }
+    return kExitOk;
+}
+
+}  // namespace papa::cli
