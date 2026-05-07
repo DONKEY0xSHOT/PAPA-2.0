@@ -112,7 +112,6 @@ tests/
     run_parity.py       diffs PAPA vs capa.exe rule-match sets
 tools/papa/             CLI entry (papa_main.cpp)
 third_party/            Zydis (vendored) and doctest (single header)
-docs/                   BUILD.md, USAGE.md, ARCHITECTURE.md
 ```
 
 ## Performance
