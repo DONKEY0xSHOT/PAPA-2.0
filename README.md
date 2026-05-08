@@ -145,7 +145,7 @@ categories. Both are quantifiable and bounded.
   vivisect recovers using heuristics that PAPA's
   recursive-descent plus pdata seeding does not yet replicate.
 
-PAPA generally achieves recal and percision rates raging from 90% to 100%. Since CAPA is designed for initial triage, the remaining gap is well within useful range and the vast majority of rules behave identically!
+On medium binaries, PAPA generally achieves recall and percision rates raging from 90% to 100%. Since CAPA is designed for initial triage, this gap is well within useful range.
 
 ## TODO
 
