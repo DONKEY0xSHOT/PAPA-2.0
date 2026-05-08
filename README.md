@@ -149,8 +149,7 @@ On medium binaries, PAPA generally achieves recall and percision rates raging fr
 
 ## TODO
 
-- **FLIRT signature support** - It would solve most of the false positives (CRT helpers would be
-  suppressed) and the false-negative gap (more accurate function
-  boundaries via FLIRT-recognized prologues).
+- **FLIRT signature support** - It would solve most of the FPs & FNs. We currently use pattern-matching to detect common CRT functions, but there's more work to be done.
 - **Broader regex compatibility** - for rules whose patterns use Python `re`
   features `std::regex` rejects.
+- **Beautify the CLI output** - The current CLI output is ugly, unlike CAPA's one.
