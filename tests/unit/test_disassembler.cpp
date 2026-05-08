@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <span>
 #include <string_view>
+#include "fixture_paths.h"
 
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::Disassembler;
@@ -20,7 +21,7 @@ using papa::features::extractors::papa_native::OperandKind;
 
 namespace {
 
-constexpr std::string_view kNotepad = "C:/Windows/System32/notepad.exe";
+const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
 // Small helper to turn a list of byte-integers into std::array<std::byte, N>
 template <typename... B>

@@ -12,12 +12,13 @@
 #include <filesystem>
 #include <string_view>
 #include <utility>
+#include "fixture_paths.h"
 
 using papa::features::extractors::papa_native::PapaNativeBackend;
 
 namespace {
 
-constexpr std::string_view kNotepad = "C:/Windows/System32/notepad.exe";
+const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
 }  // namespace
 

@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <string>
 #include <variant>
+#include "fixture_paths.h"
 
 using papa::features::AbsoluteVirtualAddress;
 using papa::features::Characteristic;
@@ -210,7 +211,7 @@ namespace {
     static bool tried = false;
     if (!tried) {
         tried = true;
-        const std::string_view path = "C:/Windows/System32/notepad.exe";
+        const auto path = papa_tests::fixture_path("notepad.exe");
         if (std::filesystem::exists(path)) {
             auto r = papa::pe::PeParser::parse_file(path);
             if (r) { cached.emplace(std::move(*r)); }

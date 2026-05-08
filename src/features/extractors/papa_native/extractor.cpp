@@ -75,7 +75,12 @@ insn_from_handle(const base::InsnHandle& ih) {
 }  // namespace
 
 PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
-    : backend_(std::move(backend)) {}
+    : backend_(std::move(backend)),
+      library_sigs_(LibrarySignatureSet::make_default()) {}
+
+void PapaNativeStaticExtractor::set_library_signatures(LibrarySignatureSet sigs) noexcept {
+    library_sigs_ = std::move(sigs);
+}
 
 features::Address PapaNativeStaticExtractor::get_base_address() const {
     return va_addr(backend_.image().image_base());
@@ -241,10 +246,45 @@ bool PapaNativeStaticExtractor::is_library_function(
     const features::Address& addr) const {
     const auto va = absolute_va(addr);
     if (!va.has_value()) { return false; }
-    for (const auto& fn : backend_.functions()) {
-        if (fn.va == *va) { return fn.likely_library; }
+
+    // Locate the function carrying that VA
+    const Function* fn = nullptr;
+    for (const auto& f : backend_.functions()) {
+        if (f.va == *va) { fn = &f; break; }
     }
-    return false;
+    if (fn == nullptr) { return false; }
+
+    // CFG-derived hint takes precedence when the recovery layer set it
+    if (fn->likely_library) { return true; }
+
+    // Fetch enough prologue bytes to cover the longest bundled signature
+    // 64 bytes is well above what any current pattern needs and short enough
+    // that a single bounds-checked PE read costs nothing on the cold path
+    constexpr std::size_t kMaxPrologueBytes = 64;
+    const auto& image = backend_.image();
+    if (*va < image.image_base()) { return false; }
+    const std::uint64_t rva = *va - image.image_base();
+    auto bytes = image.read_at_rva(rva, kMaxPrologueBytes);
+
+    // Section may end before kMaxPrologueBytes; attempt a smaller read in that case
+    if (!bytes) {
+        for (std::size_t cap = kMaxPrologueBytes; cap > 0; cap >>= 1) {
+            auto retry = image.read_at_rva(rva, cap);
+            if (retry) { bytes = std::move(retry); break; }
+        }
+        if (!bytes) {
+            // Still without bytes; only the structural thunk check can fire
+            return library_sigs_.is_thunk(*fn);
+        }
+    }
+
+    // The image_read_at_rva span is std::byte-typed
+    // Convert it to std::uint8_t for the matcher's hex comparisons
+    std::vector<std::uint8_t> prologue;
+    prologue.reserve(bytes->size());
+    for (std::byte b : *bytes) { prologue.push_back(static_cast<std::uint8_t>(b)); }
+
+    return library_sigs_.classify_as_library(*fn, prologue);
 }
 
 std::optional<std::string>
