@@ -121,7 +121,10 @@ ruleset on the same machine.
 
 | Sample        | Size   | PAPA | CAPA | Speedup |
 |---------------|--------|------|------|---------|
+| `calc.exe` | ~30 KB | 0.5 s  | 12 s | ~24x     |
 | `notepad.exe` | ~200 KB | 7 s  | 51 s | ~7x     |
+| `chrome.exe` | ~3.25 MB | 547 s  | 598 s | ~8%     |
+ 
 
 The speedup is significant mostly on small to medium binaries because CAPA
 pays a fixed cost for Python interpreter startup, vivisect's
@@ -142,8 +145,7 @@ categories. Both are quantifiable and bounded.
   vivisect recovers using heuristics that PAPA's
   recursive-descent plus pdata seeding does not yet replicate.
 
-Concretely, on `notepad.exe` PAPA achieves 94.6% recall and 100%
-precision. PAPA achieves similar stats on other executables, with both recal and percision raging from 90% to 100%. Since CAPA is designed for initial triage, the remaining gap is well within useful range and the vast majority of rules behave identically!
+PAPA generally achieves recal and percision rates raging from 90% to 100%. Since CAPA is designed for initial triage, the remaining gap is well within useful range and the vast majority of rules behave identically!
 
 ## TODO
 
