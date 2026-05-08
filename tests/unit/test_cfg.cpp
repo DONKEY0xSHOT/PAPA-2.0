@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <span>
 #include <string_view>
+#include "fixture_paths.h"
 
 using papa::features::extractors::papa_native::BasicBlock;
 using papa::features::extractors::papa_native::Cfg;
@@ -24,7 +25,7 @@ using papa::features::extractors::papa_native::Function;
 
 namespace {
 
-constexpr std::string_view kNotepad = "C:/Windows/System32/notepad.exe";
+const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
 // Helper to construct a byte array from an integer list
 template <typename... B>

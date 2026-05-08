@@ -27,10 +27,11 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include "fixture_paths.h"
 
 namespace {
 
-constexpr std::string_view kNotepad = "C:/Windows/System32/notepad.exe";
+const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
 [[nodiscard]] std::unique_ptr<papa::rules::Rule> parse_rule(std::string_view yaml) {
     auto r = papa::rules::RuleParser::parse(yaml, "test.yml");

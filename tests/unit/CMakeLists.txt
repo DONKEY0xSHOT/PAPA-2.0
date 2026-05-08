@@ -25,6 +25,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_hash.cpp
     test_json_writer.cpp
     test_render.cpp
+    test_library_signatures.cpp
 )
 
 add_executable(papa_unit_tests ${PAPA_UNIT_TEST_SOURCES})

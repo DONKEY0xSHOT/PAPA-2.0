@@ -1,6 +1,3 @@
-
-
-
 #include "papa/version.h"
 
 #include <ostream>

@@ -26,6 +26,7 @@ set(PAPA_LIB_SOURCES
     features/extractors/papa_native/function.cpp
     features/extractors/papa_native/backend.cpp
     features/extractors/papa_native/extractor.cpp
+    features/extractors/papa_native/library_signatures.cpp
     features/extractors/pefile_extractor.cpp
     capabilities/common.cpp
     capabilities/static_.cpp

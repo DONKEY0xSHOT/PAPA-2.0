@@ -17,6 +17,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "fixture_paths.h"
 
 using papa::features::AbsoluteVirtualAddress;
 using papa::features::Address;
@@ -32,7 +33,7 @@ using papa::features::extractors::pefile::FeatureWithAddress;
 
 namespace {
 
-constexpr std::string_view kNotepad = "C:/Windows/System32/notepad.exe";
+const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
 [[nodiscard]] bool has_feature_value(const std::vector<FeatureWithAddress>& v,
                                      FeatureTag tag,
