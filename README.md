@@ -37,6 +37,24 @@ The pipeline mirrors CAPA's:
    renderer needs. Successful matches inject `MatchedRule` entries so later
    rules can reference them via `match:`.
 
+## Performance
+
+Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0`
+ruleset on the same machine.
+
+| Sample        | Size   | PAPA | CAPA | Speedup |
+|---------------|--------|------|------|---------|
+| `calc.exe` | ~30 KB | 0.5 s  | 12 s | ~24x     |
+| `notepad.exe` | ~200 KB | 7 s  | 51 s | ~7x     |
+| `chrome.exe` | ~3.25 MB | 547 s  | 598 s | ~8%     |
+ 
+
+The speedup is significant mostly on small to medium binaries because CAPA
+pays a fixed cost for Python interpreter startup, vivisect's
+import-time analysis, and per-scope Python overhead. PAPA's startup is
+roughly constant. On very large binaries the per-instruction cost
+dominates and the two converge : )
+
 ## Structure
 Headers live under `include/papa/` and are mirrored 1:1 by implementation
 files under `src/`.
@@ -113,24 +131,6 @@ tests/
 tools/papa/             CLI entry (papa_main.cpp)
 third_party/            Zydis (vendored) and doctest (single header)
 ```
-
-## Performance
-
-Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0`
-ruleset on the same machine.
-
-| Sample        | Size   | PAPA | CAPA | Speedup |
-|---------------|--------|------|------|---------|
-| `calc.exe` | ~30 KB | 0.5 s  | 12 s | ~24x     |
-| `notepad.exe` | ~200 KB | 7 s  | 51 s | ~7x     |
-| `chrome.exe` | ~3.25 MB | 547 s  | 598 s | ~8%     |
- 
-
-The speedup is significant mostly on small to medium binaries because CAPA
-pays a fixed cost for Python interpreter startup, vivisect's
-import-time analysis, and per-scope Python overhead. PAPA's startup is
-roughly constant. On very large binaries the per-instruction cost
-dominates and the two converge : )
 
 ## Limitations
 
