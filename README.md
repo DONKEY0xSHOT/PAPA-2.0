@@ -180,7 +180,7 @@ ctest --test-dir build -C Release
 ```
 
 Point `PAPA_TEST_FIXTURES` at a folder of sample PEs to enable the
-fixture-backed cases; without it they skip cleanly and the suite still passes.
+fixture-backed cases - without it they skip cleanly and the suite still passes.
 
 In addition to its unit tests, PAPA was also tested against a corpus of 42 PE files:
 ```
@@ -227,9 +227,6 @@ where_x86.exe
 73,728 whoami_x64.exe
 whoami_x86.exe
 ```
-
-## Limitations
-
 PAPA reaches 100% recall and 100% precision on the 42-binary validation corpus, so there are no
 known false positives or false negatives on tested samples.
 
