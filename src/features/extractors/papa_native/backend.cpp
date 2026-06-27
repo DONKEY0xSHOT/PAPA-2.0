@@ -4,6 +4,7 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/insn.h"
+#include "papa/features/extractors/papa_native/noreturn.h"
 #include "papa/pe/pe_image.h"
 
 #include <utility>
@@ -30,12 +31,24 @@ PapaNativeBackend::build(const ::papa::pe::PeImage& image) {
     // depends on its bitness and decoded operand semantics
     Disassembler disasm(image.is_64bit());
 
-    auto cfg_result = Cfg::recover(image, disasm);
+    // The import table is built before recovery so the no-return oracle can
+    // resolve the import a call reaches. The oracle mirrors vivisect's noret
+    // seeding: a call to an exit/abort/throw family import does not return, so
+    // recovery must not decode the fallthrough after it.
+    ImportTable imports = build_import_table(image);
+    const NoReturnOracle is_noreturn =
+        [&image, &disasm, &imports](const DecodedInsn& ins) -> bool {
+            if (!ins.is_call) { return false; }
+            const ::papa::pe::ParsedImport* row =
+                insn::resolve_direct_call_import(ins, image, imports, disasm);
+            return row != nullptr && is_noreturn_api(row->dll, row->name);
+        };
+
+    auto cfg_result = Cfg::recover(image, disasm, is_noreturn);
     if (!cfg_result) {
         return ::papa::Unexpected{cfg_result.error()};
     }
 
-    ImportTable imports = build_import_table(image);
     return PapaNativeBackend(image,
                              std::move(disasm),
                              std::move(*cfg_result),

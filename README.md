@@ -1,63 +1,75 @@
-# PAPA 2.0
+# PAPA
 
-A native C++20 port of Mandiant's [CAPA](https://github.com/mandiant/capa). 
+A native C++20 port of Mandiant's [CAPA](https://github.com/mandiant/capa).
 
-The motivation is simple - CAPA's analysis is excellent, but it's slow. PAPA keeps CAPA's rule semantics and report format, but it's is much faster!
+The motivation is simple - CAPA's analysis is great, but it's slow. 
+PAPA keeps CAPA's rule semantics and report format, but it's much faster!
 
 ## Advantages
 
-- **Full CAPA rule syntax**
-- **CAPA-Compatible JSON Output**
-- **No runtime** - A single native executable!
-- **Much better performance : )**
-- **Minimal dependencies** - only Zydis for disassembly and doctest for unit testing
+- **Full CAPA rule syntax** - every feature, statement, subscope, and
+  `count(...)` range, including `or fewer` / `or more`, plus COM class and
+  interface lookups.
+- **Byte-identical text report** and a **JSON report** that is
+  field-compatible with `capa.exe --json`, so any tool that already consumes
+  CAPA reports works unchanged.
+- **No runtime** - a single native executable!
+- **100% capability parity** - 0 FPs and 0 FNss across a
+  42-binary x86/x64 corpus.
+- **Much faster : )** - roughly 7x on small to medium binaries.
+- **Minimal dependencies** - only Zydis for disassembly, miniz for zlib decompression (needed for FLIRT) & doctest for unit
+  testing.
 
 ## How it works
 
-The pipeline mirrors CAPA's:
+The pipeline mirrors CAPA's, porting vivisect's analysis wherever parity demands
+it:
 
-1. **PE parsing** - the parser reads headers,
-   sections, imports, exports, delay imports, and TLS callbacks.
-2. **CFG recovery** - Function entries are seeded from the PE entry point,
-   exports, TLS callbacks, and the x64 `.pdata` exception directory.
-   Recursive descent extends each function until a return or an unconditional
-   branch.
-3. **Disassembly** - Zydis decodes each reachable byte. 
-1. PAPA wraps each decoded instruction with operand
-   classifications (`kImm`, `kImmMem`, `kPcRel`, `kRipRel`, `kReg`,
-   `kRegMem`, `kSib`) compatible with vivisect's semantics so CAPA rules
-   match identically.
-4. **Feature extraction** - Per-scope extractors emit the same features
-   CAPA produces: `api`, `mnemonic`, `number`, `offset`, `bytes`, `string`,
-   `operand[i].number`, plus characteristics (`nzxor`, `peb access`,
-   `loop`, `tight loop`, `stack string`, etc).
-5. **Rule matching** - A `Statement` tree is evaluated against a `FeatureSet`.
-   Each rule first runs through a boolean fast path that skips result-tree
-   allocations; only on success does it run the full evaluator that the
-   renderer needs. Successful matches inject `MatchedRule` entries so later
-   rules can reference them via `match:`.
+1. **PE parsing** - a bounds-checked parser reads headers, sections, imports
+   (including delay and by-ordinal imports), exports, TLS callbacks, and base
+   relocations.
+2. **CFG recovery** - functions are seeded from the entry point, exports, TLS
+   callbacks, and the x64 `.pdata` table, then extended by recursive descent.
+   Switch tables, no-return calls, tail calls, and vivisect's shared-block model
+   were all ported faithfully.
+3. **Emulation-driven discovery** - a security-bounded port of vivisect's Intel
+   emulator (i386 and amd64) recovers functions reachable only through
+   relocation pointers, including stripped 32-bit binaries with no `.pdata`. It
+   is abstract interpretation only: it never executes native code, never
+   dereferences an emulated value as a host pointer, and is bounded against
+   crafted input.
+4. **Disassembly** - Zydis decodes each reachable byte. PAPA tags every operand
+   (`kImm`, `kImmMem`, `kPcRel`, `kRipRel`, `kReg`, `kRegMem`, `kSib`) to match
+   vivisect's semantics so rules match identically.
+5. **FLIRT** - a faithful port of CAPA's `viv_utils.flirt` pipeline reads the
+   embedded IDASGN signatures and marks statically-linked library code, so rules
+   don't fire inside the CRT.
+6. **Feature extraction** - per-scope extractors emit the same features CAPA
+   produces: `api`, `mnemonic`, `number`, `offset`, `bytes`, `string`,
+   `operand[i].number`, plus characteristics (`nzxor`, `peb access`, `loop`,
+   `tight loop`, `stack string`, etc).
+7. **Rule matching** - a `Statement` tree is evaluated against a `FeatureSet`.
+   Each rule runs a boolean fast path first. Matches inject
+   `MatchedRule` entries so later rules can reference them via `match:`.
 
 ## Performance
 
-Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0`
-ruleset on the same machine.
+Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0` ruleset on
+the same machine (`--json`, output redirected).
 
-| Sample        | Size   | PAPA | CAPA | Speedup |
-|---------------|--------|------|------|---------|
-| `calc.exe` | ~30 KB | 0.5 s  | 12 s | ~24x     |
-| `notepad.exe` | ~200 KB | 7 s  | 51 s | ~7x     |
-| `chrome.exe` | ~3.25 MB | 547 s  | 598 s | ~8%     |
- 
+| Sample        | Size    | PAPA  | CAPA  | Speedup |
+|---------------|---------|-------|-------|---------|
+| `calc.exe`    | ~27 KB  | 1.6 s | 11 s  | ~7x     |
+| `notepad.exe` | ~200 KB | 7 s   | 48 s  | ~7x     |
+| `7z.exe`      | ~549 KB | 29 s  | 219 s | ~8x     |
+| `capa.exe`    | ~7 MB   | 268 s | 275 s | ~1x     |
 
-The speedup is significant mostly on small to medium binaries because CAPA
-pays a fixed cost for Python interpreter startup, vivisect's
-import-time analysis, and per-scope Python overhead. PAPA's startup is
-roughly constant. On very large binaries the per-instruction cost
-dominates and the two converge : )
+PAPA is ~7-8x faster on small to medium binaries!
 
 ## Structure
-Headers live under `include/papa/` and are mirrored 1:1 by implementation
-files under `src/`.
+
+Headers live under `include/papa/` and are mirrored 1:1 by implementation files
+under `src/`.
 
 ```text
 include/papa/
@@ -95,19 +107,38 @@ include/papa/
         global_.h       Os, Arch, Format extraction
         indirect_calls.h backward-slice register resolution
         insn.h          per-instruction extractors
+        jump_tables.h   x86 / x64 switch-table resolution
+        noreturn.h      vivisect no-return analysis port
+        library_signatures.h thunk classifier + embedded FLIRT set
+        flirt/          faithful viv_utils.flirt port:
+          flirt_reader.h     decompress and parse the signature trees
+          flirt_matcher.h    pattern + tail-CRC16 + tail-byte matching
+          flirt_classifier.h reference validation and name assignment
+        emu/            security-bounded vivisect Intel emulator (i386 + amd64):
+          registers.h        RegisterFile with meta-register encoding
+          memory.h           SandboxMemory (read-only backing + capped overlay)
+          intel_emulator.h   operand layer + execute_opcode
+          workspace_emulator.h runFunction driver over a bounded work-queue
+          watcher.h          emucode behavioral filter (looks_good)
+          taints.h           sentinels for unknown state
+          emu_discovery.h    relocation-pointer candidate discovery
 
   pe/
-    pe_image.h          ParsedSection, ParsedImport, PeImage
+    pe_image.h          ParsedSection, ParsedImport, relocations(), PeImage
     pe_parser.h         PeParser::parse / parse_file
     pe_structs.h        IMAGE_* POD structs
+    ordinal_names.h     ws2_32 / oleaut32 ordinal-to-name lookup
 
   render/
     json.h              CAPA-schema JSON renderer
-    result_document.h   ResultDocument, build_document
+    result_document.h   ResultDocument, MatchNode, build_document
+    spec.h              ATT&CK / MBC spec parsing (text + JSON)
+    table.h             decoupled, rich-identical table engine
     text.h              default / verbose / vverbose text renderer
 
   rules/
     com_lookup.h        ComEntry, lookup_com (CLSID + IID tables)
+    optimizer.h         reorders statement children by selectivity
     parser.h            RuleParser
     rule.h              Rule, RuleMeta, Scopes
     ruleset.h           RuleSet (subscope extraction + topo sort)
@@ -123,33 +154,84 @@ include/papa/
 ```
 
 ```text
-src/                    implementation files. mirrors include/papa/
+src/                    implementation files, mirrors include/papa/
 tests/
   unit/                 doctest suite
   integration/
     run_parity.py       diffs PAPA vs capa.exe rule-match sets
+    parity_tool.py      multi-binary corpus parity driver
 tools/papa/             CLI entry (papa_main.cpp)
 third_party/            Zydis (vendored) and doctest (single header)
 ```
 
+## Build
+
+```bash
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release --parallel
+```
+
+The CLI lands at `build/tools/papa/Release/papa.exe`.
+
+## Testing
+
+```bash
+ctest --test-dir build -C Release
+```
+
+Point `PAPA_TEST_FIXTURES` at a folder of sample PEs to enable the
+fixture-backed cases; without it they skip cleanly and the suite still passes.
+
+PAPA was tested against a corpus of 42 PE files:
+```
+7z.exe
+attrib_x64.exe
+attrib_x86.exe
+bcrypt_x64.dll
+calc.exe
+capa.exe
+certutil_x64.exe
+certutil_x86.exe
+cff_explorer.exe
+chrome.exe
+cmd_x64.exe
+cmd_x86.exe
+everything.exe
+find_x86.exe
+gzip_mingw.exe
+hostname_x64.exe
+hostname_x86.exe
+ipconfig_x64.exe
+ipconfig_x86.exe
+msedge.exe
+netapi32_x64.dll
+netapi32_x86.dll
+netstat_x64.exe
+netstat_x86.exe
+notepad.exe
+ping_x64.exe
+ping_x86.exe
+powercfg_x64.exe
+reg_x64.exe
+reg_x86.exe
+robocopy_x64.exe
+robocopy_x86.exe
+schtasks_x64.exe
+schtasks_x86.exe
+sc_x64.exe
+sc_x86.exe
+systeminfo_x64.exe
+tasklist_x64.exe
+where_x64.exe
+where_x86.exe
+73,728 whoami_x64.exe
+whoami_x86.exe
+```
+
 ## Limitations
 
-A small number of rules diverge from CAPA's matches, falling into two
-categories. Both are quantifiable and bounded.
+PAPA reaches 100% recall and 100% precision on the 42-binary validation corpus, so there are no
+known false positives or false negatives on tested samples.
 
-- **False positives, ~2-3 per medium binary.** PAPA matches rules at
-  CRT helper functions (TLS init, heap setup) where CAPA suppresses them
-  via FLIRT signatures. PAPA does not yet have FLIRT, so these helpers are
-  treated as user code.
-- **False negatives, ~2-3 per medium binary.** A small set of functions
-  vivisect recovers using heuristics that PAPA's
-  recursive-descent plus pdata seeding does not yet replicate.
-
-On medium binaries, PAPA generally achieves recall and percision rates raging from 90% to 100%. Since CAPA is designed for initial triage, this gap is well within useful range.
-
-## TODO
-
-- **FLIRT signature support** - It would solve most of the FPs & FNs. We currently use pattern-matching to detect common CRT functions, but there's more work to be done.
-- **Broader regex compatibility** - for rules whose patterns use Python `re`
-  features `std::regex` rejects.
-- **Beautify the CLI output** - The current CLI output is ugly, unlike CAPA's one.
+Perfect match-set parity on an *arbitrary* binary is currently not promised, so an unseen sample can still diverge a bit. 
+In practice, precision and recall should stay ~100%.

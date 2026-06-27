@@ -109,21 +109,34 @@ operand_target_va(const DecodedInsn& ins, const DecodedOperand& op) noexcept {
     return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
 }
 
-// True when the instruction is "add esp, k" or "sub esp, k" (or rsp variants)
-// Such instructions are suppressed as Number-feature sources because they
-// describe stack-frame management rather than constants in user code
-[[nodiscard]] bool
-is_stack_adjust(const DecodedInsn& ins, bool is_64bit) noexcept {
-    if (ins.zyd_mnem != ZYDIS_MNEMONIC_ADD &&
-        ins.zyd_mnem != ZYDIS_MNEMONIC_SUB) {
-        return false;
+// True for the base registers CAPA excludes from memory-access offset features:
+// the frame pointer (ebp/rbp) and the 32-bit stack pointer (esp). By a quirk of
+// CAPA's register filter it keeps the 64-bit stack pointer (rsp), so offsets off
+// rsp -- common when a function spills struct fields to stack locals -- must be
+// emitted to match capa (viv/insn.py extract_insn_offset_features).
+[[nodiscard]] bool is_offset_excluded_reg(ZydisRegister reg, bool is_64bit) noexcept {
+    if (reg == ZYDIS_REGISTER_NONE) { return false; }
+    const ZydisMachineMode mode =
+        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
+    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
+    if (is_64bit) {
+        return enclosing == ZYDIS_REGISTER_RBP;
     }
-    if (ins.operand_count < 2) { return false; }
+    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
+}
+
+// True when the instruction is "add esp, k" -- the single stack-management form
+// CAPA suppresses as a Number-feature source. extract_op_number_features skips
+// the immediate of `add esp, imm` (the cdecl cleanup after a call), keyed on the
+// destination being the 32-bit esp specifically (opers[0].reg == REG_ESP). CAPA
+// does NOT suppress `sub esp`, `add rsp`, or `sub rsp`, so neither do we
+// (viv/insn.py extract_op_number_features).
+[[nodiscard]] bool
+is_add_esp(const DecodedInsn& ins) noexcept {
+    if (ins.zyd_mnem != ZYDIS_MNEMONIC_ADD) { return false; }
+    if (ins.operand_count < 1) { return false; }
     const auto& dst = ins.operands[0];
-    const auto& src = ins.operands[1];
-    if (dst.kind != OperandKind::kReg) { return false; }
-    if (src.kind != OperandKind::kImm) { return false; }
-    return is_stack_reg(dst.base_reg, is_64bit);
+    return dst.kind == OperandKind::kReg && dst.base_reg == ZYDIS_REGISTER_ESP;
 }
 
 // Read at most cap bytes starting at va
@@ -227,7 +240,7 @@ interned_mnemonic(ZydisMnemonic m, std::string_view text) {
 
 std::optional<FeatureWithAddress>
 extract_mnemonic(const DecodedInsn& ins) {
-    // Partial decodes leave mnemonic_str empty; skip them so we never construct
+    // Partial decodes leave mnemonic_str empty. Skip them so we never construct
     // a Mnemonic feature with no value
     if (ins.mnemonic_str.empty()) { return std::nullopt; }
     return FeatureWithAddress{
@@ -317,19 +330,44 @@ std::vector<FeatureWithAddress>
 extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
     std::vector<FeatureWithAddress> out;
     const bool is_64bit = image.is_64bit();
-    const bool stack_adjust = is_stack_adjust(ins, is_64bit);
+    const bool suppress_number = is_add_esp(ins);
 
     for (std::size_t i = 0; i < ins.operand_count; ++i) {
         const auto& op = ins.operands[i];
         if (op.kind != OperandKind::kImm && op.kind != OperandKind::kImmMem) { continue; }
-        const std::uint64_t v = (op.kind == OperandKind::kImm)
+        std::uint64_t v = (op.kind == OperandKind::kImm)
             ? op.imm
             : static_cast<std::uint64_t>(op.disp);
 
-        // add esp, 4 / sub rsp, 0x20 carry stack-management semantics
-        // Surface them as nothing so rules looking for real numeric constants
-        // do not see frame-management noise
-        if (stack_adjust) { continue; }
+        // Zydis sign-extends a narrow immediate to 64 bits, so imm32 0xefcdab89
+        // arrives as 0xffffffffefcdab89. CAPA keeps the value at the operation
+        // width, which is the destination operand's width, not the immediate's
+        // encoded width: a sign-extended imm8 in "cmp eax, 0xcc" stays
+        // 0xffffffcc, while "cmp al, 0xcc" is 0xcc. Mask to the first register
+        // or memory operand's width to match (e.g. the MD5/SHA1 magic constants).
+        if (op.kind == OperandKind::kImm) {
+            // Default to the architecture pointer width so an imm-only
+            // instruction (push 0x80000002) masks to its real width instead of
+            // keeping Zydis's 64-bit sign extension. A register or memory operand
+            // overrides it with the destination width (cmp eax, 0xcc -> 0xffffffcc).
+            std::size_t op_width = is_64bit ? 8U : 4U;
+            for (std::size_t j = 0; j < ins.operand_count; ++j) {
+                const auto k = ins.operands[j].kind;
+                if (k == OperandKind::kReg || k == OperandKind::kRegMem ||
+                    k == OperandKind::kRipRel || k == OperandKind::kImmMem ||
+                    k == OperandKind::kSib) {
+                    op_width = ins.operands[j].width_bytes;
+                    break;
+                }
+            }
+            if (op_width >= 1U && op_width < 8U) {
+                v &= (std::uint64_t{1} << (op_width * 8U)) - 1U;
+            }
+        }
+
+        // CAPA suppresses the number only of `add esp, imm` (the cdecl call
+        // cleanup). See is_add_esp. Every other add/sub keeps its number.
+        if (suppress_number) { continue; }
 
         // Pointer-like values are picked up by extract_bytes / extract_string
         // probe_readable expects an RVA, so subtract image base when possible
@@ -346,10 +384,10 @@ extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
             std::make_shared<const features::OperandNumber>(i, val),
             va_addr(ins.va));
 
-        // "add reg, small_imm" doubles as a struct-offset hint in MSVC code
-        // Range matches CAPA insn.py:84 which caps offsets at kMaxStructureSize
-        if ((ins.zyd_mnem == ZYDIS_MNEMONIC_ADD ||
-             ins.zyd_mnem == ZYDIS_MNEMONIC_SUB) &&
+        // "add reg, small_imm" doubles as a struct-offset hint in MSVC code.
+        // capa restricts this to add, not sub (extract_op_number_features), so a
+        // sub immediate is never surfaced as an offset.
+        if (ins.zyd_mnem == ZYDIS_MNEMONIC_ADD &&
             ins.operand_count >= 2 &&
             ins.operands[0].kind == OperandKind::kReg &&
             !is_stack_reg(ins.operands[0].base_reg, is_64bit) &&
@@ -374,22 +412,45 @@ extract_offset(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
     for (std::size_t i = 0; i < ins.operand_count; ++i) {
         const auto& op = ins.operands[i];
         if (op.kind != OperandKind::kRegMem && op.kind != OperandKind::kSib) { continue; }
-        // Stack-frame relative accesses describe local layout, not struct geometry
-        if (is_stack_reg(op.base_reg, is_64bit)) { continue; }
-        // Zero displacement carries no offset semantics worth surfacing
-        if (op.disp == 0) { continue; }
+        // capa excludes the stack and frame pointer only for a plain ModRM
+        // [reg+disp] operand (i386RegMemOper, no SIB byte). A SIB-encoded operand
+        // (i386SibOper, which includes [rsp+disp] since rsp forces a SIB byte, and
+        // any indexed [base+idx*scale+disp]) is never excluded, so it yields its
+        // offset even on a stack or frame base. sib_encoded, not the operand kind,
+        // is what tells the two apart (papa keys kind on the index register).
+        if (!op.sib_encoded && is_offset_excluded_reg(op.base_reg, is_64bit)) { continue; }
 
+        // For a SIB operand with no base register the displacement is an absolute
+        // address: vivisect stores it as i386SibOper.imm and leaves disp 0, so the
+        // offset is 0. That is how capa counts gs:[0x60] as offset(0) (the second
+        // InLoadOrderModuleList walk step the runtime-linking rules need). A SIB
+        // with a base, and any plain [reg+disp], keep the displacement as offset.
+        const std::int64_t off =
+            (op.kind == OperandKind::kSib && op.base_reg == ZYDIS_REGISTER_NONE)
+                ? std::int64_t{0}
+                : op.disp;
+
+        // A zero displacement is still an offset. capa emits offset(0) for a bare
+        // [reg] dereference, which is how the runtime-linking rules count the
+        // mov reg, [reg] steps that walk PEB_LDR_DATA InLoadOrderModuleList.Flink.
         out.emplace_back(
-            std::make_shared<const features::Offset>(op.disp),
+            std::make_shared<const features::Offset>(off),
             va_addr(ins.va));
         out.emplace_back(
-            std::make_shared<const features::OperandOffset>(i, op.disp),
+            std::make_shared<const features::OperandOffset>(i, off),
             va_addr(ins.va));
 
         // For "lea reg, [reg + off]" where off does not point at readable memory,
         // CAPA also surfaces the displacement as a Number because the LEA is
-        // commonly used to materialize plain integer constants
-        if (ins.zyd_mnem == ZYDIS_MNEMONIC_LEA && op.disp > 0) {
+        // commonly used to materialize plain integer constants. A stack/frame
+        // base means the lea computes a local address, not a constant, so it is
+        // excluded here even though rsp offsets are kept above. CAPA only does
+        // this in its i386RegMemOper branch, so a SIB-encoded operand (the
+        // i386SibOper branch, e.g. "lea rcx, [r12 + 0xB8]" where r12 forces a SIB
+        // byte) yields an offset only and never a number. Matching this stopped a
+        // false get-number-of-processors match on msedge.
+        if (ins.zyd_mnem == ZYDIS_MNEMONIC_LEA && op.disp > 0 &&
+            !is_stack_reg(op.base_reg, is_64bit) && !op.sib_encoded) {
             const std::uint64_t v = static_cast<std::uint64_t>(op.disp);
             const std::uint64_t rva =
                 (v >= image.image_base()) ? (v - image.image_base()) : v;
@@ -411,12 +472,16 @@ bool is_security_cookie(const Function&    fn,
                         const BasicBlock&  bb,
                         const DecodedInsn& ins,
                         bool               is_64bit) noexcept {
-    // The cookie XOR always reads or writes a stack-relative register
-    // CAPA inspects the second operand because vivisect orders xor's destination first
+    // CAPA inspects the second operand (vivisect orders xor's destination first)
+    // and rejects a cookie only when that operand is a register that is not a
+    // stack or frame pointer. An immediate or memory operand still reaches the
+    // prologue/epilogue position check, so "xor reg, imm" early in the entry
+    // block counts as a cookie just as in viv/insn.py is_security_cookie.
     if (ins.operand_count < 2) { return false; }
     const auto& src = ins.operands[1];
-    if (src.kind != OperandKind::kReg) { return false; }
-    if (!is_stack_reg(src.base_reg, is_64bit)) { return false; }
+    if (src.kind == OperandKind::kReg && !is_stack_reg(src.base_reg, is_64bit)) {
+        return false;
+    }
     if (fn.basic_blocks.empty())                { return false; }
 
     const auto& entry_bb = fn.basic_blocks.front();
@@ -487,23 +552,38 @@ std::optional<FeatureWithAddress>
 extract_cross_section_flow(const DecodedInsn&         ins,
                            const ::papa::pe::PeImage& image,
                            const ImportTable&         imports) {
-    // Only direct branches matter
-    // Indirect targets go through registers and are handled by extract_api_features
-    // when the target resolves to an IAT slot
     const bool is_branch = ins.is_call || ins.is_jump;
-    if (!is_branch)                       { return std::nullopt; }
-    if (!ins.branch_target.has_value())   { return std::nullopt; }
-    if (ins.va < image.image_base())      { return std::nullopt; }
+    if (!is_branch)                  { return std::nullopt; }
+    if (ins.va < image.image_base()) { return std::nullopt; }
 
-    const std::uint64_t target = *ins.branch_target;
-    // Direct calls into the IAT cross sections by definition
-    // They are not CAPA cross-section-flow evidence and are filtered out
+    // The address whose section is compared against the branch site. For a
+    // direct branch it is the branch target. For a branch through a memory
+    // pointer (call/jmp [rip+disp] on x64, [abs] on x86) vivisect reports the
+    // operand's data slot, not the dereferenced code pointer, so a call into a
+    // function-pointer table in .rdata counts as cross-section flow. Register
+    // and otherwise-unresolved indirect branches yield no static target.
+    std::uint64_t target = 0;
+    if (ins.branch_target.has_value()) {
+        target = *ins.branch_target;
+    } else if (ins.operand_count > 0 &&
+               ins.operands[0].kind == OperandKind::kRipRel) {
+        target = ins.va + ins.length +
+                 static_cast<std::uint64_t>(ins.operands[0].disp);
+    } else if (ins.operand_count > 0 &&
+               ins.operands[0].kind == OperandKind::kImmMem) {
+        target = static_cast<std::uint64_t>(ins.operands[0].disp);
+    } else {
+        return std::nullopt;
+    }
+
+    // A branch that reads its target from an IAT slot is an ordinary import,
+    // not cross-section-flow evidence. CAPA filters these out.
     if (imports.by_iat_va.find(target) != imports.by_iat_va.end()) {
         return std::nullopt;
     }
 
-    const std::uint64_t src_rva = ins.va - image.image_base();
     if (target < image.image_base()) { return std::nullopt; }
+    const std::uint64_t src_rva = ins.va - image.image_base();
     const std::uint64_t dst_rva = target - image.image_base();
 
     const auto* src_section = image.section_containing_rva(src_rva);
@@ -599,20 +679,18 @@ has_endbranch_prefix(const ::papa::pe::PeImage& image, std::uint64_t va) noexcep
     return true;
 }
 
-// Decode the instruction at va and return its branch target when the
-// instruction is an unconditional direct JMP or CALL
-// Returns nullopt for any other instruction shape because CAPA's thunk
-// follower only follows direct unconditional control flow
-[[nodiscard]] std::optional<std::uint64_t>
-follow_one_thunk(const ::papa::pe::PeImage& image,
-                 const Disassembler&        disasm,
-                 std::uint64_t              va) {
+// Decode the single instruction located at va, reading through the image
+// Used to walk a thunk chain one hop at a time. The section may end inside the
+// candidate instruction, so the request is binary-shrunk to the largest
+// readable prefix before decoding.
+[[nodiscard]] std::optional<DecodedInsn>
+decode_insn_at(const ::papa::pe::PeImage& image,
+               const Disassembler&        disasm,
+               std::uint64_t              va) {
     if (va < image.image_base()) { return std::nullopt; }
     constexpr std::size_t kMaxFetch = ::papa::constants::kMaxInsnBytes;
     auto r = image.read_at_rva(va - image.image_base(), kMaxFetch);
     if (!r) {
-        // Section may end inside the candidate instruction
-        // Binary-shrink the request to find the largest readable prefix
         std::size_t hi = kMaxFetch;
         std::size_t lo = 0;
         while (hi - lo > 1U) {
@@ -627,15 +705,96 @@ follow_one_thunk(const ::papa::pe::PeImage& image,
     }
     auto decoded = disasm.decode(*r, va);
     if (!decoded) { return std::nullopt; }
-    const auto& d = *decoded;
-    const bool is_branch = d.is_jump || d.is_call;
-    if (!is_branch)        { return std::nullopt; }
-    if (d.is_conditional)  { return std::nullopt; }
-    if (!d.branch_target.has_value()) { return std::nullopt; }
-    return d.branch_target;
+    return *decoded;
 }
 
 }  // namespace
+
+std::vector<FeatureWithAddress> extract_flirt_call_api(
+    const DecodedInsn& ins,
+    const std::function<std::optional<std::string>(std::uint64_t)>& flirt_name) {
+    std::vector<FeatureWithAddress> out;
+    if (!flirt_name) { return out; }
+
+    const bool is_tail_jmp = ins.is_jump && !ins.is_conditional;
+    if (!ins.is_call && !is_tail_jmp) { return out; }
+    if (ins.operand_count == 0) { return out; }
+    if (ins.operands[0].kind != OperandKind::kPcRel) { return out; }
+    if (!ins.branch_target.has_value()) { return out; }
+
+    const auto name = flirt_name(*ins.branch_target);
+    if (!name.has_value() || name->empty()) { return out; }
+
+    // capa yields the library name and, for a leading-underscore name, the form
+    // with one underscore removed (e.g. __beginthreadex yields _beginthreadex),
+    // so a rule can match either spelling.
+    out.emplace_back(std::make_shared<const features::Api>(*name), va_addr(ins.va));
+    if (name->front() == '_' && name->size() > 1U) {
+        out.emplace_back(std::make_shared<const features::Api>(name->substr(1)),
+                         va_addr(ins.va));
+    }
+    return out;
+}
+
+const ::papa::pe::ParsedImport*
+resolve_direct_call_import(const DecodedInsn&         ins,
+                           const ::papa::pe::PeImage& image,
+                           const ImportTable&         imports,
+                           const Disassembler&        disasm) {
+    if (ins.operand_count == 0) { return nullptr; }
+    const auto& op0 = ins.operands[0];
+
+    const auto lookup = [&](std::uint64_t iat_va) -> const ::papa::pe::ParsedImport* {
+        const auto it = imports.by_iat_va.find(iat_va);
+        return it == imports.by_iat_va.end() ? nullptr : it->second;
+    };
+
+    switch (op0.kind) {
+        case OperandKind::kImmMem:
+            return lookup(static_cast<std::uint64_t>(op0.disp));
+
+        case OperandKind::kRipRel:
+            return lookup(ins.va + ins.length + static_cast<std::uint64_t>(op0.disp));
+
+        case OperandKind::kPcRel: {
+            std::optional<std::uint64_t> target = ins.branch_target;
+            if (!target.has_value()) { return nullptr; }
+
+            for (std::size_t hop = 0;
+                 hop < ::papa::constants::kThunkChainDepthDelta; ++hop) {
+                if (const auto* row = lookup(*target)) { return row; }
+                if (has_endbranch_prefix(image, *target)) {
+                    *target += ::papa::constants::kEndbranchSkipLen;
+                }
+                const auto step = decode_insn_at(image, disasm, *target);
+                if (!step.has_value()) { return nullptr; }
+                const auto& d = *step;
+                if ((!d.is_jump && !d.is_call) || d.is_conditional ||
+                    d.operand_count == 0) {
+                    return nullptr;
+                }
+                const auto& thunk_op = d.operands[0];
+                if (thunk_op.kind == OperandKind::kRipRel) {
+                    return lookup(d.va + d.length +
+                                  static_cast<std::uint64_t>(thunk_op.disp));
+                }
+                if (thunk_op.kind == OperandKind::kImmMem) {
+                    return lookup(static_cast<std::uint64_t>(thunk_op.disp));
+                }
+                if (thunk_op.kind == OperandKind::kPcRel) {
+                    if (!d.branch_target.has_value()) { return nullptr; }
+                    target = d.branch_target;
+                    continue;
+                }
+                return nullptr;
+            }
+            return nullptr;
+        }
+
+        default:
+            return nullptr;
+    }
+}
 
 std::vector<FeatureWithAddress>
 extract_api_features(const Function&            fn,
@@ -648,10 +807,13 @@ extract_api_features(const Function&            fn,
     (void)bb;
     std::vector<FeatureWithAddress> out;
 
-    // CAPA limits API extraction to call-class instructions
-    // Jump-style thunks are followed only when the original instruction itself is a CALL
-    if (!ins.is_call)              { return out; }
-    if (ins.operand_count == 0)    { return out; }
+    // CAPA extracts API features from call and unconditional jmp instructions
+    // A tail-call jmp through the IAT or a thunk chain is an API use just like a
+    // call. Library and thunk functions are filtered out before extraction, so a
+    // forwarder's own jmp never reaches here.
+    const bool is_tail_jmp = ins.is_jump && !ins.is_conditional;
+    if (!ins.is_call && !is_tail_jmp) { return out; }
+    if (ins.operand_count == 0)       { return out; }
 
     const auto& op0 = ins.operands[0];
 
@@ -665,38 +827,16 @@ extract_api_features(const Function&            fn,
 
     switch (op0.kind) {
         case OperandKind::kImmMem:
-            try_emit_from_iat(static_cast<std::uint64_t>(op0.disp));
-            break;
-
-        case OperandKind::kRipRel: {
-            const std::uint64_t target = ins.va + ins.length +
-                                         static_cast<std::uint64_t>(op0.disp);
-            try_emit_from_iat(target);
-            break;
-        }
-
-        case OperandKind::kPcRel: {
-            std::optional<std::uint64_t> target = op0.imm;
-            if (!target.has_value() && ins.branch_target.has_value()) {
-                target = ins.branch_target;
-            }
-            if (!target.has_value()) { break; }
-
-            // Walk up to kThunkChainDepthDelta thunk hops
-            // ENDBRANCH prefix is skipped at each hop because CET-protected
-            // thunks land on the endbr instruction before the real control flow
-            for (std::size_t hop = 0;
-                 hop < ::papa::constants::kThunkChainDepthDelta; ++hop) {
-                if (try_emit_from_iat(*target)) { break; }
-                if (has_endbranch_prefix(image, *target)) {
-                    *target += ::papa::constants::kEndbranchSkipLen;
-                }
-                auto next = follow_one_thunk(image, disasm, *target);
-                if (!next.has_value()) { break; }
-                target = next;
+        case OperandKind::kRipRel:
+        case OperandKind::kPcRel:
+            // Direct IAT call or thunk chain. The shared resolver applies the
+            // same operand and thunk-walk logic the no-return oracle relies on,
+            // so both agree on which import a call reaches.
+            if (const auto* row =
+                    resolve_direct_call_import(ins, image, imports, disasm)) {
+                emit_api_variants(*row, ins.va, out);
             }
             break;
-        }
 
         case OperandKind::kReg: {
             // Indirect call through a register: backward-slice within the BB

@@ -5,8 +5,10 @@
 
 #include <Zydis/Zydis.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace papa::features::extractors::papa_native {
 
@@ -85,6 +87,66 @@ classify_definition(const DecodedInsn& ins,
     return def;
 }
 
+// Search instructions [0, upto) of one block backward for the first qualifying
+// definition of reg
+[[nodiscard]] std::optional<Definition>
+scan_block_backward(const BasicBlock& bb, std::size_t upto,
+                    ZydisRegister reg, bool is_64bit) noexcept {
+    for (std::size_t step = upto; step > 0; --step) {
+        if (auto def = classify_definition(bb.instructions[step - 1U], reg, is_64bit);
+            def.has_value()) {
+            return def;
+        }
+    }
+    return std::nullopt;
+}
+
+// Locate the block whose entry equals va. basic_blocks is sorted by entry VA,
+// so a binary search keeps the predecessor walk cheap on large functions.
+[[nodiscard]] const BasicBlock* block_at(const Function& fn, std::uint64_t va) noexcept {
+    const auto it = std::lower_bound(
+        fn.basic_blocks.begin(), fn.basic_blocks.end(), va,
+        [](const BasicBlock& bb, std::uint64_t v) noexcept { return bb.va < v; });
+    if (it != fn.basic_blocks.end() && it->va == va) { return &*it; }
+    return nullptr;
+}
+
+// Resolve the definition of reg reaching the entry of start by a bounded
+// breadth-first walk over predecessor blocks, returning the nearest reaching
+// definition. This approximates the emulation-based resolution capa performs:
+// the register is loaded from the IAT once and called later past a guard, so
+// the closest backward write is the one an emulator would observe at the call.
+[[nodiscard]] std::optional<Definition>
+define_at_entry(const Function& fn, const BasicBlock& start,
+                ZydisRegister reg, bool is_64bit) {
+    constexpr std::size_t kMaxBlocks = 64;
+    std::vector<std::uint64_t> visited{start.va};
+    std::vector<const BasicBlock*> frontier{&start};
+    std::size_t examined = 0;
+    while (!frontier.empty() && examined < kMaxBlocks) {
+        std::vector<const BasicBlock*> next;
+        for (const BasicBlock* bb : frontier) {
+            for (const auto pred_va : bb->predecessors) {
+                if (std::find(visited.begin(), visited.end(), pred_va) != visited.end()) {
+                    continue;
+                }
+                visited.push_back(pred_va);
+                const BasicBlock* pred = block_at(fn, pred_va);
+                if (pred == nullptr) { continue; }
+                examined += 1;
+                if (auto def = scan_block_backward(
+                        *pred, pred->instructions.size(), reg, is_64bit);
+                    def.has_value()) {
+                    return def;
+                }
+                next.push_back(pred);
+            }
+        }
+        frontier = std::move(next);
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 std::optional<Definition>
@@ -111,20 +173,18 @@ find_definition(const Function&    fn,
         if (host != nullptr) { break; }
     }
     if (host == nullptr) { return std::nullopt; }
-    if (call_index == 0) { return std::nullopt; }
 
-    // Walk backward from the instruction immediately before the call
-    // The first qualifying definition wins
-    // Any later writes are stale by definition because the slicer travels in
-    // reverse program order from the call site backward
-    for (std::size_t step = call_index; step > 0; --step) {
-        const auto& candidate = host->instructions[step - 1U];
-        if (auto def = classify_definition(candidate, target_reg, is_64bit);
-            def.has_value()) {
-            return def;
-        }
+    // The first qualifying write before the call in the host block wins. Any
+    // later writes are stale because the slicer travels in reverse program order
+    if (auto def = scan_block_backward(*host, call_index, target_reg, is_64bit);
+        def.has_value()) {
+        return def;
     }
-    return std::nullopt;
+
+    // The register is set up in an earlier block, as compilers routinely do for
+    // an import loaded once and called past a guard. Search predecessors for the
+    // nearest reaching definition.
+    return define_at_entry(fn, *host, target_reg, is_64bit);
 }
 
 }  // namespace papa::features::extractors::papa_native

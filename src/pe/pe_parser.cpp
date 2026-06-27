@@ -2,6 +2,7 @@
 
 #include "papa/constants.h"
 #include "papa/exceptions.h"
+#include "papa/pe/ordinal_names.h"
 #include "papa/pe/pe_structs.h"
 
 #include <algorithm>
@@ -150,6 +151,15 @@ struct DataDirectory {
         if ((entry & ordinal_flag) != 0) {
             item.ordinal    = static_cast<std::uint32_t>(entry & 0xFFFFu);
             item.by_ordinal = true;
+            // Resolve the DLLs commonly linked by ordinal (ws2_32, oleaut32) to
+            // their symbol names the way vivisect's ordlookup does, so api and
+            // import features use the name (getsockname) rather than the ordinal.
+            // A resolved import is then a named one.
+            if (const auto name = lookup_ordinal_name(normalized_dll, item.ordinal);
+                name.has_value()) {
+                item.name       = std::string{*name};
+                item.by_ordinal = false;
+            }
         } else {
             const std::uint64_t hint_rva = entry & 0x7FFFFFFFu;
             const std::uint64_t name_rva = hint_rva + 2;
@@ -337,6 +347,58 @@ struct DataDirectory {
     return callbacks;
 }
 
+// Parse the base-relocation directory into (rva, type) entries, faithful to
+// vivisect PE.parseRelocations. Every entry is retained including the type-0
+// ABSOLUTE block padding so the pointers pass sees the same set vivisect does.
+// A corrupt directory is tolerated: the walk stops and the partial list stands,
+// matching vivisect's log-and-return behavior rather than failing the parse.
+[[nodiscard]] std::vector<ParsedRelocation> parse_relocations(
+    const PeImage& image, const std::vector<ImageDataDirectory>& dirs) {
+    std::vector<ParsedRelocation> out;
+    const auto dd = get_data_directory(dirs, constants::kImageDirectoryEntryBaseReloc);
+    if (dd.rva == 0 || dd.size == 0) { return out; }
+
+    // Read the whole directory, clamped to the bytes actually mapped in the
+    // containing section, then walk fixed-size block headers within it.
+    std::uint64_t avail = dd.size;
+    if (const auto* s = image.section_containing_rva(dd.rva); s != nullptr) {
+        const std::uint64_t delta     = dd.rva - s->virtual_address;
+        const std::uint64_t remaining = (delta < s->raw_size) ? (s->raw_size - delta) : 0;
+        avail = std::min<std::uint64_t>(dd.size, remaining);
+    }
+    auto dir = image.read_at_rva(dd.rva, static_cast<std::size_t>(avail));
+    if (!dir) { return out; }
+    const std::span<const std::byte> relbytes = *dir;
+
+    std::size_t pos = 0;
+    while (pos < relbytes.size()) {
+        const std::size_t remaining = relbytes.size() - pos;
+        if (remaining < 8) { break; }  // need an 8-byte block header
+
+        std::uint32_t page_rva  = 0;
+        std::uint32_t chunk_size = 0;
+        if (!read_le<std::uint32_t>(relbytes, pos, page_rva) ||
+            !read_le<std::uint32_t>(relbytes, pos + 4, chunk_size)) {
+            break;
+        }
+        if (chunk_size == 0) { break; }          // corrupt: zero-size chunk
+        if (chunk_size > remaining) { break; }   // corrupt: chunk past directory
+        if (chunk_size < 8) { break; }           // corrupt: header without entries
+
+        const std::size_t body_end = pos + chunk_size;
+        for (std::size_t roff = pos + 8; roff + sizeof(std::uint16_t) <= body_end;
+             roff += sizeof(std::uint16_t)) {
+            std::uint16_t entry = 0;
+            if (!read_le<std::uint16_t>(relbytes, roff, entry)) { break; }
+            const auto rtype  = static_cast<std::uint16_t>(entry >> 12);
+            const auto offset = static_cast<std::uint32_t>(entry & 0x0fffu);
+            out.push_back(ParsedRelocation{page_rva + offset, rtype});
+        }
+        pos += chunk_size;
+    }
+    return out;
+}
+
 }  // namespace
 
 Expected<PeImage> PeParser::parse(std::vector<std::byte> buffer) {
@@ -461,6 +523,7 @@ Expected<PeImage> PeParser::parse(std::vector<std::byte> buffer) {
         if (!r) { return Unexpected{r.error()}; }
         img.tls_callbacks_ = std::move(*r);
     }
+    img.relocations_ = parse_relocations(img, dirs);
 
     return img;
 }

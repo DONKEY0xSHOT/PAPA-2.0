@@ -3,6 +3,7 @@
 #include "papa/capabilities/common.h"
 #include "papa/capabilities/static_.h"
 #include "papa/exceptions.h"
+#include "papa/features/address.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
 #include "papa/features/extractors/pefile_extractor.h"
@@ -25,7 +26,13 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
+
+#if defined(_WIN32)
+#  include <cstdio>
+#  include <io.h>
+#endif
 
 namespace papa::cli {
 
@@ -69,13 +76,14 @@ read_entire_file(const std::filesystem::path& path) {
     return buf;
 }
 
-[[nodiscard]] std::string join_argv(int argc, const char* const* argv) {
-    std::ostringstream oss;
-    for (int i = 0; i < argc; ++i) {
-        if (i > 0) { oss << ' '; }
-        oss << argv[i];
-    }
-    return oss.str();
+// True when stdout is an interactive console rather than a file or pipe.
+// capa colors its report only in this case, so PAPA does the same.
+[[nodiscard]] bool stdout_is_terminal() noexcept {
+#if defined(_WIN32)
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    return false;
+#endif
 }
 
 }  // namespace
@@ -86,6 +94,9 @@ ParseResult parse_args(int argc, const char* const* argv) {
 
     for (int i = 0; i < argc; ++i) {
         const std::string_view arg{argv[i]};
+
+        // Keep every argument verbatim so the report can echo the command line.
+        a.argv.emplace_back(arg);
 
         if (arg == "--help" || arg == "-h") { a.show_help = true; continue; }
         if (arg == "--version")             { a.show_version = true; continue; }
@@ -178,6 +189,10 @@ int run(const Args& args) {
         return kExitInvalidRule;
     }
 
+    // capa colors its text report only for an interactive console, and only when
+    // the report goes to stdout rather than a file.
+    const bool color = args.output_path.empty() && stdout_is_terminal();
+
     // First-pass file-only check for static-limitation rules
     {
         features::extractors::PefileFeatureExtractor pe_only(*image);
@@ -198,17 +213,18 @@ int run(const Args& args) {
             auto meta = collect_metadata(
                 std::span<const std::byte>(sample_buf),
                 args.sample_path,
-                std::string{},
+                args.argv,
                 std::move(rules_paths),
                 *image,
                 capabilities::static_::StaticCapabilities{},
                 pe_only);
             auto doc = render::build_document(std::move(meta), *ruleset, file_caps->matches);
             if (args.output == OutputMode::kJson) {
-                render::json::render(doc, std::cout, /*pretty=*/true);
+                // capa emits compact JSON (model_dump_json) then a trailing newline
+                render::json::render(doc, std::cout, /*pretty=*/false);
                 std::cout << '\n';
             } else {
-                render::text::render(doc, std::cout, render::text::Verbosity::kDefault);
+                render::text::render(doc, std::cout, render::text::Verbosity::kDefault, color);
             }
             return kExitFileLimitation;
         }
@@ -235,11 +251,21 @@ int run(const Args& args) {
     auto meta = collect_metadata(
         std::span<const std::byte>(sample_buf),
         args.sample_path,
-        std::string{},
+        args.argv,
         std::move(rules_paths),
         *image,
         *caps,
         extractor);
+
+    // Enrich the metadata with the two pieces only the full pipeline can supply:
+    // capa's basic-block layout and the FLIRT name of each library function.
+    meta.analysis.layout = compute_static_layout(*ruleset, extractor, *caps);
+    for (auto& lib : meta.analysis.library_functions) {
+        if (const auto* abs =
+                std::get_if<features::AbsoluteVirtualAddress>(&lib.address)) {
+            lib.name = extractor.flirt_name_at(abs->v).value_or("?");
+        }
+    }
     auto doc = render::build_document(std::move(meta), *ruleset, caps->all_matches);
 
     // Route the report to a file when --output was given, otherwise stdout
@@ -257,17 +283,18 @@ int run(const Args& args) {
 
     switch (args.output) {
         case OutputMode::kJson:
-            render::json::render(doc, *out, /*pretty=*/true);
+            // capa emits compact JSON (model_dump_json) then a trailing newline
+            render::json::render(doc, *out, /*pretty=*/false);
             (*out) << '\n';
             break;
         case OutputMode::kVerbose:
-            render::text::render(doc, *out, render::text::Verbosity::kVerbose);
+            render::text::render(doc, *out, render::text::Verbosity::kVerbose, color);
             break;
         case OutputMode::kVverbose:
-            render::text::render(doc, *out, render::text::Verbosity::kVverbose);
+            render::text::render(doc, *out, render::text::Verbosity::kVverbose, color);
             break;
         case OutputMode::kDefault:
-            render::text::render(doc, *out, render::text::Verbosity::kDefault);
+            render::text::render(doc, *out, render::text::Verbosity::kDefault, color);
             break;
     }
     return kExitOk;

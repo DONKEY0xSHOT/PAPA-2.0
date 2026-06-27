@@ -32,3 +32,6 @@ if (TARGET Zycore)
             INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_zycore_inc}")
     endif()
 endif()
+
+# miniz: amalgamated DEFLATE decompressor, used internally by the FLIRT reader
+add_subdirectory(miniz)

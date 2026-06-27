@@ -492,6 +492,23 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
 
 // feature parsing
 // Parse a leaf "feature: value [= description]" into a FeaturePtr
+// Mirrors capa's trim_dll_part: since capa v7 the api feature matches on the
+// bare symbol, so a single-dot native name like kernel32.CreateFileA is reduced
+// to CreateFileA. Ordinal imports (ws2_32.#1) and dotnet names (Class::Method)
+// keep their full form. This lets api rules match calls whose import resolves
+// through an API-Set dll (api-ms-win-...) rather than the classic dll.
+[[nodiscard]] std::string trim_dll_part(std::string_view api) {
+    if (api.find(".#") != std::string_view::npos) { return std::string(api); }
+    std::size_t dots = 0;
+    for (const char c : api) {
+        if (c == '.') { ++dots; }
+    }
+    if (dots == 1 && api.find("::") == std::string_view::npos) {
+        return std::string(api.substr(api.find('.') + 1U));
+    }
+    return std::string(api);
+}
+
 // key has already been split off the YAML mapping
 // value is the raw YAML scalar
 // description, when non-empty, comes from inline "= ..." or a sibling description key
@@ -570,7 +587,7 @@ build_feature_leaf(std::string_view key,
     auto [value, desc] = split_for_desc(raw_value);
 
     if (key == "api") {
-        return std::make_shared<const Api>(std::string(value), std::move(desc));
+        return std::make_shared<const Api>(trim_dll_part(value), std::move(desc));
     }
     if (key == "import") {
         return std::make_shared<const Import>(std::string(value), std::move(desc));

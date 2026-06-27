@@ -3,6 +3,7 @@
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/backend.h"
+#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
 #include "papa/features/extractors/papa_native/library_signatures.h"
 
 #include <cstdint>
@@ -80,10 +81,24 @@ public:
 
     [[nodiscard]] const PapaNativeBackend& backend() const noexcept { return backend_; }
 
+    // The library name FLIRT assigned to the function at va, or nullopt when it
+    // is not a named library function. Used to name calls to statically-linked
+    // library routines (e.g. _beginthreadex) and the report's library functions.
+    [[nodiscard]] std::optional<std::string> flirt_name_at(std::uint64_t va) const;
+
 private:
+    // Classify every recovered function once, populating flirt_cache_ so library
+    // names are available for any VA. Idempotent.
+    void ensure_flirt_primed() const;
+
     PapaNativeBackend                                       backend_;
     std::unordered_map<std::uint64_t, std::string>          function_names_;
     LibrarySignatureSet                                     library_sigs_;
+    // Memoizes FLIRT library classifications across the per-function calls the
+    // orchestrator makes, so reference recursion is not repeated and a match's
+    // offset names mark sibling functions regardless of query order.
+    mutable flirt::FlirtClassifier::Cache                   flirt_cache_;
+    mutable bool                                            flirt_primed_{false};
 };
 
 }  // namespace papa::features::extractors::papa_native

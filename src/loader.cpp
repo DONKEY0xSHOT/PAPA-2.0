@@ -2,9 +2,13 @@
 
 #include "papa/capabilities/static_.h"
 #include "papa/constants.h"
+#include "papa/engine.h"
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/pe/pe_image.h"
+#include "papa/rules/rule.h"
+#include "papa/rules/ruleset.h"
+#include "papa/rules/scope.h"
 #include "papa/util/hash.h"
 #include "papa/version.h"
 
@@ -17,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -73,7 +78,7 @@ SampleHashes compute_sample_hashes(std::span<const std::byte> data) {
 Metadata
 collect_metadata(std::span<const std::byte>                                 sample_buf,
                  std::filesystem::path                                      sample_path,
-                 std::string                                                argv_string,
+                 std::vector<std::string>                                   argv,
                  std::vector<std::string>                                   rules_paths,
                  const pe::PeImage&                                         image,
                  const capabilities::static_::StaticCapabilities&           caps,
@@ -81,22 +86,60 @@ collect_metadata(std::span<const std::byte>                                 samp
     Metadata m;
     m.timestamp         = utc_iso8601_now();
     m.version           = std::string(version::kVersionString);
-    m.argv              = std::move(argv_string);
+    m.argv              = std::move(argv);
     m.sample_path       = std::move(sample_path);
     m.sample_size_bytes = static_cast<std::uint64_t>(sample_buf.size());
     m.hashes            = compute_sample_hashes(sample_buf);
 
-    m.analysis.arch        = arch_for_machine(image.machine());
-    m.analysis.os          = std::string(constants::os_value::kWindows);
-    m.analysis.format      = std::string(constants::format_value::kPe);
-    m.analysis.extractor   = "papa_native";
-    m.analysis.rules_paths = std::move(rules_paths);
+    m.analysis.arch         = arch_for_machine(image.machine());
+    m.analysis.os           = std::string(constants::os_value::kWindows);
+    m.analysis.format       = std::string(constants::format_value::kPe);
+    m.analysis.extractor    = "papa_native";
+    m.analysis.rules_paths  = std::move(rules_paths);
+    m.analysis.base_address = image.image_base();
+
+    // Library-function names come from FLIRT, which only the concrete extractor
+    // exposes, so callers fill them in afterward. Default to capa's "?" sentinel.
+    m.analysis.library_functions.reserve(caps.library_functions.size());
+    for (const auto& addr : caps.library_functions) {
+        m.analysis.library_functions.push_back(LibraryFunction{addr, "?"});
+    }
 
     m.analysis.feature_count_file        = caps.feature_count;
-    m.analysis.library_functions         = caps.library_functions;
     m.analysis.feature_counts_functions  = caps.per_function_feature_counts;
     (void)extractor;
     return m;
+}
+
+std::vector<FunctionMatchLayout>
+compute_static_layout(const rules::RuleSet&                                 rules,
+                      const features::extractors::StaticFeatureExtractor&   extractor,
+                      const capabilities::static_::StaticCapabilities&      caps) {
+    // Collect the basic blocks where a basic-block-scope rule matched. capa keys
+    // these by the match address, which for that scope is the basic block.
+    std::unordered_set<std::uint64_t> matched_bbs;
+    for (const auto& [rule_name, addr_results] : caps.all_matches) {
+        const rules::Rule* rule = rules.find(rule_name);
+        if (rule == nullptr) { continue; }
+        if (rule->meta().scopes.static_scope != rules::Scope::kBasicBlock) { continue; }
+        for (const auto& [addr, _result] : addr_results) {
+            matched_bbs.insert(features::linearize(addr));
+        }
+    }
+
+    std::vector<FunctionMatchLayout> layout;
+    for (const auto& fh : extractor.get_functions()) {
+        std::vector<features::Address> matched;
+        for (const auto& bbh : extractor.get_basic_blocks(fh)) {
+            if (matched_bbs.count(features::linearize(bbh.addr)) != 0) {
+                matched.push_back(bbh.addr);
+            }
+        }
+        if (!matched.empty()) {
+            layout.push_back(FunctionMatchLayout{fh.addr, std::move(matched)});
+        }
+    }
+    return layout;
 }
 
 }  // namespace papa

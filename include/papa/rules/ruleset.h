@@ -54,6 +54,11 @@ public:
     // Returns nullptr if no rule has that name
     [[nodiscard]] const Rule* find(std::string_view name) const noexcept;
 
+    // Rules whose namespace is exactly the given string, in registration order
+    // Used by the renderer to splice a `match: namespace` subtree, like capa
+    [[nodiscard]] std::span<const Rule* const>
+    rules_in_namespace(std::string_view ns) const noexcept;
+
     // Topologically-ordered rules for the given scope
     // Returns an empty span when no rule is registered at that scope
     [[nodiscard]] std::span<const Rule* const> rules_by_scope(Scope scope) const noexcept;

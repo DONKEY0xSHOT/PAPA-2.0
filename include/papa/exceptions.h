@@ -24,6 +24,12 @@ enum class ErrorKind : std::uint8_t {
     kUnsupportedFormat,
     kYamlParseError,
     kInternalInvariant,
+    kFlirtBadCompressedStream,
+    kFlirtBadMagic,
+    kFlirtUnsupportedVersion,
+    kFlirtTruncated,
+    kFlirtBadNode,
+    kFlirtTooDeep,
 };
 
 [[nodiscard]] std::string_view to_string(ErrorKind kind) noexcept;

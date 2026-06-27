@@ -32,6 +32,7 @@ inline constexpr std::uint32_t kImageDirectoryEntryExport        = 0;
 inline constexpr std::uint32_t kImageDirectoryEntryImport        = 1;
 inline constexpr std::uint32_t kImageDirectoryEntryResource      = 2;
 inline constexpr std::uint32_t kImageDirectoryEntryException     = 3;
+inline constexpr std::uint32_t kImageDirectoryEntryBaseReloc     = 5;
 inline constexpr std::uint32_t kImageDirectoryEntryTls           = 9;
 inline constexpr std::uint32_t kImageDirectoryEntryDelayImport   = 13;
 inline constexpr std::uint32_t kImageNumberOfDirectoryEntries    = 16;

@@ -36,6 +36,11 @@ struct ParsedExport {
     std::optional<std::string> forwarder;
 };
 
+struct ParsedRelocation {
+    std::uint32_t rva;   // RVA of the relocation site (page RVA + entry offset)
+    std::uint16_t type;  // IMAGE_REL_BASED_* type, e.g. 3 HIGHLOW, 10 DIR64, 0 ABSOLUTE
+};
+
 class PeParser;  // friend
 
 class PeImage {
@@ -52,6 +57,9 @@ public:
     [[nodiscard]] std::span<const ParsedExport>       exports()    const noexcept { return exports_; }
     [[nodiscard]] std::span<const std::uint64_t>      tls_callbacks_va() const noexcept {
         return tls_callbacks_;
+    }
+    [[nodiscard]] std::span<const ParsedRelocation>   relocations() const noexcept {
+        return relocations_;
     }
 
     [[nodiscard]] Expected<std::span<const std::byte>>
@@ -77,10 +85,11 @@ private:
     std::uint32_t              entry_point_rva_{0};
     std::uint32_t              size_of_image_{0};
     bool                       is_64bit_{false};
-    std::vector<ParsedSection> sections_;
-    std::vector<ParsedImport>  imports_;
-    std::vector<ParsedExport>  exports_;
-    std::vector<std::uint64_t> tls_callbacks_;
+    std::vector<ParsedSection>    sections_;
+    std::vector<ParsedImport>     imports_;
+    std::vector<ParsedExport>     exports_;
+    std::vector<std::uint64_t>    tls_callbacks_;
+    std::vector<ParsedRelocation> relocations_;
 };
 
 }  // namespace papa::pe

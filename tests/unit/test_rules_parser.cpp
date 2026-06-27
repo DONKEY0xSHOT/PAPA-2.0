@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 the PAPA authors
+
 #include <ostream>
 
 #include "doctest.h"
@@ -191,7 +194,34 @@ TEST_CASE("rules: minimal rule with single api leaf parses") {
     CHECK(rule.scope() == Scope::kFunction);
     CHECK(rule.meta().source_path == "simple.yml");
     const auto& api = must_be<Api>(feat_of(rule.statement()));
-    CHECK(api.value() == "kernel32.CreateFileA");
+    // api matching is dll-agnostic since capa v7, so the dll part is trimmed
+    CHECK(api.value() == "CreateFileA");
+}
+
+TEST_CASE("rules: api leaf trims the dll part like capa") {
+    auto api_value = [](std::string_view api_line) -> std::string {
+        std::string text =
+            "rule:\n"
+            "  meta:\n"
+            "    name: r\n"
+            "    scope: function\n"
+            "  features:\n"
+            "    - api: ";
+        text.append(api_line);
+        text.push_back('\n');
+        auto r = RuleParser::parse(text, "r.yml");
+        REQUIRE(r);
+        return must_be<Api>(feat_of((*r)->statement())).value();
+    };
+    // single-dot native names drop the dll
+    CHECK(api_value("kernel32.GetTickCount") == "GetTickCount");
+    CHECK(api_value("ntdll.NtTerminateProcess") == "NtTerminateProcess");
+    // already-bare names are unchanged
+    CHECK(api_value("exit") == "exit");
+    // ordinal imports keep the dll
+    CHECK(api_value("ws2_32.#1") == "ws2_32.#1");
+    // dotnet names with :: keep their full form
+    CHECK(api_value("System.Convert::FromBase64String") == "System.Convert::FromBase64String");
 }
 
 TEST_CASE("rules: rule with namespace, authors, and description in meta") {

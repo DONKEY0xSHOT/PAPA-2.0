@@ -5,6 +5,7 @@
 #include "papa/features/address.h"
 #include "papa/features/common.h"
 #include "papa/features/feature.h"
+#include "papa/rules/optimizer.h"
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
@@ -124,6 +125,12 @@ std::span<const Rule* const> RuleSet::rules_by_scope(Scope scope) const noexcept
     return it->second;
 }
 
+std::span<const Rule* const> RuleSet::rules_in_namespace(std::string_view ns) const noexcept {
+    auto it = by_namespace_.find(std::string(ns));
+    if (it == by_namespace_.end()) { return {}; }
+    return it->second;
+}
+
 std::pair<features::FeatureSet, engine::MatchResults>
 RuleSet::match(Scope scope, features::FeatureSet fs, const features::Address& addr) const {
     const auto topo = rules_by_scope(scope);
@@ -137,6 +144,12 @@ Expected<RuleSet> RuleSet::from_rules(std::vector<std::unique_ptr<Rule>> rules) 
 
     RuleSet rs;
     rs.rules_ = std::move(rules);
+
+    // Reorder each rule's statement children so cheap, selective features
+    // evaluate first, the way capa's optimizer does. Parity-neutral on results.
+    for (auto& r : rs.rules_) {
+        if (r && r->statement_) { optimize(*r->statement_); }
+    }
 
     auto idx = rs.index_rules();
     if (!idx) { return Unexpected{idx.error()}; }

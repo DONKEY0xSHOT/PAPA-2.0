@@ -211,11 +211,11 @@ find_static_capabilities(
         // representing real capabilities authored by the binary's developers
         if (extractor.is_library_function(fh.addr)) {
             caps.library_functions.push_back(fh.addr);
-            caps.per_function_feature_counts.push_back(0U);
+            caps.per_function_feature_counts.push_back({fh.addr, 0U});
             continue;
         }
         auto code_caps = find_code_capabilities_inner(rules, extractor, fh, globals);
-        caps.per_function_feature_counts.push_back(code_caps.feature_count);
+        caps.per_function_feature_counts.push_back({fh.addr, code_caps.feature_count});
         merge_into(all_fn_matches,   std::move(code_caps.function_matches));
         merge_into(all_bb_matches,   std::move(code_caps.bb_matches));
         merge_into(all_insn_matches, std::move(code_caps.insn_matches));

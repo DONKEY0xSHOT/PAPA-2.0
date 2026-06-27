@@ -20,6 +20,12 @@ std::string_view to_string(ErrorKind kind) noexcept {
         case ErrorKind::kUnsupportedFormat:  return "unsupported-format";
         case ErrorKind::kYamlParseError:     return "yaml-parse-error";
         case ErrorKind::kInternalInvariant:  return "internal-invariant";
+        case ErrorKind::kFlirtBadCompressedStream: return "flirt-bad-compressed-stream";
+        case ErrorKind::kFlirtBadMagic:      return "flirt-bad-magic";
+        case ErrorKind::kFlirtUnsupportedVersion:  return "flirt-unsupported-version";
+        case ErrorKind::kFlirtTruncated:     return "flirt-truncated";
+        case ErrorKind::kFlirtBadNode:       return "flirt-bad-node";
+        case ErrorKind::kFlirtTooDeep:       return "flirt-too-deep";
     }
     return "unknown";
 }

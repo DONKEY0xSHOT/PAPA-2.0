@@ -33,6 +33,15 @@ struct CodeCapabilities {
     std::size_t           feature_count{0};
 };
 
+// One recovered function's entry address and the number of features extracted
+// from it. Mirrors capa's feature_counts.functions entries so the report JSON
+// stays schema-compatible and downstream tooling can see which functions the
+// extractor actually analyzed
+struct FunctionFeatureCount {
+    features::Address  address;
+    std::size_t        count{0};
+};
+
 // Final image-level aggregate
 // per_function_feature_counts is populated as the orchestrator walks each
 // function so collect_metadata never has to re-extract just to count
@@ -40,7 +49,7 @@ struct StaticCapabilities {
     engine::MatchResults                    all_matches;
     std::size_t                             feature_count{0};
     std::vector<features::Address>          library_functions;
-    std::vector<std::size_t>                per_function_feature_counts;
+    std::vector<FunctionFeatureCount>       per_function_feature_counts;
 };
 
 [[nodiscard]] InstructionCapabilities

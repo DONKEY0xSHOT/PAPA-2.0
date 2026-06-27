@@ -17,13 +17,14 @@ enum class OutputMode : std::uint8_t {
 };
 
 struct Args {
-    std::filesystem::path  sample_path;
-    std::filesystem::path  rules_dir{"data/rules"};
-    std::filesystem::path  output_path;        // empty means stdout
-    OutputMode             output{OutputMode::kDefault};
-    bool                   quiet{false};
-    bool                   show_help{false};
-    bool                   show_version{false};
+    std::filesystem::path     sample_path;
+    std::filesystem::path     rules_dir{"data/rules"};
+    std::filesystem::path     output_path;     // empty means stdout
+    std::vector<std::string>  argv;            // the raw arguments, for the report
+    OutputMode                output{OutputMode::kDefault};
+    bool                      quiet{false};
+    bool                      show_help{false};
+    bool                      show_version{false};
 };
 
 // Exit codes

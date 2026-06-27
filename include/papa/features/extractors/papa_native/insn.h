@@ -7,7 +7,9 @@
 #include "papa/pe/pe_image.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -129,6 +131,19 @@ extract_cross_section_flow(const DecodedInsn&         ins,
                            const ::papa::pe::PeImage& image,
                            const ImportTable&         imports);
 
+// Resolve the import a direct CALL or unconditional JMP targets, through the
+// IAT directly (kImmMem on x86, kRipRel on x64) or a thunk chain (kPcRel, up to
+// kThunkChainDepthDelta unconditional JMP/CALL hops with optional CET ENDBRANCH
+// skipping). Returns the import row, or nullptr when the target is not an
+// import. Register-indirect calls (kReg) are out of scope because resolving
+// them needs the function context for a backward slice. Shared by API feature
+// extraction and the no-return oracle so both agree on what a call reaches.
+[[nodiscard]] const ::papa::pe::ParsedImport*
+resolve_direct_call_import(const DecodedInsn&         ins,
+                           const ::papa::pe::PeImage& image,
+                           const ImportTable&         imports,
+                           const Disassembler&        disasm);
+
 // Resolve every API name implied by a CALL or thunk-style JMP instruction
 //
 // For direct IAT calls (kImmMem and kRipRel) the operand encodes the IAT slot
@@ -150,5 +165,16 @@ extract_api_features(const Function&            fn,
                      const ::papa::pe::PeImage& image,
                      const ImportTable&         imports,
                      const Disassembler&        disasm);
+
+// Emit Api features for a direct call (or tail jmp) to a statically-linked
+// library function that FLIRT identified, the way capa does for routines like
+// _beginthreadex that are not imports. `flirt_name` returns the function's
+// library name for a VA, or nullopt when it is not a named library function.
+// A leading-underscore name also yields its stripped form (capa: _fwrite ->
+// fwrite), so a rule can match either spelling.
+[[nodiscard]] std::vector<FeatureWithAddress>
+extract_flirt_call_api(
+    const DecodedInsn& ins,
+    const std::function<std::optional<std::string>(std::uint64_t)>& flirt_name);
 
 }  // namespace papa::features::extractors::papa_native::insn

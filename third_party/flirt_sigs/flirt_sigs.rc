@@ -1,0 +1,4 @@
+#include "flirt_sigs_resources.h"
+PAPA_FLIRT_RTF     RCDATA "1_flare_msvc_rtf_32_64.sig"
+PAPA_FLIRT_ATLMFC  RCDATA "2_flare_msvc_atlmfc_32_64.sig"
+PAPA_FLIRT_COMMON  RCDATA "3_flare_common_libs.sig"

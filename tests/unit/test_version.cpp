@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 the PAPA authors
+
 #include "papa/version.h"
 
 #include <ostream>
