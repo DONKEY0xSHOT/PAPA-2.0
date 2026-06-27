@@ -182,7 +182,7 @@ ctest --test-dir build -C Release
 Point `PAPA_TEST_FIXTURES` at a folder of sample PEs to enable the
 fixture-backed cases; without it they skip cleanly and the suite still passes.
 
-PAPA was tested against a corpus of 42 PE files:
+In addition to its unit tests, PAPA was also tested against a corpus of 42 PE files:
 ```
 7z.exe
 attrib_x64.exe
