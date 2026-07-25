@@ -12,9 +12,9 @@ namespace papa::features::extractors::papa_native {
 namespace {
 
 // The static reference a single instruction emits, if any. A call or jump
-// yields a code reference to its target; any other instruction that dereferences
+// yields a code reference to its target. Any other instruction that dereferences
 // a fixed address yields a data reference. Register-indexed and register-only
-// operands cannot be resolved statically and yield nothing.
+// operands cannot be resolved statically and yield nothing
 [[nodiscard]] std::optional<flirt::FlirtXref> resolve_xref(const DecodedInsn& ins) {
     if (ins.is_call || ins.is_jump) {
         if (ins.branch_target.has_value()) {
@@ -59,7 +59,7 @@ FlirtBackendContext::code_at(std::uint64_t va, std::size_t max_len) const {
     const std::uint64_t rva = va - image.image_base();
     auto bytes = image.read_at_rva(rva, max_len);
     if (!bytes) {
-        // The section may end before max_len. Halve the window until a read fits.
+        // The section may end before max_len. Halve the window until a read fits
         for (std::size_t cap = max_len; cap > 0; cap >>= 1) {
             auto retry = image.read_at_rva(rva, cap);
             if (retry) { bytes = std::move(retry); break; }
@@ -88,7 +88,7 @@ std::optional<flirt::FlirtXref>
 FlirtBackendContext::xref_from(std::uint64_t site_va) const {
     const auto& funcs = backend_->functions();
     // The only function that can contain site_va is the last one whose entry is
-    // at or before it, since functions are sorted by entry VA.
+    // at or before it, since functions are sorted by entry VA
     auto it = std::upper_bound(
         funcs.begin(), funcs.end(), site_va,
         [](std::uint64_t v, const Function& f) noexcept { return v < f.va; });
