@@ -23,13 +23,12 @@ target_compile_definitions(miniz PRIVATE
 )
 
 if(MSVC)
-    # /MD$<$<CONFIG:Debug>:d> picks the dynamic CRT so this archive
-    # links cleanly into papa_lib (which uses the same selection).
-    target_compile_options(miniz PRIVATE
-        /W0
-        $<$<CONFIG:Debug>:/MDd>
-        $<$<NOT:$<CONFIG:Debug>>:/MD>
-    )
+    # The runtime is not selected here. CMAKE_MSVC_RUNTIME_LIBRARY (set from
+    # PAPA_STATIC_RUNTIME in the root CMakeLists, under policy CMP0091) drives
+    # every target, so this archive always matches the one papa_lib links.
+    # Hardcoding /MD here silently mixed the dynamic and static CRTs, which the
+    # linker only reports as the easily-missed warning LNK4098.
+    target_compile_options(miniz PRIVATE /W0)
 else()
     target_compile_options(miniz PRIVATE -w)
 endif()
