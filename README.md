@@ -26,54 +26,8 @@ PAPA is usually ~7X faster on small to medium binaries!
 
 
 ## Testing
-In addition to its unit tests, PAPA was also tested against a corpus of 42 PE files:
-
-```
-7z.exe
-attrib_x64.exe
-attrib_x86.exe
-bcrypt_x64.dll
-calc.exe
-capa.exe
-certutil_x64.exe
-certutil_x86.exe
-cff_explorer.exe
-chrome.exe
-cmd_x64.exe
-cmd_x86.exe
-everything.exe
-find_x86.exe
-gzip_mingw.exe
-hostname_x64.exe
-hostname_x86.exe
-ipconfig_x64.exe
-ipconfig_x86.exe
-msedge.exe
-netapi32_x64.dll
-netapi32_x86.dll
-netstat_x64.exe
-netstat_x86.exe
-notepad.exe
-ping_x64.exe
-ping_x86.exe
-powercfg_x64.exe
-reg_x64.exe
-reg_x86.exe
-robocopy_x64.exe
-robocopy_x86.exe
-schtasks_x64.exe
-schtasks_x86.exe
-sc_x64.exe
-sc_x86.exe
-systeminfo_x64.exe
-tasklist_x64.exe
-where_x64.exe
-where_x86.exe
-whoami_x64.exe
-whoami_x86.exe
-```
-
-PAPA reaches 100% recall and 100% precision on the validation corpus, so there are no
+In addition to its unit tests, PAPA was also tested against a corpus of 42 PE files.
+It reached 100% recall and 100% precision on the validation corpus, so there are no
 known false positives or false negatives on tested samples.
 
 Perfect match-set parity on an *arbitrary* binary is currently not promised, so an unseen sample can still diverge a bit. 
