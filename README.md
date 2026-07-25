@@ -22,14 +22,7 @@ PAPA keeps CAPA's rule semantics and report format, but it's much faster!
 
 Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0` ruleset on
 the same machine (`--json`, output redirected).
-
-| Sample        | Size    | PAPA  | CAPA  | Speedup |
-|---------------|---------|-------|-------|---------|
-| `calc.exe`    | ~27 KB  | 1.6 s | 11 s  | ~7x     |
-| `notepad.exe` | ~200 KB | 7 s   | 48 s  | ~7x     |
-| `7z.exe`      | ~549 KB | 29 s  | 219 s | ~8x     |
-
-PAPA is ~7-8x faster on small to medium binaries!
+PAPA is usually ~7X faster on small to medium binaries!
 
 
 ## Testing
