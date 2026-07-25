@@ -1,0 +1,43 @@
+# papa_set_hardening(<target>) -- stack protector, CFG/CET, _FORTIFY_SOURCE
+
+function(papa_set_hardening TARGET)
+    if(NOT PAPA_ENABLE_HARDENING)
+        return()
+    endif()
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        target_compile_options(${TARGET} INTERFACE
+            /GS
+            /guard:cf
+            /Qspectre
+            /sdl
+        )
+        target_link_options(${TARGET} INTERFACE
+            /DYNAMICBASE
+            /NXCOMPAT
+            /HIGHENTROPYVA
+            /guard:cf
+        )
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # _FORTIFY_SOURCE requires optimization so skip Debug
+        target_compile_definitions(${TARGET} INTERFACE
+            $<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>
+        )
+        target_compile_options(${TARGET} INTERFACE
+            -fstack-protector-strong
+            -fno-strict-aliasing
+            -fno-strict-overflow
+        )
+
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-fcf-protection=full" PAPA_HAS_CF_PROTECTION)
+        if(PAPA_HAS_CF_PROTECTION)
+            target_compile_options(${TARGET} INTERFACE -fcf-protection=full)
+        endif()
+
+        check_cxx_compiler_flag("-fstack-clash-protection" PAPA_HAS_STACK_CLASH)
+        if(PAPA_HAS_STACK_CLASH)
+            target_compile_options(${TARGET} INTERFACE -fstack-clash-protection)
+        endif()
+    endif()
+endfunction()
