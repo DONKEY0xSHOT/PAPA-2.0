@@ -15,7 +15,7 @@ namespace papa::features::extractors::papa_native {
 /// Implements the FLIRT classifier's FunctionContext over a recovered backend.
 /// This is the single place where FLIRT meets the CFG, the import table, and
 /// the image, so the reference-validating classifier stays free of those
-/// dependencies. One instance serves a whole classify call and its recursion.
+/// dependencies. One instance serves a whole classify call and its recursion
 class FlirtBackendContext final : public flirt::FunctionContext {
 public:
     explicit FlirtBackendContext(const PapaNativeBackend& backend) noexcept;
@@ -33,7 +33,7 @@ public:
 
 private:
     const PapaNativeBackend*          backend_;
-    // Backing store for the bytes code_at returns. Valid until the next call.
+    // Backing store for the bytes code_at returns. Valid until the next call
     mutable std::vector<std::uint8_t> scratch_;
 };
 
