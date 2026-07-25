@@ -11,22 +11,22 @@ namespace papa::features::extractors::papa_native::flirt::detail {
 ///
 /// Every read validates remaining length first and advances the position
 /// only on success. Reads return false and leave both the out parameter
-/// and the position untouched when the buffer is too short.
+/// and the position untouched when the buffer is too short
 class ByteCursor {
 public:
-    /// Construct a cursor positioned at the start of `buf`.
+    /// Construct a cursor positioned at the start of `buf`
     explicit ByteCursor(std::span<const std::uint8_t> buf) noexcept
         : buf_{buf}, pos_{0} {}
 
-    /// True when at least `n` bytes remain from the current position.
+    /// True when at least `n` bytes remain from the current position
     [[nodiscard]] bool remaining(std::size_t n) const noexcept {
         return pos_ + n <= buf_.size();
     }
 
-    /// Current read offset from the start of the buffer.
+    /// Current read offset from the start of the buffer
     [[nodiscard]] std::size_t offset() const noexcept { return pos_; }
 
-    /// Read one unsigned byte.
+    /// Read one unsigned byte
     [[nodiscard]] bool read_u8(std::uint8_t& out) noexcept {
         if (!remaining(1)) {
             return false;
@@ -36,7 +36,7 @@ public:
         return true;
     }
 
-    /// Read a little-endian unsigned 16-bit value.
+    /// Read a little-endian unsigned 16-bit value
     [[nodiscard]] bool read_u16_le(std::uint16_t& out) noexcept {
         if (!remaining(2)) {
             return false;
@@ -47,7 +47,7 @@ public:
         return true;
     }
 
-    /// Read a little-endian unsigned 32-bit value.
+    /// Read a little-endian unsigned 32-bit value
     [[nodiscard]] bool read_u32_le(std::uint32_t& out) noexcept {
         if (!remaining(4)) {
             return false;
@@ -64,7 +64,7 @@ public:
     /// Read a FLAIR variable-length integer in the 0..0x7FFF range.
     ///
     /// One byte when the high bit is clear, otherwise two bytes with the
-    /// low 7 bits of the lead byte forming the high byte of the result.
+    /// low 7 bits of the lead byte forming the high byte of the result
     [[nodiscard]] bool read_vle16(std::uint16_t& out) noexcept {
         if (!remaining(1)) {
             return false;
@@ -88,7 +88,7 @@ public:
     /// Read a FLAIR variable-length integer of up to 32 bits.
     ///
     /// The top bits of the lead byte select a 1, 2, 4, or 5 byte encoding.
-    /// The 5-byte form carries a full big-endian u32 in the trailing bytes.
+    /// The 5-byte form carries a full big-endian u32 in the trailing bytes
     [[nodiscard]] bool read_vle32(std::uint32_t& out) noexcept {
         if (!remaining(1)) {
             return false;
@@ -131,7 +131,7 @@ public:
         return true;
     }
 
-    /// Copy `n` bytes into `dst`.
+    /// Copy `n` bytes into `dst`
     [[nodiscard]] bool read_bytes(std::uint8_t* dst, std::size_t n) noexcept {
         if (!remaining(n)) {
             return false;
@@ -141,7 +141,7 @@ public:
         return true;
     }
 
-    /// Advance the cursor by `n` bytes without reading them.
+    /// Advance the cursor by `n` bytes without reading them
     [[nodiscard]] bool skip(std::size_t n) noexcept {
         if (!remaining(n)) {
             return false;

@@ -33,7 +33,7 @@ bool SandboxMemory::probe(std::uint64_t va, std::size_t size,
     if (map == nullptr) {
         return false;
     }
-    // The whole range must lie within this one map.
+    // The whole range must lie within this one map
     if (va + size > map->base + map->size) {
         return false;
     }
@@ -61,7 +61,7 @@ SandboxMemory::read_bytes(std::uint64_t va, std::size_t size) const {
     if (size == 0) {
         return {};
     }
-    // Unreadable range -> taint fill (vivisect _safe_mem fallback).
+    // Unreadable range -> taint fill (vivisect _safe_mem fallback)
     if (!probe(va, size, kMemRead)) {
         return std::vector<std::uint8_t>(size, kTaintByte);
     }
@@ -110,7 +110,7 @@ void SandboxMemory::write(std::uint64_t va, std::span<const std::uint8_t> bytes)
     if (bytes.empty()) {
         return;
     }
-    // Drop the whole write if the range is not writable (safe-mem).
+    // Drop the whole write if the range is not writable (safe-mem)
     if (!probe(va, bytes.size(), kMemWrite)) {
         return;
     }
@@ -121,7 +121,7 @@ void SandboxMemory::write(std::uint64_t va, std::span<const std::uint8_t> bytes)
             it->second = bytes[i];
             continue;
         }
-        // DoS backstop: stop growing the overlay past the cap.
+        // DoS backstop: stop growing the overlay past the cap
         if (overlay_.size() >= overlay_cap_) {
             return;
         }

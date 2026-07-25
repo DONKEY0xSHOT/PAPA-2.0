@@ -15,7 +15,7 @@ namespace papa::features::extractors::papa_native::emu {
 // real function. A faithful port of analysis/generic/emucode.py watcher: it
 // stops emulation at the first ret (or a privileged/garbage instruction) and
 // then looks_good() iff a ret was reached via varied, non-bad-code instructions
-// with no single mnemonic dominating. Drives the emulation behavioral filter.
+// with no single mnemonic dominating. Drives the emulation behavioral filter
 class Watcher : public EmulationMonitor {
 public:
     void prehook(WorkspaceEmulator& emu, const DecodedInsn& insn,
@@ -23,11 +23,11 @@ public:
     void log_anomaly(WorkspaceEmulator& emu, std::uint64_t eip) override;
 
     // A candidate looks like a function: it reached a ret, hit no bad code, and
-    // no single mnemonic is >= 67% of instructions (when more than four).
+    // no single mnemonic is >= 67% of instructions (when more than four)
     [[nodiscard]] bool looks_good() const noexcept;
 
     // A weaker test for greedy code discovery: the last instruction is a ret,
-    // branch or call and no single mnemonic is >= 60% of instructions.
+    // branch or call and no single mnemonic is >= 60% of instructions
     [[nodiscard]] bool is_code() const noexcept;
 
     [[nodiscard]] bool has_ret() const noexcept { return hasret_; }

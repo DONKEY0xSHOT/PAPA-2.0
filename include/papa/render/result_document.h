@@ -21,7 +21,7 @@ namespace papa::render {
 // One node of a rule's match tree, mirroring capa's Match model.
 // A node wraps either a feature (leaf) or a logic statement. feature and the
 // statement fields point into rule-owned memory and are never owned here, so
-// the originating RuleSet must outlive the document during rendering.
+// the originating RuleSet must outlive the document during rendering
 struct MatchNode {
     bool                            success{false};
     bool                            is_feature{false};
@@ -69,7 +69,7 @@ build_document(Metadata                                   metadata,
                const ::papa::engine::MatchResults&        matches);
 
 // Resolve a sample path to capa's absolute, forward-slash form
-// (Path.resolve().as_posix()), shared by the text and JSON renderers.
+// (Path.resolve().as_posix()), shared by the text and JSON renderers
 [[nodiscard]] std::string posix_path(const std::filesystem::path& p);
 
 }  // namespace papa::render

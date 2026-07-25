@@ -15,7 +15,7 @@ namespace emu = papa::features::extractors::papa_native::emu;
 // private capped overlay (the backing bytes are never mutated, so an emulated
 // PE can never corrupt papa state), and falls back to a taint fill for
 // unmapped reads (vivisect _safe_mem). Faithful to envi/memory.py +
-// impemu/emulator.py read/write hooks.
+// impemu/emulator.py read/write hooks
 
 namespace {
 
@@ -38,7 +38,7 @@ TEST_CASE("emu SandboxMemory: read_value reads a single byte") {
 }
 
 TEST_CASE("emu SandboxMemory: an unmapped read returns the taint fill") {
-    // vivisect _safe_mem: a read that does not probe returns taintbyte*size.
+    // vivisect _safe_mem: a read that does not probe returns taintbyte*size
     emu::SandboxMemory mem;
     CHECK(mem.read_value(0x9000, 4) == 0x61616161ULL);
 }
@@ -93,7 +93,7 @@ TEST_CASE("emu SandboxMemory: a stack write reads back through the overlay") {
 }
 
 TEST_CASE("emu SandboxMemory: a write to a read-only map is dropped") {
-    // The backing bytes must never change -- safety property.
+    // The backing bytes must never change -- safety property
     emu::SandboxMemory mem;
     mem.add_map(0x1000, emu::kMemRead, kBacking);
     const std::array<std::uint8_t, 1> data = {0xFF};
@@ -144,7 +144,7 @@ TEST_CASE("emu SandboxMemory: read_code of an unmapped address is empty") {
 
 TEST_CASE("emu SandboxMemory: the overlay cap drops writes beyond the bound") {
     // DoS guard: the write overlay cannot grow without bound. With a tiny
-    // injected cap, writes past it are dropped and read back as the stack fill.
+    // injected cap, writes past it are dropped and read back as the stack fill
     emu::SandboxMemory mem(/*overlay_cap=*/4);
     mem.init_stack();
     const std::array<std::uint8_t, 4> first = {1, 2, 3, 4};

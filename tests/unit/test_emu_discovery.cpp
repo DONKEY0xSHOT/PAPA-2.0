@@ -38,7 +38,7 @@ TEST_CASE("emu discovery: section_perms maps PE characteristics to memory perms"
 namespace {
 
 // Build a two-region ImageMaps by hand for the call-target discovery tests:
-// region 0 is the function under emulation, region 1 (optional) is the callee.
+// region 0 is the function under emulation, region 1 (optional) is the callee
 [[nodiscard]] emu::ImageMaps make_maps(
     std::uint64_t caller_base, std::vector<std::uint8_t> caller_code,
     std::uint64_t callee_base = 0, std::vector<std::uint8_t> callee_code = {}) {
@@ -56,7 +56,7 @@ namespace {
 
 TEST_CASE("emu discovery: discover_call_targets collects an executable indirect call target") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    // 0x401000: mov eax, 0x00402000 ; call eax ; ret    callee 0x402000: ret
+    // 0x401000: mov eax, 0x00402000 / call eax / ret    callee 0x402000: ret
     const emu::ImageMaps maps = make_maps(
         0x401000, {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3},
         0x402000, {0xC3});
@@ -67,7 +67,7 @@ TEST_CASE("emu discovery: discover_call_targets collects an executable indirect 
 
 TEST_CASE("emu discovery: discover_call_targets ignores a non-executable target") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    // call target 0x402000 is not mapped, so it is not executable code.
+    // call target 0x402000 is not mapped, so it is not executable code
     const emu::ImageMaps maps = make_maps(
         0x401000, {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3});
     const std::vector<std::uint64_t> seeds =
@@ -77,12 +77,33 @@ TEST_CASE("emu discovery: discover_call_targets ignores a non-executable target"
 
 TEST_CASE("emu discovery: discover_call_targets ignores a recursive self-call") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    // 0x401000: mov eax, 0x00401000 ; call eax ; ret  (pc == funcva)
+    // 0x401000: mov eax, 0x00401000 / call eax / ret  (pc == funcva)
     const emu::ImageMaps maps = make_maps(
         0x401000, {0xB8, 0x00, 0x10, 0x40, 0x00, 0xFF, 0xD0, 0xC3});
     const std::vector<std::uint64_t> seeds =
         emu::discover_call_targets(maps, disasm, 0x401000);
     CHECK(seeds.empty());
+}
+
+TEST_CASE("emu discovery: emulate_to_read_register reads a base register set by a lea") {
+    const pn::Disassembler disasm(/*is_64bit=*/true);
+    // 0x401000: lea r12, [rip+0xff9]  -> r12 = 0x401007 + 0xff9 = 0x402000
+    // 0x401007: ret  (the target address whose register state we read)
+    const emu::ImageMaps maps = make_maps(
+        0x401000, {0x4c, 0x8d, 0x25, 0xf9, 0x0f, 0x00, 0x00, 0xc3});
+    const auto value = emu::emulate_to_read_register(
+        maps, disasm, /*funcva=*/0x401000, /*target_va=*/0x401007, ZYDIS_REGISTER_R12);
+    REQUIRE(value.has_value());
+    CHECK(*value == 0x402000);
+}
+
+TEST_CASE("emu discovery: emulate_to_read_register returns nullopt when the target is unreached") {
+    const pn::Disassembler disasm(/*is_64bit=*/true);
+    // 0x401000: ret immediately, so 0x401007 is never reached
+    const emu::ImageMaps maps = make_maps(0x401000, {0xc3});
+    const auto value = emu::emulate_to_read_register(
+        maps, disasm, /*funcva=*/0x401000, /*target_va=*/0x401007, ZYDIS_REGISTER_R12);
+    CHECK_FALSE(value.has_value());
 }
 
 TEST_CASE("emu discovery: find_pointer_candidates surfaces reloc-driven .text pointers") {
@@ -101,7 +122,7 @@ TEST_CASE("emu discovery: find_pointer_candidates surfaces reloc-driven .text po
     // pointers stored at base-relocation sites inside .text (site RVAs 0x925f0 /
     // 0x9539c / 0x95b14). A data-only pointer scan never reads .text, so it
     // misses them and the island stays unrecovered. The reloc-driven,
-    // section-agnostic scan must surface their targets as candidates.
+    // section-agnostic scan must surface their targets as candidates
     const auto is_candidate = [&](std::uint64_t va) {
         return std::binary_search(cands.begin(), cands.end(), va);
     };
@@ -113,7 +134,7 @@ TEST_CASE("emu discovery: find_pointer_candidates surfaces reloc-driven .text po
 TEST_CASE("emu discovery: riprel_lea_target computes the lea [rip+disp] pointer") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
     // lea rdx, [rip + 0xFF8]  (48 8D 15 F8 0F 00 00), length 7.
-    // target = va + length + disp.
+    // target = va + length + disp
     const std::array<std::byte, 7> bytes{
         std::byte{0x48}, std::byte{0x8D}, std::byte{0x15},
         std::byte{0xF8}, std::byte{0x0F}, std::byte{0x00}, std::byte{0x00}};
@@ -126,7 +147,7 @@ TEST_CASE("emu discovery: riprel_lea_target computes the lea [rip+disp] pointer"
 
 TEST_CASE("emu discovery: riprel_lea_target ignores a non-lea rip-relative load") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
-    // mov rdx, [rip + 0xFF8]  (48 8B 15 ...): a dereference, not an address.
+    // mov rdx, [rip + 0xFF8]  (48 8B 15 ...): a dereference, not an address
     const std::array<std::byte, 7> bytes{
         std::byte{0x48}, std::byte{0x8B}, std::byte{0x15},
         std::byte{0xF8}, std::byte{0x0F}, std::byte{0x00}, std::byte{0x00}};
@@ -137,7 +158,7 @@ TEST_CASE("emu discovery: riprel_lea_target ignores a non-lea rip-relative load"
 
 TEST_CASE("emu discovery: riprel_lea_target ignores a lea with a register base") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
-    // lea rdx, [rax + 8]  (48 8D 50 08): runtime-dependent, not a static pointer.
+    // lea rdx, [rax + 8]  (48 8D 50 08): runtime-dependent, not a static pointer
     const std::array<std::byte, 4> bytes{
         std::byte{0x48}, std::byte{0x8D}, std::byte{0x50}, std::byte{0x08}};
     auto lea = disasm.decode(bytes, 0x1000);
@@ -164,7 +185,7 @@ namespace {
 // candidate, whether it is already covered by a recovered function, and the
 // outcome of emulating it (executable, has_ret, bad_code, insn_count,
 // looks_good). Diagnoses why a pointer-referenced function is or is not
-// discovered. No-op unless PAPA_DIAG_BIN is set.
+// discovered. No-op unless PAPA_DIAG_BIN is set
 TEST_CASE("diag: emu candidate probe") {
     const std::string bin = papa_tests::detail::read_env("PAPA_DIAG_BIN");
     if (bin.empty()) { return; }
@@ -173,11 +194,12 @@ TEST_CASE("diag: emu candidate probe") {
     auto img = papa::pe::PeParser::parse_file(bin);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto funcs = pn::Cfg::recover(*img, disasm);
-    REQUIRE(funcs.has_value());
+    auto rec = pn::cfg::recover(*img, disasm);
+    REQUIRE(rec.has_value());
+    const auto& funcs = rec->functions;
 
     std::unordered_set<std::uint64_t> covered;
-    for (const auto& f : *funcs) {
+    for (const auto& f : funcs) {
         for (const auto& bb : f.basic_blocks) {
             for (const auto& ins : bb.instructions) { covered.insert(ins.va); }
         }
@@ -216,13 +238,14 @@ TEST_CASE("emu discovery: x64 lea-referenced function is recovered (certutil adl
     auto img = papa::pe::PeParser::parse_file(path);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto funcs = pn::Cfg::recover(*img, disasm);
-    REQUIRE(funcs.has_value());
+    auto rec = pn::cfg::recover(*img, disasm);
+    REQUIRE(rec.has_value());
+    const auto& funcs = rec->functions;
     // adler32 at 0x140109160 is referenced only by `lea rdx, [rip + ...]` at
     // 0x140108161 and is absent from .pdata and the relocations. The amd64
-    // code-derived REF_PTR (lea-target) emucode candidate source recovers it.
+    // code-derived REF_PTR (lea-target) emucode candidate source recovers it
     const bool recovered = std::any_of(
-        funcs->begin(), funcs->end(),
+        funcs.begin(), funcs.end(),
         [](const pn::Function& f) { return f.va == 0x140109160ULL; });
     CHECK(recovered);
 }
@@ -240,14 +263,15 @@ TEST_CASE("diag: emu looks_good rate over recovered functions") {
     auto img = papa::pe::PeParser::parse_file(bin);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto funcs = pn::Cfg::recover(*img, disasm);
-    REQUIRE(funcs.has_value());
+    auto rec = pn::cfg::recover(*img, disasm);
+    REQUIRE(rec.has_value());
+    const auto& funcs = rec->functions;
 
     const emu::ImageMaps maps = emu::build_image_maps(*img);
 
     std::size_t good = 0;
     std::size_t total = 0;
-    for (const pn::Function& f : *funcs) {
+    for (const pn::Function& f : funcs) {
         if (f.basic_blocks.empty()) { continue; }
         ++total;
         if (emu::validate_candidate(maps, disasm, f.va)) {
@@ -275,12 +299,13 @@ TEST_CASE("diag: emu pointer-candidate discovery yield") {
     auto img = papa::pe::PeParser::parse_file(bin);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto funcs = pn::Cfg::recover(*img, disasm);
-    REQUIRE(funcs.has_value());
+    auto rec = pn::cfg::recover(*img, disasm);
+    REQUIRE(rec.has_value());
+    const auto& funcs = rec->functions;
 
-    // Every VA already attributed to a recovered function.
+    // Every VA already attributed to a recovered function
     std::unordered_set<std::uint64_t> covered;
-    for (const pn::Function& f : *funcs) {
+    for (const pn::Function& f : funcs) {
         for (const pn::BasicBlock& bb : f.basic_blocks) {
             for (const pn::DecodedInsn& ins : bb.instructions) {
                 covered.insert(ins.va);
@@ -318,14 +343,15 @@ TEST_CASE("diag: emu unsupported-opcode histogram") {
     auto img = papa::pe::PeParser::parse_file(bin);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto funcs = pn::Cfg::recover(*img, disasm);
-    REQUIRE(funcs.has_value());
+    auto rec = pn::cfg::recover(*img, disasm);
+    REQUIRE(rec.has_value());
+    const auto& funcs = rec->functions;
 
     emu::IntelEmulator scratch;
     std::unordered_map<std::string, std::size_t> unsupported;
     std::size_t insns = 0;
     std::size_t unsupported_total = 0;
-    for (const pn::Function& f : *funcs) {
+    for (const pn::Function& f : funcs) {
         for (const pn::BasicBlock& bb : f.basic_blocks) {
             for (const pn::DecodedInsn& ins : bb.instructions) {
                 ++insns;

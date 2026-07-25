@@ -4,7 +4,7 @@ namespace papa::features::extractors::papa_native::emu {
 
 namespace {
 
-// 2^width - 1 as a 64-bit mask (width in bits, capped at 64).
+// 2^width - 1 as a 64-bit mask (width in bits, capped at 64)
 [[nodiscard]] std::uint64_t width_mask(std::uint32_t width_bits) noexcept {
     if (width_bits >= 64U) {
         return 0xFFFFFFFFFFFFFFFFULL;
@@ -16,7 +16,7 @@ namespace {
 // offset 0 (width 32 in bits 16..23, offset 0 in bits 24..31). In amd64 mode,
 // writing such a lane (eax, r8d, ...) zero-extends into the full parent
 // register, so it is redirected to a write of the whole real register
-// (envi/archs/amd64/regs.py Amd64RegisterContext.setRegister).
+// (envi/archs/amd64/regs.py Amd64RegisterContext.setRegister)
 constexpr std::uint32_t kRMetaLow32 = 0x00200000U;
 
 }  // namespace
@@ -48,7 +48,7 @@ std::uint64_t RegisterFile::get_register(std::uint32_t index) const noexcept {
 
 void RegisterFile::set_register(std::uint32_t index, std::uint64_t value) noexcept {
     // amd64 RMETA_LOW32 override: a 32-bit-low lane (eax, r8d, ...) writes the
-    // whole real register, zero-extending the value into the upper bits.
+    // whole real register, zero-extending the value into the upper bits
     if (low32_zx_ && (index & 0xFFFF0000U) == kRMetaLow32) {
         index &= 0xFFFFU;
     }
@@ -59,7 +59,7 @@ void RegisterFile::set_register(std::uint32_t index, std::uint64_t value) noexce
     }
     if (ridx != index) {
         // Meta-register lane: splice the new bits in, preserve the rest
-        // (_xlateToNativeReg). 8/16-bit lanes thus keep the upper bits.
+        // (_xlateToNativeReg). 8/16-bit lanes thus keep the upper bits
         const std::uint32_t offset = (index >> 24) & 0xFFU;
         const std::uint32_t width  = (index >> 16) & 0xFFU;
         const std::uint64_t lane_mask = width_mask(width) << offset;

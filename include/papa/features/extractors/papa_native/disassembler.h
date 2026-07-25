@@ -39,7 +39,7 @@ struct DecodedOperand {
     std::size_t   width_bytes   { 0 };
     // True when this memory operand was encoded with a SIB byte. vivisect splits
     // these into i386SibOper, where (unlike i386RegMemOper) a lea displacement is
-    // not surfaced as a number. Meaningful only for memory operands.
+    // not surfaced as a number. Meaningful only for memory operands
     bool          sib_encoded   { false };
 };
 
@@ -79,7 +79,7 @@ public:
     // Pure CAPA-compatible per-operand classification. has_sib is the
     // instruction's ZYDIS_ATTRIB_HAS_SIB flag and decides whether a memory
     // operand with no base or index is a SIB-encoded absolute (vivisect
-    // i386SibOper, kSib) or a direct absolute (vivisect i386ImmMemOper, kImmMem).
+    // i386SibOper, kSib) or a direct absolute (vivisect i386ImmMemOper, kImmMem)
     [[nodiscard]] static OperandKind
         classify(const ZydisDecodedOperand& op, ZydisMachineMode mode,
                  bool has_sib) noexcept;

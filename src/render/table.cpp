@@ -12,7 +12,7 @@ namespace {
 
 // SQUARE box glyphs as raw UTF-8 bytes so the source stays ASCII-only.
 // These are the same characters rich substitutes for its HEAVY_HEAD default
-// box on Windows, which is what capa.exe emits.
+// box on Windows, which is what capa.exe emits
 constexpr std::string_view kHorizontal = "\xE2\x94\x80";  // U+2500
 constexpr std::string_view kVertical   = "\xE2\x94\x82";  // U+2502
 constexpr std::string_view kTopLeft    = "\xE2\x94\x8C";  // U+250C
@@ -26,19 +26,19 @@ constexpr std::string_view kBotCross   = "\xE2\x94\xB4";  // U+2534
 constexpr std::string_view kBotRight   = "\xE2\x94\x98";  // U+2518
 constexpr std::string_view kEllipsis   = "\xE2\x80\xA6";  // U+2026
 
-// ANSI SGR escapes for capa's cyan styling (rich's [cyan] markup).
+// ANSI SGR escapes for capa's cyan styling (rich's [cyan] markup)
 constexpr std::string_view kCyanOn  = "\x1b[36m";
 constexpr std::string_view kReset   = "\x1b[0m";
 
-// Horizontal padding rich applies inside every cell, one space each side.
+// Horizontal padding rich applies inside every cell, one space each side
 constexpr int kCellPadding = 2;
 
-// Whitespace per Python's regex \s for the ASCII text capa renders.
+// Whitespace per Python's regex \s for the ASCII text capa renders
 [[nodiscard]] bool is_space(char c) noexcept {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-// Cell length in terminal columns, which equals the byte count for ASCII text.
+// Cell length in terminal columns, which equals the byte count for ASCII text
 [[nodiscard]] int cell_len(std::string_view s) noexcept {
     return static_cast<int>(s.size());
 }
@@ -49,14 +49,14 @@ constexpr int kCellPadding = 2;
     return total;
 }
 
-// The plain text of a cell, used for all width and wrap calculations.
+// The plain text of a cell, used for all width and wrap calculations
 [[nodiscard]] std::string cell_plain(const Cell& cell) {
     std::string out;
     for (const Run& run : cell.runs) { out.append(run.text); }
     return out;
 }
 
-// The style of each character of a cell's plain text, parallel to cell_plain.
+// The style of each character of a cell's plain text, parallel to cell_plain
 [[nodiscard]] std::vector<Style> cell_styles(const Cell& cell) {
     std::vector<Style> out;
     for (const Run& run : cell.runs) {
@@ -65,7 +65,7 @@ constexpr int kCellPadding = 2;
     return out;
 }
 
-// Length of the longest newline-delimited line, which is rich's max measurement.
+// Length of the longest newline-delimited line, which is rich's max measurement
 [[nodiscard]] int longest_line(std::string_view cell) noexcept {
     int best = 0;
     std::size_t start = 0;
@@ -80,7 +80,7 @@ constexpr int kCellPadding = 2;
 }
 
 // Round num/den to the nearest integer with ties to even, as Python's round does.
-// Both arguments are non-negative and den is positive at every call site.
+// Both arguments are non-negative and den is positive at every call site
 [[nodiscard]] long long round_half_even(long long num, long long den) noexcept {
     const long long quotient = num / den;
     const long long twice_remainder = 2 * (num % den);
@@ -89,12 +89,12 @@ constexpr int kCellPadding = 2;
     return (quotient % 2 == 0) ? quotient : quotient + 1;
 }
 
-// Smallest integer not less than num/den for non-negative num and positive den.
+// Smallest integer not less than num/den for non-negative num and positive den
 [[nodiscard]] long long ceil_div(long long num, long long den) noexcept {
     return (num + den - 1) / den;
 }
 
-// Coalesce per-character styles over [begin, end) of plain into styled runs.
+// Coalesce per-character styles over [begin, end) of plain into styled runs
 [[nodiscard]] std::vector<Run> runs_from(const std::string& plain,
                                          const std::vector<Style>& styles,
                                          std::size_t begin, std::size_t end) {
@@ -109,20 +109,20 @@ constexpr int kCellPadding = 2;
     return out;
 }
 
-// One whitespace-delimited word with the offset where it begins in the source.
+// One whitespace-delimited word with the offset where it begins in the source
 struct Word {
     int         start;
     std::string text;
 };
 
-// Drop trailing whitespace, matching rich's per-line rstrip before padding.
+// Drop trailing whitespace, matching rich's per-line rstrip before padding
 [[nodiscard]] std::string rstrip(std::string_view s) {
     std::size_t end = s.size();
     while (end > 0 && is_space(s[end - 1])) { --end; }
     return std::string(s.substr(0, end));
 }
 
-// Split text into rich's words: each is one run of non-space plus trailing space.
+// Split text into rich's words: each is one run of non-space plus trailing space
 [[nodiscard]] std::vector<Word> words(const std::string& s) {
     std::vector<Word> out;
     const int n = static_cast<int>(s.size());
@@ -141,7 +141,7 @@ struct Word {
 
 // Build a styled line of exactly width cells from [begin, end) of one wrapped
 // piece: trailing whitespace is dropped, then the line is ellipsis-truncated if
-// it overflows or right-padded with spaces if it is short.
+// it overflows or right-padded with spaces if it is short
 [[nodiscard]] std::vector<Run> make_line(const std::string& plain,
                                          const std::vector<Style>& styles,
                                          std::size_t begin, std::size_t end, int width) {
@@ -163,7 +163,7 @@ struct Word {
 
 // Wrap a cell to width columns, returning styled lines each width cells wide.
 // A token longer than width is truncated with an ellipsis, matching rich's
-// default "ellipsis" overflow rather than folding.
+// default "ellipsis" overflow rather than folding
 [[nodiscard]] std::vector<std::vector<Run>> wrap_cell(const Cell& cell, int width) {
     const std::string plain = cell_plain(cell);
     const std::vector<Style> styles = cell_styles(cell);
@@ -191,7 +191,7 @@ struct Word {
     return out;
 }
 
-// Build one horizontal box rule spanning the column widths.
+// Build one horizontal box rule spanning the column widths
 [[nodiscard]] std::string border(const std::vector<int>& widths,
                                  std::string_view left, std::string_view cross,
                                  std::string_view right) {
@@ -205,7 +205,7 @@ struct Word {
     return s;
 }
 
-// Emit one styled line, wrapping cyan runs in ANSI escapes when color is set.
+// Emit one styled line, wrapping cyan runs in ANSI escapes when color is set
 void emit_runs(std::string& out, const std::vector<Run>& runs, bool color) {
     for (const Run& run : runs) {
         if (color && run.style == Style::kCyan) {
@@ -218,7 +218,7 @@ void emit_runs(std::string& out, const std::vector<Run>& runs, bool color) {
     }
 }
 
-// Emit one logical row, wrapping cells and padding short cells with blank lines.
+// Emit one logical row, wrapping cells and padding short cells with blank lines
 void emit_row(std::string& out, const std::vector<Cell>& cells,
               const std::vector<int>& widths, bool color) {
     const std::size_t ncols = widths.size();
@@ -305,7 +305,7 @@ std::vector<int> divide_line(const std::string& text, int width) {
         if (remaining >= word_length) {
             cell_offset += cell_len(w.text);
         } else if (word_length > width) {
-            // Folding is disabled, so the over-long word stays put to be truncated.
+            // Folding is disabled, so the over-long word stays put to be truncated
             if (w.start != 0) { breaks.push_back(w.start); }
             cell_offset = cell_len(w.text);
         } else if (cell_offset != 0 && w.start != 0) {
@@ -321,7 +321,7 @@ std::vector<int> compute_column_widths(const Table& table, int available_width) 
     const int extra_width = 2 + static_cast<int>(ncols) - 1;
     const int max_width = available_width - extra_width;
 
-    // Natural width of each column is its widest line plus padding.
+    // Natural width of each column is its widest line plus padding
     std::vector<int> widths(ncols);
     for (std::size_t c = 0; c < ncols; ++c) {
         int measured = 0;
@@ -337,7 +337,7 @@ std::vector<int> compute_column_widths(const Table& table, int available_width) 
     int table_width = sum(widths);
     if (table_width > max_width) {
         // Over budget: shrink the widest columns, then re-measuring is a no-op
-        // because every width is now at most its natural maximum.
+        // because every width is now at most its natural maximum
         int total = table_width;
         int excess = total - max_width;
         while (total > 0 && excess > 0) {

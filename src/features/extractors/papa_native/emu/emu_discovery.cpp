@@ -6,22 +6,23 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 namespace papa::features::extractors::papa_native::emu {
 
 namespace {
 
-// PE section characteristics bits (winnt.h IMAGE_SCN_MEM_*).
+// PE section characteristics bits (winnt.h IMAGE_SCN_MEM_*)
 constexpr std::uint32_t kScnMemExecute = 0x20000000U;
 constexpr std::uint32_t kScnMemRead = 0x40000000U;
 constexpr std::uint32_t kScnMemWrite = 0x80000000U;
 
-// Base-relocation types that store an absolute pointer the loader fixes up.
+// Base-relocation types that store an absolute pointer the loader fixes up
 constexpr std::uint16_t kRelBasedHighLow = 3;   // IMAGE_REL_BASED_HIGHLOW (32-bit)
 constexpr std::uint16_t kRelBasedDir64 = 10;    // IMAGE_REL_BASED_DIR64 (64-bit)
 
-// Assemble a little-endian unsigned value of the given width from a byte span.
+// Assemble a little-endian unsigned value of the given width from a byte span
 [[nodiscard]] std::uint64_t read_le_uint(std::span<const std::byte> b,
                                          std::size_t width) noexcept {
     std::uint64_t v = 0;
@@ -70,7 +71,7 @@ ImageMaps build_image_maps(const pe::PeImage& image) {
 }
 
 std::vector<std::uint64_t> find_pointer_candidates(const pe::PeImage& image) {
-    // Executable VA ranges the candidate pointer values must target.
+    // Executable VA ranges the candidate pointer values must target
     std::vector<std::pair<std::uint64_t, std::uint64_t>> exec_ranges;
     for (const pe::ParsedSection& s : image.sections()) {
         if ((s.characteristics & kScnMemExecute) != 0) {
@@ -94,7 +95,7 @@ std::vector<std::uint64_t> find_pointer_candidates(const pe::PeImage& image) {
     // relocation marks a stored pointer to follow. The site can live anywhere,
     // including .text, which is where callback/vtable/island-entry pointers sit
     // and where the data-only scan never looks. Read the pointer at each site
-    // and keep the values that target executable code.
+    // and keep the values that target executable code
     const std::size_t ptr_size = image.is_64bit() ? 8U : 4U;
     for (const pe::ParsedRelocation& r : image.relocations()) {
         std::size_t width = 0;
@@ -118,7 +119,7 @@ std::vector<std::uint64_t> find_pointer_candidates(const pe::PeImage& image) {
     // findPointers free-hanging scan (vivisect generic findPointers): aligned
     // slots in initialized data whose value points into code. The reloc scan is
     // authoritative for relocated binaries, but this also catches pointers in
-    // images without a populated relocation table.
+    // images without a populated relocation table
     for (const pe::ParsedSection& s : image.sections()) {
         if ((s.characteristics & kScnMemRead) == 0 ||
             (s.characteristics & kScnMemExecute) != 0) {
@@ -150,7 +151,7 @@ std::optional<std::uint64_t> riprel_lea_target(const DecodedInsn& insn) noexcept
         const DecodedOperand& op = insn.operands[i];
         if (op.kind == OperandKind::kRipRel) {
             // RIP addresses the next instruction, so the computed absolute is
-            // va + length + disp (disp is signed).
+            // va + length + disp (disp is signed)
             return insn.va + insn.length +
                    static_cast<std::uint64_t>(op.disp);
         }
@@ -164,7 +165,7 @@ bool validate_candidate(const ImageMaps& maps, const Disassembler& disasm,
     for (std::size_t i = 0; i < maps.entries.size(); ++i) {
         we.add_map(maps.entries[i].base, maps.entries[i].perms, maps.bytes[i]);
     }
-    // emucode only emulates executable candidates.
+    // emucode only emulates executable candidates
     if (!we.emu().memory().probe(va, 1, kMemExec)) {
         return false;
     }
@@ -176,7 +177,7 @@ bool validate_candidate(const ImageMaps& maps, const Disassembler& disasm,
 
 void AnalysisMonitor::apicall(WorkspaceEmulator& emu, const DecodedInsn& op,
                               std::uint64_t pc) {
-    // vivisect AnalysisMonitor.apicall discovery tail (impemu/monitor.py).
+    // vivisect AnalysisMonitor.apicall discovery tail (impemu/monitor.py)
     if (pc == funcva_) {
         return;  // recursive self-call
     }
@@ -185,7 +186,7 @@ void AnalysisMonitor::apicall(WorkspaceEmulator& emu, const DecodedInsn& op,
     }
     // Only concrete executable targets are functions. A taint sentinel sits in
     // the reserved high band and is not in any mapped section, so the exec probe
-    // also rejects unresolved indirect calls.
+    // also rejects unresolved indirect calls
     if (!emu.emu().memory().probe(pc, 1, kMemExec)) {
         return;
     }
@@ -212,6 +213,45 @@ std::vector<std::uint64_t> discover_call_targets(const ImageMaps& maps,
     AnalysisMonitor monitor(va);
     we.run_function(va, &monitor, /*maxhit=*/1);
     return monitor.seeds();
+}
+
+std::optional<std::uint64_t>
+emulate_to_read_register(const ImageMaps& maps, const Disassembler& disasm,
+                         std::uint64_t funcva, std::uint64_t target_va,
+                         ZydisRegister reg) {
+    WorkspaceEmulator we(disasm);
+    for (std::size_t i = 0; i < maps.entries.size(); ++i) {
+        we.add_map(maps.entries[i].base, maps.entries[i].perms, maps.bytes[i]);
+    }
+    if (!we.emu().memory().probe(funcva, 1, kMemExec)) {
+        return std::nullopt;
+    }
+    we.prepare(funcva);
+
+    // Stop the run the first time execution reaches target_va and capture reg
+    class RegAtTarget final : public EmulationMonitor {
+    public:
+        RegAtTarget(std::uint64_t target, ZydisRegister reg) noexcept
+            : target_(target), reg_(reg) {}
+        void prehook(WorkspaceEmulator& emu, const DecodedInsn& /*insn*/,
+                     std::uint64_t eip) override {
+            if (!value_.has_value() && eip == target_) {
+                value_ = emu.emu().register_value(reg_);
+                emu.stop_emu();
+            }
+        }
+        [[nodiscard]] std::optional<std::uint64_t> value() const noexcept {
+            return value_;
+        }
+
+    private:
+        std::uint64_t                target_;
+        ZydisRegister                reg_;
+        std::optional<std::uint64_t> value_;
+    } monitor(target_va, reg);
+
+    we.run_function(funcva, &monitor, /*maxhit=*/1);
+    return monitor.value();
 }
 
 }  // namespace papa::features::extractors::papa_native::emu

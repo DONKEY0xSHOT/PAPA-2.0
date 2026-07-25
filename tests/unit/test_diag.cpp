@@ -209,7 +209,7 @@ namespace {
 //   sha256 0cac3d17c4f4b83ad936cead2a7e79efcc2e0e39ee030a84477af95cffc2bc84
 // These imports are reached through an indirect memory thunk (jmp [rip+slot])
 // and through a register loaded from the IAT in an earlier basic block. Before
-// the fixes papa resolved neither, dropping api features capa relies on.
+// the fixes papa resolved neither, dropping api features capa relies on
 TEST_CASE("api: chrome resolves thunked and register-indirect imports") {
     const auto chrome = papa_tests::fixture_path("chrome.exe");
     if (!papa_tests::fixture_available(chrome)) {
@@ -223,7 +223,7 @@ TEST_CASE("api: chrome resolves thunked and register-indirect imports") {
 
     // jmp [rip+slot] import thunks. MiniDumpWriteDump is called at 0x140213915,
     // which the pdata boundary places in the function entered at 0x1402136b0 (the
-    // function at 0x140213540 ends at the int3 padding before it).
+    // function at 0x140213540 ends at the int3 padding before it)
     CHECK(function_emits_api(*backend, 0x1400630c0ULL, "GetFileVersionInfo"));
     CHECK(function_emits_api(*backend, 0x1402136b0ULL, "MiniDumpWriteDump"));
     // register loaded from the IAT in an earlier block
@@ -237,7 +237,7 @@ namespace fl = papa::features::extractors::papa_native::flirt;
 // Walks a FLIRT tree and, for every node whose pattern and a leaf module's CRC
 // match function_bytes, prints that module's public name plus each tail byte's
 // expected and actual value and each reference. Reveals why a candidate the CRC
-// accepts is then rejected by the tail-byte or reference stage.
+// accepts is then rejected by the tail-byte or reference stage
 void dump_flirt_node(const fl::FlirtNode& node, std::span<const std::uint8_t> fb) {
     if (!node.pattern.matches(fb)) { return; }
     for (const fl::FlirtModule& m : node.leaf_modules) {
@@ -259,7 +259,7 @@ void dump_flirt_node(const fl::FlirtNode& node, std::span<const std::uint8_t> fb
         }
         for (const auto& tb : m.tail_bytes) {
             // The tail-byte offset is relative to the end of the pattern+CRC
-            // region, matching python-flirt's buf[byte_sig_size + crc_len + off].
+            // region, matching python-flirt's buf[byte_sig_size + crc_len + off]
             const std::size_t pos = 32U + m.tail_length + tb.offset;
             const bool in = pos < fb.size();
             std::printf("    tb off=%u pos=%zu exp=%02x act=%02x %s\n", tb.offset, pos,
@@ -279,7 +279,7 @@ void dump_flirt_node(const fl::FlirtNode& node, std::span<const std::uint8_t> fb
 }  // namespace
 
 // PAPA_FLIRT_BIN=<path> PAPA_FLIRT_VAS=<hex,hex> dumps the FLIRT candidates for
-// each VA. No-op without the env var.
+// each VA. No-op without the env var
 TEST_CASE("diag: flirt match attempt") {
     const std::string bin = papa_tests::detail::read_env("PAPA_FLIRT_BIN");
     if (bin.empty()) { return; }

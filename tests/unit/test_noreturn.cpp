@@ -11,7 +11,7 @@ namespace pn = papa::features::extractors::papa_native;
 
 namespace {
 
-// Build a terminator instruction with the branch-class flags noret cares about.
+// Build a terminator instruction with the branch-class flags noret cares about
 pn::DecodedInsn term(std::uint64_t va, bool is_call, bool is_jump,
                      bool is_cond, bool is_ret) {
     pn::DecodedInsn ins;
@@ -30,7 +30,7 @@ pn::BasicBlock leaf(std::uint64_t va, const pn::DecodedInsn& terminator) {
     return bb;
 }
 
-// An oracle that treats every call as no-return, for the leaf-scan tests.
+// An oracle that treats every call as no-return, for the leaf-scan tests
 const pn::NoReturnOracle kAllCallsNoReturn =
     [](const pn::DecodedInsn& ins) { return ins.is_call; };
 
@@ -38,7 +38,7 @@ const pn::NoReturnOracle kAllCallsNoReturn =
 
 // norm_file_name is a faithful port of vivisect's normFileName: basename,
 // lowercase, strip the final extension (joining any earlier dotted parts with
-// '_'), then replace every character outside [a-z0-9_] with '_'.
+// '_'), then replace every character outside [a-z0-9_] with '_'
 TEST_CASE("norm_file_name lowercases and strips the extension") {
     CHECK(pn::norm_file_name("kernel32.dll") == "kernel32");
     CHECK(pn::norm_file_name("KERNEL32.DLL") == "kernel32");
@@ -48,7 +48,7 @@ TEST_CASE("norm_file_name lowercases and strips the extension") {
 
 TEST_CASE("norm_file_name replaces non-alphanumeric characters with underscore") {
     // The api-ms-win CRT forwarder DLLs are the reason this matters: the
-    // dashes become underscores so the no-return regexes match.
+    // dashes become underscores so the no-return regexes match
     CHECK(pn::norm_file_name("api-ms-win-crt-runtime-l1-1-0.dll") ==
           "api_ms_win_crt_runtime_l1_1_0");
 }
@@ -95,7 +95,18 @@ TEST_CASE("is_noreturn_api rejects ordinary and near-miss APIs") {
 
 // function_is_noreturn ports vivisect noret.py analyzeFunction's leaf scan: a
 // function does not return when none of its terminal blocks ends in a ret or a
-// dynamic branch, where a leaf ending in a no-return call does not count.
+// dynamic branch, where a leaf ending in a no-return call does not count
+TEST_CASE("function_is_noreturn: a function with no blocks is not no-return") {
+    // vivisect noret.py bails when buildFunctionGraph throws (an empty or
+    // graph-build-failed function), returning without addNoReturnVa. A FLIRT
+    // overlap can leave an enclosing function with zero blocks, and it must not
+    // be treated as no-return, or a caller's fall-through after the call would be
+    // wrongly suppressed
+    pn::Function fn;
+    fn.va = 0x1000;  // no basic blocks
+    CHECK_FALSE(pn::function_is_noreturn(fn, kAllCallsNoReturn));
+}
+
 TEST_CASE("function_is_noreturn: a returning leaf means the function returns") {
     pn::Function fn;
     fn.va = 0x1000;
@@ -156,7 +167,7 @@ TEST_CASE("function_is_noreturn: an ordinary (returning) call leaf does not "
           "by itself prove no-return but yields no ret either") {
     // A leaf ending in a call the oracle does not flag contributes no ret and
     // no branch, mirroring noret.py where a bare call is neither IF_RET nor
-    // IF_BRANCH. With no returning leaf anywhere, the function is no-return.
+    // IF_BRANCH. With no returning leaf anywhere, the function is no-return
     pn::Function fn;
     fn.va = 0x6000;
     pn::NoReturnOracle never = [](const pn::DecodedInsn&) { return false; };

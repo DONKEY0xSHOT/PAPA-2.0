@@ -111,7 +111,7 @@ Expected<FlirtHeader> parse_header(std::span<const std::uint8_t> data) noexcept 
 
 namespace {
 
-// Trailing parsing-flags byte after each module. Bits drive the leaf loops.
+// Trailing parsing-flags byte after each module. Bits drive the leaf loops
 constexpr std::uint8_t kMorePublicNames        = 0x01;
 constexpr std::uint8_t kTailBytes              = 0x02;
 constexpr std::uint8_t kReferencedFunctions    = 0x04;
@@ -119,17 +119,17 @@ constexpr std::uint8_t kMoreModulesWithSameCrc = 0x08;
 constexpr std::uint8_t kMoreModules            = 0x10;
 
 // A name's bytes are all >= 0x20. A byte below that, when peeked before the
-// name characters, is an optional per-name flag byte rather than text.
+// name characters, is an optional per-name flag byte rather than text
 constexpr std::uint8_t kNameTextFloor          = 0x20;
 
 // Per-name flag-byte bits (the optional control byte that precedes a name).
-// LOCAL marks a local rather than public symbol; NEGATIVE_OFFSET makes the
-// delta subtract from the running offset instead of adding.
+// LOCAL marks a local rather than public symbol. NEGATIVE_OFFSET makes the
+// delta subtract from the running offset instead of adding
 constexpr std::uint8_t kNameLocal              = 0x02;
 constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 
 // FLAIR's vword. Counts and offsets are vint16 before v9 and vint32 from v9
-// on. The result rides in a u32 either way.
+// on. The result rides in a u32 either way
 [[nodiscard]] bool read_word(ByteCursor& cur, std::uint8_t version,
                              std::uint32_t& out) noexcept {
     if (version < 9U) {
@@ -147,7 +147,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 // width follows the segment length: a 2-byte vint below 0x10, otherwise a
 // 4-byte vint. Segments longer than kMaxPatternLength (0x20) are rejected by
 // parse_node before this runs, so FLAIR's wider 8-byte tier for lengths above
-// 0x20 is intentionally not implemented.
+// 0x20 is intentionally not implemented
 [[nodiscard]] bool read_variant_mask(ByteCursor& cur, std::uint16_t length,
                                      std::uint64_t& out) noexcept {
     if (length == 0U) {
@@ -175,7 +175,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 // floor), then the name text up to the trailing parsing-flags byte. Offsets are
 // delta-encoded: each name's absolute, function-relative offset accumulates the
 // running base, subtracting when NEGATIVE_OFFSET is set. Returns the trailing
-// parsing-flags byte that follows the final name.
+// parsing-flags byte that follows the final name
 [[nodiscard]] Expected<std::uint8_t> parse_module_names(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtName>& out) noexcept {
     std::uint8_t flags = 0;
@@ -191,7 +191,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
             return Unexpected{make_error(ErrorKind::kFlirtTruncated, "name lead")};
         }
         // A control byte here is the per-name flag byte. Real text starts at
-        // the next byte. Otherwise the byte just read is the first character.
+        // the next byte. Otherwise the byte just read is the first character
         std::uint8_t name_flags = 0;
         if (peek < kNameTextFloor) {
             name_flags = peek;
@@ -200,7 +200,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
             }
         }
         // Consume the name. Characters run until a control byte, which is the
-        // trailing parsing-flags byte and is left consumed in `peek`.
+        // trailing parsing-flags byte and is left consumed in `peek`
         std::string name;
         while (peek >= kNameTextFloor) {
             name.push_back(static_cast<char>(peek));
@@ -236,7 +236,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 // Parses the tail-byte records that may follow a module's names into `out`.
 // Each is an offset relative to the end of the pattern and CRC region (the
 // matcher adds that base, per python-flirt) plus one byte value. The count is
-// implicit (one) before v8.
+// implicit (one) before v8
 [[nodiscard]] Expected<bool> parse_tail_bytes(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtTailByte>& out) noexcept {
     std::uint32_t count = 1;
@@ -261,7 +261,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 
 // Parses referenced-function records into `out`. Each is an absolute,
 // function-relative offset plus a size byte and that many name characters. A
-// zero size byte means the real size is a following vint16.
+// zero size byte means the real size is a following vint16
 [[nodiscard]] Expected<bool> parse_referenced_functions(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtReference>& out) noexcept {
     std::uint32_t count = 1;
@@ -307,7 +307,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 // Parses the module records of a leaf node into `out`. The tail CRC16, tail
 // length, function size, names, tail bytes, and referenced functions are all
 // retained so the matcher and the library classifier can apply capa's full,
-// reference-gated decision.
+// reference-gated decision
 [[nodiscard]] Expected<bool> parse_leaf_modules(
     ByteCursor& cur, std::uint8_t version,
     std::vector<FlirtModule>& out) noexcept {
@@ -317,7 +317,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
         if (!cur.read_u8(crc_len)) {
             return Unexpected{make_error(ErrorKind::kFlirtTruncated, "crc length")};
         }
-        // The module CRC16 is stored most-significant byte first on disk.
+        // The module CRC16 is stored most-significant byte first on disk
         std::uint8_t crc_hi = 0;
         std::uint8_t crc_lo = 0;
         if (!cur.read_u8(crc_hi) || !cur.read_u8(crc_lo)) {
@@ -373,7 +373,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 
 // Recursively parses a tree node. A child count of zero turns the current
 // node into a leaf carrying module records. Otherwise each child contributes
-// a pattern segment appended to the inherited prefix, then recurses.
+// a pattern segment appended to the inherited prefix, then recurses
 [[nodiscard]] Expected<bool> parse_node(
     ByteCursor& cur, std::uint8_t version, FlirtNode& node,
     const FlirtPattern& prefix, std::size_t depth) noexcept {
@@ -387,7 +387,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     }
 
     // Every node carries its accumulated pattern so the matcher can prune by
-    // prefix while descending. Leaves additionally hold the module records.
+    // prefix while descending. Leaves additionally hold the module records
     node.pattern = prefix;
     if (child_count == 0U) {
         return parse_leaf_modules(cur, version, node.leaf_modules);
@@ -419,7 +419,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 
         // The variant mask marks wildcard positions. Mask bit (length-1-p)
         // governs segment position p, matching the FLAIR layout. Literal bytes
-        // cover the non-wildcard positions in file order.
+        // cover the non-wildcard positions in file order
         std::size_t literal_count = 0;
         for (std::uint16_t bit = 0; bit < length; ++bit) {
             if ((mask & (std::uint64_t{1} << bit)) == 0U) {

@@ -26,7 +26,7 @@ namespace pn = papa::features::extractors::papa_native;
 // pure unit test over synthetic sigs could not catch it. The addresses below
 // are library-function starts in
 //   chrome.exe sha256 0cac3d17c4f4b83ad936cead2a7e79efcc2e0e39ee030a84477af95cffc2bc84
-// the same functions vivisect plus FLIRT mark as library in capa.
+// the same functions vivisect plus FLIRT mark as library in capa
 TEST_CASE("flirt: embedded signatures classify real library functions") {
     const auto chrome = papa_tests::fixture_path("chrome.exe");
     if (!papa_tests::fixture_available(chrome)) {
@@ -54,12 +54,12 @@ TEST_CASE("flirt: embedded signatures classify real library functions") {
 
 // Per-signature priming resolves a collision the aggregated match cannot.
 // certutil's mainCRTStartup at 0x14011a9d0 shares the bare 14-byte
-// `sub rsp,28; call; add rsp,28; jmp` prologue with the reference-free ?AfxAbort
+// `sub rsp,28 / call / add rsp,28 / jmp` prologue with the reference-free ?AfxAbort
 // signature, which lives in a different tree. Matching all trees at once yields
 // two valid, differently-named candidates, so the function goes unnamed and its
 // api(exit) produces a spurious terminate-process match. Per-tree matching names
 // mainCRTStartup from its earlier tree, marking the function library as capa does
-// and closing the false positive.
+// and closing the false positive
 TEST_CASE("flirt: per-tree priming marks certutil mainCRTStartup library") {
     const auto certutil = papa_tests::fixture_path("corpus/certutil_x64.exe");
     if (!papa_tests::fixture_available(certutil)) {

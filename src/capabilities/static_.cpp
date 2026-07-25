@@ -72,7 +72,7 @@ void inject_match_features(features::FeatureSet&                fs,
 
 }  // namespace
 
-/// Internal find_* overloads that take pre-extracted globals; the public
+/// Internal find_* overloads that take pre-extracted globals. The public
 /// wrappers below extract globals once and forward
 namespace {
 

@@ -14,11 +14,11 @@ namespace pn = papa::features::extractors::papa_native;
 // The operand-access layer bridges Zydis-decoded operands (DecodedOperand) to
 // register/memory state, reproducing envi/archs/i386/disasm.py getOperValue /
 // setOperValue / getOperAddr. It is the foundation every instruction handler
-// builds on. Synthetic DecodedInsns drive the tests so no real PE is needed.
+// builds on. Synthetic DecodedInsns drive the tests so no real PE is needed
 
 namespace {
 
-// Build a one-operand instruction with the given va/length.
+// Build a one-operand instruction with the given va/length
 pn::DecodedInsn make_insn(pn::DecodedOperand op, std::uint64_t va = 0x1000,
                           std::size_t length = 2) {
     pn::DecodedInsn insn;
@@ -65,7 +65,7 @@ TEST_CASE("emu operands: get_oper_value returns an immediate") {
 
 TEST_CASE("emu operands: get_oper_value on a pc-relative operand is the absolute target") {
     // vivisect i386PcRelOper.getOperValue = op.va + op.size + imm. papa already
-    // resolves that into DecodedInsn.branch_target via Zydis.
+    // resolves that into DecodedInsn.branch_target via Zydis
     emu::IntelEmulator e;
     pn::DecodedOperand op;
     op.kind = pn::OperandKind::kPcRel;

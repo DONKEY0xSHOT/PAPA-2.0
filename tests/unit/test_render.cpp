@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 the PAPA authors
-
 #include <ostream>
 
 #include "doctest.h"
@@ -127,10 +124,10 @@ TEST_CASE("render: text default lists capabilities in capa's table format") {
         doc, papa::render::text::Verbosity::kDefault);
     CHECK(out.find("decode-base64") != std::string::npos);
     CHECK(out.find("data-manipulation/encoding/base64") != std::string::npos);
-    // capa shows the bare rule name for a single match, with no count suffix.
+    // capa shows the bare rule name for a single match, with no count suffix
     CHECK(out.find("matches)") == std::string::npos);
     CHECK(out.find("[1 match]") == std::string::npos);
-    // The capabilities and meta tables carry capa's column and field labels.
+    // The capabilities and meta tables carry capa's column and field labels
     CHECK(out.find("Capability") != std::string::npos);
     CHECK(out.find("Namespace") != std::string::npos);
     CHECK(out.find("analysis") != std::string::npos);
@@ -166,14 +163,14 @@ TEST_CASE("render: text hides library rules but JSON keeps them, matching capa")
     doc.rules.emplace("calculate-modulo-256-via-x86-assembly", std::move(library));
 
     // Text report shows the capability but hides the library rule (capa does
-    // not list lib rules among capabilities).
+    // not list lib rules among capabilities)
     const auto text = papa::render::text::render_to_string(
         doc, papa::render::text::Verbosity::kDefault);
     CHECK(text.find("send-data") != std::string::npos);
     CHECK(text.find("calculate-modulo-256-via-x86-assembly") == std::string::npos);
 
     // JSON keeps the library rule (capa's --json includes lib rules), so
-    // schema-consuming tooling sees the same rule set.
+    // schema-consuming tooling sees the same rule set
     const auto js = papa::render::json::render_to_string(doc, /*pretty=*/false);
     CHECK(js.find("calculate-modulo-256-via-x86-assembly") != std::string::npos);
 }
@@ -195,7 +192,7 @@ TEST_CASE("render: json emits capa's meta and match-tree schema") {
     papa::render::ResultDocument doc;
     doc.meta = std::move(meta);
 
-    // The feature must outlive render because MatchNode points into rule memory.
+    // The feature must outlive render because MatchNode points into rule memory
     const papa::features::Api api("CreateFileA");
     const papa::features::Address loc{papa::features::AbsoluteVirtualAddress{0x401000U}};
 
@@ -219,7 +216,7 @@ TEST_CASE("render: json emits capa's meta and match-tree schema") {
 
     const auto js = papa::render::json::render_to_string(doc, /*pretty=*/false);
 
-    // Meta block follows capa's schema and field order.
+    // Meta block follows capa's schema and field order
     CHECK(js.find("\"flavor\":\"static\"") != std::string::npos);
     CHECK(js.find("\"argv\":[\"papa.exe\",\"x.exe\"]") != std::string::npos);
     CHECK(js.find("\"sample\":{\"md5\":\"aa\",\"sha1\":\"bb\",\"sha256\":\"cc\",\"path\":")
@@ -227,7 +224,7 @@ TEST_CASE("render: json emits capa's meta and match-tree schema") {
     CHECK(js.find("\"base_address\":{\"type\":\"absolute\",\"value\":5368709120}")
           != std::string::npos);
 
-    // Match tree uses capa's recursive node model and freeze feature format.
+    // Match tree uses capa's recursive node model and freeze feature format
     CHECK(js.find("\"node\":{\"type\":\"statement\",\"statement\":{\"type\":\"and\"}}")
           != std::string::npos);
     CHECK(js.find("\"node\":{\"type\":\"feature\",\"feature\":{\"type\":\"api\",\"api\":\"CreateFileA\"}}")

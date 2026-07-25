@@ -84,7 +84,7 @@ collect_metadata(std::span<const std::byte>                                 samp
 
 // Link each matched basic block to its function, mirroring capa's
 // compute_static_layout. Only basic blocks where a basic-block-scope rule
-// matched are recorded, and only functions that contain at least one are kept.
+// matched are recorded, and only functions that contain at least one are kept
 [[nodiscard]] std::vector<FunctionMatchLayout>
 compute_static_layout(const rules::RuleSet&                                 rules,
                       const features::extractors::StaticFeatureExtractor&   extractor,

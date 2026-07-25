@@ -39,7 +39,7 @@ bool LibrarySignatureSet::classify_as_library(
     const Function& fn,
     std::span<const std::uint8_t> function_bytes) const noexcept {
     // Thunk check first (O(1) structural), then FLIRT (tree walk). This mirrors
-    // CAPA which suppresses thunks and FLIRT-identified library functions.
+    // CAPA which suppresses thunks and FLIRT-identified library functions
     if (is_thunk(fn)) { return true; }
     return flirt_.classify(function_bytes);
 }

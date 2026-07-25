@@ -11,7 +11,7 @@ namespace flirt = papa::features::extractors::papa_native::flirt;
 
 // FLAIR CRC16: reflected polynomial 0x8408, initial value 0xFFFF, finished
 // with a one's-complement and a byte swap. These vectors are the values FLAIR
-// actually stores in real .sig modules, verified against capa's signatures.
+// actually stores in real .sig modules, verified against capa's signatures
 
 TEST_CASE("flirt_crc16: empty input is zero") {
     CHECK(flirt::flirt_crc16({}) == 0x0000U);

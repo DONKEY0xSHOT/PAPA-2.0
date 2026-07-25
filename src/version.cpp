@@ -7,6 +7,7 @@ namespace papa::version {
 
 namespace {
 
+// Concatenate the product name and version into a fixed buffer at compile time
 constexpr auto kBannerBuffer = [] {
     constexpr auto total_size = kProductName.size() + 1 + kVersionString.size() + 1;
     std::array<char, total_size> buf{};

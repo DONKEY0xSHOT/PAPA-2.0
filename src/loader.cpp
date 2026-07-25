@@ -65,10 +65,9 @@ namespace {
 
 SampleHashes compute_sample_hashes(std::span<const std::byte> data) {
     SampleHashes out;
-    // Three independent passes
-    // The buffers are typically tens of MB so cost is dominated by IO/parsing,
-    // not the hash computation
-    // Three independent passes keep the code simple at no measurable cost
+
+    // Three independent passes. Hashing cost is dominated by IO and parsing,
+    // so a single combined pass would not be measurably faster
     out.md5    = util::hex_digest(util::md5(data));
     out.sha1   = util::hex_digest(util::sha1(data));
     out.sha256 = util::hex_digest(util::sha256(data));
@@ -99,7 +98,7 @@ collect_metadata(std::span<const std::byte>                                 samp
     m.analysis.base_address = image.image_base();
 
     // Library-function names come from FLIRT, which only the concrete extractor
-    // exposes, so callers fill them in afterward. Default to capa's "?" sentinel.
+    // exposes, so callers fill them in afterward. Default to capa's "?" sentinel
     m.analysis.library_functions.reserve(caps.library_functions.size());
     for (const auto& addr : caps.library_functions) {
         m.analysis.library_functions.push_back(LibraryFunction{addr, "?"});
@@ -116,7 +115,7 @@ compute_static_layout(const rules::RuleSet&                                 rule
                       const features::extractors::StaticFeatureExtractor&   extractor,
                       const capabilities::static_::StaticCapabilities&      caps) {
     // Collect the basic blocks where a basic-block-scope rule matched. capa keys
-    // these by the match address, which for that scope is the basic block.
+    // these by the match address, which for that scope is the basic block
     std::unordered_set<std::uint64_t> matched_bbs;
     for (const auto& [rule_name, addr_results] : caps.all_matches) {
         const rules::Rule* rule = rules.find(rule_name);

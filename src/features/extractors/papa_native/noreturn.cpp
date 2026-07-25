@@ -17,7 +17,7 @@ std::string norm_file_name(std::string_view filename) {
     std::string name = ::papa::util::to_lower_ascii(filename);
 
     // Strip the final extension. vivisect splits on '.' and rejoins every part
-    // but the last with '_', so an interior dot also collapses to '_'.
+    // but the last with '_', so an interior dot also collapses to '_'
     if (const auto last_dot = name.find_last_of('.');
         last_dot != std::string::npos) {
         name.resize(last_dot);
@@ -49,7 +49,7 @@ constexpr std::array<std::string_view, 5> kExactNoReturn = {
 };
 
 // The no-return regexes vivisect seeds for the MSVC CRT and the api-ms-win CRT
-// forwarders. Matched case-insensitively against the joined identity.
+// forwarders. Matched case-insensitively against the joined identity
 const std::array<std::regex, 8>& noreturn_regexes() {
     static const std::array<std::regex, 8> kRegexes = {
         std::regex{R"(^msvcr.*\._CxxThrowException$)", std::regex::icase},
@@ -87,20 +87,28 @@ bool is_noreturn_api(std::string_view libname, std::string_view impname) {
 }
 
 bool function_is_noreturn(const Function& fn, const NoReturnOracle& is_noreturn) {
+    // A function with no blocks is not no-return. vivisect's noret.py calls
+    // buildFunctionGraph first, which throws for a function whose graph cannot be
+    // built (a zero-block function, as a FLIRT overlap can leave the enclosing
+    // function), and the exception path returns without addNoReturnVa. Without
+    // this guard the empty leaf scan below vacuously reports no-return
+    if (fn.basic_blocks.empty()) {
+        return false;
+    }
     // Scan the terminal basic blocks (no intra-function successors). vivisect's
-    // noret.py marks the function no-return when none of these can return.
+    // noret.py marks the function no-return when none of these can return
     bool hasret = false;
     for (const BasicBlock& bb : fn.basic_blocks) {
         if (!bb.successors.empty()) { continue; }
         if (bb.instructions.empty()) { continue; }
         const DecodedInsn& term = bb.instructions.back();
         // A leaf ending in a no-return call does not count as a return path,
-        // mirroring noret.py's isNoReturnVa(lva) skip.
+        // mirroring noret.py's isNoReturnVa(lva) skip
         if (term.is_call && static_cast<bool>(is_noreturn) && is_noreturn(term)) {
             continue;
         }
         // A ret, or any branch (a tail jump or an unresolved dynamic branch we
-        // could not follow), is a possible return, matching IF_RET / IF_BRANCH.
+        // could not follow), is a possible return, matching IF_RET / IF_BRANCH
         if (term.is_return || term.is_jump || term.is_conditional) {
             hasret = true;
             break;

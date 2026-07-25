@@ -12,7 +12,7 @@ namespace emu = papa::features::extractors::papa_native::emu;
 // The register model is a faithful port of envi/registers.py +
 // envi/archs/i386/regs.py. The numeric indices, the meta-register encoding
 // (offset<<24)|(width<<16)|realindex, and the width masking on set are all
-// load-bearing for the emulator's correctness and memory safety.
+// load-bearing for the emulator's correctness and memory safety
 
 TEST_CASE("emu RegisterFile: a general-purpose register round-trips a value") {
     emu::RegisterFile regs;
@@ -23,7 +23,7 @@ TEST_CASE("emu RegisterFile: a general-purpose register round-trips a value") {
 TEST_CASE("emu RegisterFile: a 32-bit register masks values to 32 bits") {
     // registers.py:380 -- vals[ridx] = value & masks[ridx]. A value wider than
     // the register wraps rather than overflowing. This is the core memory-safety
-    // property: an emulated value can never exceed its declared width.
+    // property: an emulated value can never exceed its declared width
     emu::RegisterFile regs;
     regs.set_register(emu::kRegEax, 0x1'0000'0001ULL);
     CHECK(regs.get_register(emu::kRegEax) == 0x0000'0001U);
@@ -45,7 +45,7 @@ TEST_CASE("emu RegisterFile: an XMM register round-trips a 128-bit value") {
     }
     regs.set_xmm(0, v);
     CHECK(regs.get_xmm(0) == v);
-    // XMM registers are independent and default to zero.
+    // XMM registers are independent and default to zero
     CHECK(regs.get_xmm(1) == std::array<std::uint8_t, 16>{});
 }
 
@@ -82,7 +82,7 @@ TEST_CASE("emu RegisterFile: AH reads bits 8..15 of EAX") {
 
 TEST_CASE("emu RegisterFile: writing AL splices into the low byte of EAX") {
     // _xlateToNativeReg (registers.py:340): the meta value is masked to its
-    // width and shifted into place, the rest of the parent is preserved.
+    // width and shifted into place, the rest of the parent is preserved
     emu::RegisterFile regs;
     regs.set_register(emu::kRegEax, 0x11223344U);
     regs.set_register(emu::kRegAl, 0xFFU);
@@ -144,7 +144,7 @@ TEST_CASE("emu RegisterFile: taint sets and clears per register") {
 
 TEST_CASE("emu RegisterFile: snapshot and restore round-trip register state") {
     // registers.py:22 getRegisterSnap / setRegisterSnap underpin runFunction's
-    // per-branch work-queue. Restoring must return values and taint exactly.
+    // per-branch work-queue. Restoring must return values and taint exactly
     emu::RegisterFile regs;
     regs.set_register(emu::kRegEax, 0xCAFEBABEU);
     regs.set_taint(emu::kRegEbx, true);
@@ -166,7 +166,7 @@ TEST_CASE("emu RegisterFile: snapshot and restore round-trip register state") {
 // In 64-bit mode the eight low GP slots become rax..rdi, r8..r15 are added,
 // and eflags moves above them (its own slot). EMU NOTES: writing a 32-bit lane
 // (eax/r8d) zero-extends into the full 64-bit register (the RMETA_LOW32
-// override); 16/8-bit writes preserve the upper bits.
+// override). 16/8-bit writes preserve the upper bits
 
 TEST_CASE("emu RegisterFile amd64: a 64-bit GP register round-trips a full value") {
     emu::RegisterFile regs(/*is_64bit=*/true);
@@ -206,7 +206,7 @@ TEST_CASE("emu RegisterFile amd64: R8 round-trips and R8D zero-extends it") {
 }
 
 TEST_CASE("emu RegisterFile amd64: EFLAGS has its own slot, independent of the r-registers") {
-    // In amd64 mode eflags must not collide with r9 (slot 9 is a GP register).
+    // In amd64 mode eflags must not collide with r9 (slot 9 is a GP register)
     emu::RegisterFile regs(/*is_64bit=*/true);
     regs.set_register(emu::kRegR9, 0ULL);
     regs.set_flag(emu::kEflagsZf, true);

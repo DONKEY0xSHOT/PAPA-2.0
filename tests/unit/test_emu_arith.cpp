@@ -13,7 +13,7 @@ namespace pn = papa::features::extractors::papa_native;
 // Data / arithmetic / logic instruction handlers, ported from
 // envi/archs/i386/emu.py. Flags are checked against vivisect's exact formulas,
 // including its quirks (add derives ZF from the unmasked sum), so emulation is
-// bit-identical and discovery follows the same paths.
+// bit-identical and discovery follows the same paths
 
 namespace {
 
@@ -148,7 +148,7 @@ TEST_CASE("emu arith: mov reg, reg copies the value") {
 
 // --- amd64 arithmetic: 64-bit shift counts mask to 0x3f (not 0x1f), the
 // sign-extension ops cdqe/cqo, and 64-bit mul/div produce the rdx:rax pair via
-// 128-bit arithmetic (envi/archs/amd64 EMU NOTES + Amd64Emulator i_div/i_idiv).
+// 128-bit arithmetic (envi/archs/amd64 EMU NOTES + Amd64Emulator i_div/i_idiv)
 
 TEST_CASE("emu arith amd64: shl rax masks the shift count to 0x3f") {
     emu::IntelEmulator e(/*is_64bit=*/true);
@@ -260,7 +260,7 @@ TEST_CASE("emu arith: add sets result and arithmetic flags") {
 
 TEST_CASE("emu arith: add that carries out wraps and keeps ZF clear (vivisect quirk)") {
     // vivisect derives ZF from the unmasked sum, so 0xffffffff+1 leaves ZF=0
-    // even though the stored result is 0. Reproduced for bit-identical paths.
+    // even though the stored result is 0. Reproduced for bit-identical paths
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0xFFFFFFFFU);
     e.execute_opcode(insn2(ZYDIS_MNEMONIC_ADD, reg_oper(ZYDIS_REGISTER_EAX, 4),

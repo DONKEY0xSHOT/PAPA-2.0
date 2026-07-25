@@ -72,7 +72,7 @@ OperandKind Disassembler::classify(
                 // SIB byte it is a direct absolute, i386ImmMemOper, a number
                 // source. CAPA splits the two this way, so a SIB-encoded
                 // "gs:[0x30]" (the only x64 form of a non-RIP absolute) yields an
-                // offset and never a number.
+                // offset and never a number
                 return has_sib ? OperandKind::kSib : OperandKind::kImmMem;
             }
             if (has_index) {
@@ -128,7 +128,7 @@ namespace {
 // (hlt), INS_INVALIDOP (ud0/ud1/ud2), INS_OFLOW (into), and INS_TRAP (int N),
 // which vivisect marks no-fall on Windows for every vector except the 0x2e NT
 // syscall gate it treats as a returning call. iret (INS_TRET) is already a RET
-// to Zydis, so it is covered by is_return.
+// to Zydis, so it is covered by is_return
 [[nodiscard]] bool is_nofall_terminal(const DecodedInsn& d) noexcept {
     switch (d.zyd_mnem) {
         case ZYDIS_MNEMONIC_INT3:
@@ -236,7 +236,7 @@ Expected<DecodedInsn> Disassembler::decode(
     const ZydisMachineMode mode = zi.machine_mode;
     // The SIB flag is instruction-level. At most one memory operand uses ModRM
     // addressing, so attributing it to every operand is harmless and lets
-    // classify tell a SIB-encoded absolute (kSib) from a direct one (kImmMem).
+    // classify tell a SIB-encoded absolute (kSib) from a direct one (kImmMem)
     const bool has_sib = (zi.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
     for (std::size_t i = 0; i < visible; ++i) {
         d.operands[i] = translate_operand(zops[i], mode, has_sib);

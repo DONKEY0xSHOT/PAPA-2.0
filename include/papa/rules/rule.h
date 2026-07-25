@@ -49,13 +49,13 @@ struct RuleMeta {
 // Carries metadata, the compiled engine statement, and the original YAML text
 class Rule {
 public:
-    /// Full-meta constructor used when parsing a rule document.
+    /// Full-meta constructor used when parsing a rule document
     Rule(RuleMeta                            meta,
          std::unique_ptr<engine::Statement>  stmt,
          std::string                         definition);
 
     /// Convenience constructor used by tests and synthetic rules.
-    /// Builds a RuleMeta with only name, namespace, static_scope, and lib set.
+    /// Builds a RuleMeta with only name, namespace, static_scope, and lib set
     Rule(std::string                         name,
          std::optional<std::string>          ns,
          Scope                               scope,

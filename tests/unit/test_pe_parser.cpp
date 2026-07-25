@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 the PAPA authors
-
 // MSVC: <ostream> must precede doctest so std::string pretty-printing compiles
 #include <ostream>
 
@@ -19,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "fixture_paths.h"
 
 namespace {
@@ -208,9 +206,9 @@ TEST_CASE("lookup_ordinal_name resolves ws2_32 ordinals like vivisect ordlookup"
     CHECK(lookup_ordinal_name("ws2_32", 6) == "getsockname");
     CHECK(lookup_ordinal_name("ws2_32", 1) == "accept");
     CHECK(lookup_ordinal_name("ws2_32", 115) == "WSAStartup");
-    // wsock32.dll shares the ws2_32 table in vivisect's ordlookup.
+    // wsock32.dll shares the ws2_32 table in vivisect's ordlookup
     CHECK(lookup_ordinal_name("wsock32", 6) == "getsockname");
-    // A DLL not in the database, or an unknown ordinal, stays unresolved.
+    // A DLL not in the database, or an unknown ordinal, stays unresolved
     CHECK_FALSE(lookup_ordinal_name("kernel32", 6).has_value());
     CHECK_FALSE(lookup_ordinal_name("ws2_32", 99999).has_value());
 }
@@ -226,7 +224,7 @@ TEST_CASE("parses Everything.exe and resolves ws2_32 ordinal imports to names") 
 
     // Everything imports ws2_32 by ordinal. vivisect's ordlookup names #6
     // getsockname, so papa must resolve it (and clear by_ordinal) for the
-    // get-local-IPv4 rule's `api: getsockname` to match.
+    // get-local-IPv4 rule's `api: getsockname` to match
     const auto imps = img.imports();
     const bool has_getsockname = std::any_of(imps.begin(), imps.end(),
         [](const papa::pe::ParsedImport& p) {
@@ -252,7 +250,7 @@ TEST_CASE("parses Everything.exe base relocations including the .text island poi
 
     // Faithful to vivisect PE.getRelocations: every base-relocation entry is
     // retained, including the type-0 ABSOLUTE block padding. Everything.exe
-    // carries 25697 HIGHLOW fixups plus 159 ABSOLUTE padding entries.
+    // carries 25697 HIGHLOW fixups plus 159 ABSOLUTE padding entries
     std::size_t highlow = 0;
     std::size_t absolute = 0;
     for (const auto& r : relocs) {
@@ -265,7 +263,7 @@ TEST_CASE("parses Everything.exe base relocations including the .text island poi
     // The three socket-island entry pointers are stored at reloc SITES inside
     // .text (RVAs 0x925f0 / 0x9539c / 0x95b14). A data-only pointer scan skips
     // .text, which is why the island is unrecovered. Each site is a HIGHLOW
-    // fixup whose stored dword is an island function entry.
+    // fixup whose stored dword is an island function entry
     struct SiteExpectation {
         std::uint32_t rva;
         std::uint32_t value;
@@ -285,4 +283,84 @@ TEST_CASE("parses Everything.exe base relocations including the .text island poi
         REQUIRE(dword.has_value());
         CHECK(*dword == site.value);
     }
+}
+
+TEST_CASE("readable_bytes_at_rva is bounded by the file and the section's raw data") {
+    if (!std::filesystem::exists(kNotepad)) {
+        MESSAGE("fixture missing: " << kNotepad);
+        return;
+    }
+    const auto res = papa::pe::PeParser::parse_file(kNotepad);
+    REQUIRE(res.has_value());
+    const papa::pe::PeImage& img = *res;
+
+    // An unmapped RVA supplies nothing
+    CHECK(img.readable_bytes_at_rva(0xF0000000u) == 0);
+
+    // Inside a real section the answer is non-zero and never exceeds the file
+    const auto secs = img.sections();
+    REQUIRE_FALSE(secs.empty());
+    const papa::pe::ParsedSection& text = secs.front();
+    const std::size_t avail = img.readable_bytes_at_rva(text.virtual_address);
+    CHECK(avail > 0);
+    CHECK(avail <= img.raw_buffer().size());
+    // and it stops at the end of that section's raw bytes
+    CHECK(avail <= text.raw_size);
+
+    // One byte before the section's raw end supplies exactly one byte
+    const std::uint64_t last_rva =
+        std::uint64_t{text.virtual_address} + text.raw_size - 1U;
+    CHECK(img.readable_bytes_at_rva(last_rva) == 1U);
+}
+
+TEST_CASE("a crafted export count cannot drive a huge allocation") {
+    if (!std::filesystem::exists(kNotepad)) {
+        MESSAGE("fixture missing: " << kNotepad);
+        return;
+    }
+    const auto base = papa::pe::PeParser::parse_file(kNotepad);
+    REQUIRE(base.has_value());
+    const std::size_t honest_exports = base->exports().size();
+
+    // Locate the export directory by walking the headers, then overwrite
+    // NumberOfFunctions and NumberOfNames with 0xFFFFFFFF. Unclamped, those
+    // counts would size a per-export vector (tens of gigabytes) and spin a
+    // four-billion-iteration loop
+    const auto src = base->raw_buffer();
+    const auto read_u32_at = [&src](std::size_t off) -> std::uint32_t {
+        std::uint32_t v = 0;
+        std::memcpy(&v, src.data() + off, sizeof(v));
+        return v;
+    };
+    const std::uint32_t e_lfanew = read_u32_at(0x3CU);
+    const std::size_t   opt_off  = std::size_t{e_lfanew} + 4U + 20U;
+    std::uint16_t       magic    = 0;
+    std::memcpy(&magic, src.data() + opt_off, sizeof(magic));
+    // The export directory is entry 0 of the data-directory array, which follows
+    // the optional header (0x60 into it for PE32, 0x70 for PE32+)
+    const std::size_t   dd_off  = opt_off + (magic == 0x20BU ? 0x70U : 0x60U);
+    const std::uint32_t dd_rva  = read_u32_at(dd_off);
+    if (dd_rva == 0) {
+        MESSAGE("fixture has no export directory, skipping");
+        return;
+    }
+    const auto dir_off = base->rva_to_file_offset(dd_rva);
+    REQUIRE(dir_off.has_value());
+
+    std::vector<std::byte> buf(src.begin(), src.end());
+    // IMAGE_EXPORT_DIRECTORY: NumberOfFunctions at +0x14, NumberOfNames at +0x18
+    const std::size_t     n_funcs_off = static_cast<std::size_t>(*dir_off) + 0x14U;
+    REQUIRE(n_funcs_off + 8U <= buf.size());
+    for (std::size_t i = 0; i < 8U; ++i) {
+        buf[n_funcs_off + i] = std::byte{0xFFU};
+    }
+
+    const auto crafted = papa::pe::PeParser::parse(std::move(buf));
+    REQUIRE(crafted.has_value());
+    // The clamp holds the list to what the image can actually supply, so the
+    // parse stays bounded rather than attempting a multi-gigabyte allocation
+    CHECK(crafted->exports().size() <= papa::constants::kMaxExportsPerImage);
+    CHECK(crafted->exports().size() <=
+          crafted->raw_buffer().size() / sizeof(std::uint32_t));
+    CHECK(crafted->exports().size() >= honest_exports);
 }

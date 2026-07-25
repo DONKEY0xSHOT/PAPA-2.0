@@ -19,11 +19,11 @@ namespace papa::features::extractors::papa_native::flirt::embedded {
 
 #if defined(_WIN32) && defined(_MSC_VER)
 namespace {
-/// Locks one RCDATA resource and returns it as an EmbeddedSig, or nullopt.
+/// Locks one RCDATA resource and returns it as an EmbeddedSig, or nullopt
 [[nodiscard]] std::optional<EmbeddedSig> lock_sig(std::string_view name, int id) noexcept {
     const HMODULE module = GetModuleHandleW(nullptr);
     // RT_RCDATA expands to the ANSI MAKEINTRESOURCE when UNICODE is undefined,
-    // so spell the type out with the wide form to match FindResourceW.
+    // so spell the type out with the wide form to match FindResourceW
     const LPCWSTR rcdata_type = MAKEINTRESOURCEW(10);
     const HRSRC found = FindResourceW(module, MAKEINTRESOURCEW(id), rcdata_type);
     if (found == nullptr) { return std::nullopt; }
@@ -54,7 +54,7 @@ std::span<const EmbeddedSig> registry() noexcept {
 }
 #else
 // FLIRT signatures are embedded only on MSVC (via an .rc resource). On other
-// toolchains the registry is empty and FLIRT classification is inactive.
+// toolchains the registry is empty and FLIRT classification is inactive
 std::span<const EmbeddedSig> registry() noexcept { return {}; }
 #endif
 

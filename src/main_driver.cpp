@@ -77,7 +77,7 @@ read_entire_file(const std::filesystem::path& path) {
 }
 
 // True when stdout is an interactive console rather than a file or pipe.
-// capa colors its report only in this case, so PAPA does the same.
+// capa colors its report only in this case, so PAPA does the same
 [[nodiscard]] bool stdout_is_terminal() noexcept {
 #if defined(_WIN32)
     return _isatty(_fileno(stdout)) != 0;
@@ -95,7 +95,7 @@ ParseResult parse_args(int argc, const char* const* argv) {
     for (int i = 0; i < argc; ++i) {
         const std::string_view arg{argv[i]};
 
-        // Keep every argument verbatim so the report can echo the command line.
+        // Keep every argument verbatim so the report can echo the command line
         a.argv.emplace_back(arg);
 
         if (arg == "--help" || arg == "-h") { a.show_help = true; continue; }
@@ -190,7 +190,7 @@ int run(const Args& args) {
     }
 
     // capa colors its text report only for an interactive console, and only when
-    // the report goes to stdout rather than a file.
+    // the report goes to stdout rather than a file
     const bool color = args.output_path.empty() && stdout_is_terminal();
 
     // First-pass file-only check for static-limitation rules
@@ -258,7 +258,7 @@ int run(const Args& args) {
         extractor);
 
     // Enrich the metadata with the two pieces only the full pipeline can supply:
-    // capa's basic-block layout and the FLIRT name of each library function.
+    // capa's basic-block layout and the FLIRT name of each library function
     meta.analysis.layout = compute_static_layout(*ruleset, extractor, *caps);
     for (auto& lib : meta.analysis.library_functions) {
         if (const auto* abs =

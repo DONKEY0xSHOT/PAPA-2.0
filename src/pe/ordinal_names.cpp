@@ -8,13 +8,13 @@ namespace papa::pe {
 namespace {
 
 // One ordinal to symbol mapping. Generated from vivisect's ordlookup database
-// (the version capa 9.4.0 pins) so papa names ordinal imports the way capa does.
+// (the version capa 9.4.0 pins) so papa names ordinal imports the way capa does
 struct OrdEntry {
     std::uint32_t    ordinal;
     std::string_view name;
 };
 
-// ws2_32.dll, shared with wsock32.dll (vivisect ordlookup maps both here).
+// ws2_32.dll, shared with wsock32.dll (vivisect ordlookup maps both here)
 constexpr std::array<OrdEntry, 117> kWs2_32{{
     {1, "accept"},
     {2, "bind"},

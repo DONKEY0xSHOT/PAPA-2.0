@@ -6,7 +6,7 @@
 namespace papa::render {
 
 // An ATT&CK reference parsed from a rule's "att&ck:" string, mirroring capa's
-// AttackSpec (capa/render/result_document.py).
+// AttackSpec (capa/render/result_document.py)
 struct AttackSpec {
     std::vector<std::string> parts;
     std::string              tactic;
@@ -15,7 +15,7 @@ struct AttackSpec {
     std::string              id;
 };
 
-// An MBC reference parsed from a rule's "mbc:" string, mirroring capa's MBCSpec.
+// An MBC reference parsed from a rule's "mbc:" string, mirroring capa's MBCSpec
 struct MbcSpec {
     std::vector<std::string> parts;
     std::string              objective;
@@ -24,10 +24,10 @@ struct MbcSpec {
     std::string              id;
 };
 
-// Parse "Tactic::Technique[::Subtechnique] [id]" into an AttackSpec.
+// Parse "Tactic::Technique[::Subtechnique] [id]" into an AttackSpec
 [[nodiscard]] AttackSpec attack_from_string(const std::string& s);
 
-// Parse "Objective::Behavior[::Method] [id]" into an MbcSpec.
+// Parse "Objective::Behavior[::Method] [id]" into an MbcSpec
 [[nodiscard]] MbcSpec mbc_from_string(const std::string& s);
 
 }  // namespace papa::render

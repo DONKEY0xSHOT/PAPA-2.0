@@ -75,6 +75,12 @@ public:
 
     [[nodiscard]] bool probe_readable(std::uint64_t rva, std::size_t n) const noexcept;
 
+    /// How many contiguous bytes are actually readable starting at rva, zero when
+    /// it is unmapped. Backed by the real file buffer, so it bounds a count a
+    /// header claims: a table of N entries is only believable when the image can
+    /// supply N entries worth of bytes
+    [[nodiscard]] std::size_t readable_bytes_at_rva(std::uint64_t rva) const noexcept;
+
 private:
     friend class PeParser;
     PeImage() = default;

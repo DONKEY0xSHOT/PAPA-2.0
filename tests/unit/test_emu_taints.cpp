@@ -12,7 +12,7 @@ namespace emu = papa::features::extractors::papa_native::emu;
 // (uninitialized registers, import slots, call return values, stack locals),
 // a faithful port of impemu/emulator.py setVivTaint/getVivTaint. Taint values
 // live in a reserved high band so they read as non-pointers and are never
-// followed as control flow. Allocation is bounded.
+// followed as control flow. Allocation is bounded
 
 TEST_CASE("emu taints: allocate produces values in the reserved band") {
     emu::TaintRegistry taints;
@@ -24,7 +24,7 @@ TEST_CASE("emu taints: allocate produces values in the reserved band") {
 }
 
 TEST_CASE("emu taints: the first allocations match vivisect's exact sequence") {
-    // nextVivTaint = next(count(0x4156000F, 0x2000)) + 0x1000.
+    // nextVivTaint = next(count(0x4156000F, 0x2000)) + 0x1000
     emu::TaintRegistry taints;
     CHECK(taints.allocate(emu::TaintType::kUninitReg) == 0x4156100FULL);
     CHECK(taints.allocate(emu::TaintType::kUninitReg) == 0x4156300FULL);
@@ -41,7 +41,7 @@ TEST_CASE("emu taints: lookup recovers the type and info of an allocation") {
 }
 
 TEST_CASE("emu taints: lookup resolves a near-taint value within the masked page") {
-    // getVivTaint masks the query, so a taint plus a small offset still resolves.
+    // getVivTaint masks the query, so a taint plus a small offset still resolves
     emu::TaintRegistry taints;
     const std::uint64_t v = taints.allocate(emu::TaintType::kApiCall);
     const std::optional<emu::TaintInfo> found = taints.lookup(v + 0x10);

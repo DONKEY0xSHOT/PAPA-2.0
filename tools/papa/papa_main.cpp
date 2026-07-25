@@ -18,17 +18,12 @@ namespace {
 #if defined(_WIN32) && defined(_MSC_VER)
 
 // Set up an interactive Windows console to render the report like capa does.
-// Two things are needed and both default off on a fresh console:
-//   * UTF-8 output: the report's box-drawing glyphs are UTF-8, but a console
-//     interprets output bytes in its active code page (an OEM page), so without
-//     this a `┌` (the bytes `E2 94 8C`) appears as the mojibake `Γöî`.
-//   * Virtual-terminal processing: the report's cyan styling is emitted as ANSI
-//     escapes, which a console only interprets as color once this mode is on,
-//     otherwise the raw escape bytes are shown.
-// Redirected output is raw bytes unaffected by either setting (and the renderer
-// emits no color when not a terminal), so byte-for-byte parity with capa.exe is
-// preserved. Both settings are restored on exit, after every buffered stream is
-// flushed so the report is emitted while they are still active.
+// A fresh console defaults to an OEM code page, which turns the report's UTF-8
+// box-drawing glyphs into mojibake, and leaves virtual-terminal processing off,
+// which prints the cyan ANSI escapes literally. Redirected output is raw bytes
+// unaffected by either, so byte parity with capa is preserved. Both settings are
+// restored on exit, after the buffered streams are flushed so the report is
+// written while they are still active
 class ConsoleGuard {
 public:
     ConsoleGuard() noexcept : previous_cp_(::GetConsoleOutputCP()) {

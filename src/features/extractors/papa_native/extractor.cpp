@@ -10,7 +10,6 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
-#include "papa/features/extractors/papa_native/flirt_backend_context.h"
 #include "papa/features/extractors/papa_native/function.h"
 #include "papa/features/extractors/papa_native/global_.h"
 #include "papa/features/extractors/papa_native/insn.h"
@@ -247,7 +246,7 @@ PapaNativeStaticExtractor::extract_insn_features(
         // capa also emits an api feature for a direct call to a statically-linked
         // library function FLIRT identified (e.g. _beginthreadex), which is not
         // an import. The lookup uses the same FLIRT classification as
-        // is_library_function.
+        // is_library_function
         auto flirt_apis = ::papa::features::extractors::papa_native::insn::extract_flirt_call_api(
             ins, [this](std::uint64_t va) { return flirt_name_at(va); });
         for (auto& fa : flirt_apis) { out.push_back(std::move(fa)); }
@@ -273,63 +272,17 @@ bool PapaNativeStaticExtractor::is_library_function(
     // Structural thunks are library code regardless of any signature
     if (library_sigs_.is_thunk(*fn)) { return true; }
 
-    // FLIRT with capa-faithful reference validation. The first call primes the
-    // cache by classifying every recovered function, so a match's offset names
-    // mark sibling functions before those addresses are queried. Later calls
-    // are cache lookups. This mirrors viv_utils.flirt's whole-workspace pass,
-    // where a match accepts only when each referenced function resolves to the
-    // named library function.
-    ensure_flirt_primed();
-    const auto cached = flirt_cache_.find(*va);
-    return cached != flirt_cache_.end() && cached->second.has_value();
-}
-
-void PapaNativeStaticExtractor::ensure_flirt_primed() const {
-    if (flirt_primed_) { return; }
-    flirt_primed_ = true;
-    const FlirtBackendContext context(backend_);
-    // capa's register_flirt_signature_analyzers builds one analyzer per .sig file
-    // and runs them in order, and a function already named by an earlier analyzer
-    // is skipped by the later ones (viv_utils.flirt's is_library_function
-    // short-circuit). Match per tree in that same order rather than aggregating
-    // all trees into one match: a positive persists across trees (later trees skip
-    // it), and a negative is cleared between trees so the next tree re-evaluates
-    // the function independently. This resolves a collision the aggregated match
-    // cannot, for example certutil's mainCRTStartup at 0x14011a9d0 (whose call
-    // reference resolves) winning over ?AfxAbort (which has no references and so
-    // matches the bare prologue unconditionally) because the two signatures live
-    // in different trees.
-    for (const flirt::FlirtTree& tree : library_sigs_.flirt().trees()) {
-        const flirt::FlirtClassifier classifier(
-            [&tree](std::span<const std::uint8_t> bytes) {
-                return flirt::match_flirt_modules(tree, bytes);
-            },
-            context, flirt_cache_);
-        for (const Function& f : backend_.functions()) {
-            if (const auto it = flirt_cache_.find(f.va);
-                it != flirt_cache_.end() && it->second.has_value()) {
-                continue;  // already named by an earlier signature
-            }
-            static_cast<void>(classifier.classify(f.va));
-        }
-        // Drop the negatives this tree cached so the next tree re-evaluates every
-        // still-unnamed function. The positives, including the siblings a match
-        // names at its non-zero offsets, persist.
-        for (auto it = flirt_cache_.begin(); it != flirt_cache_.end();) {
-            if (!it->second.has_value()) {
-                it = flirt_cache_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
+    // FLIRT identified the library functions during analysis, the way capa's
+    // signature analyzers run as workspace modules while functions are made, so
+    // this is a lookup into that result rather than a second matching pass
+    return backend_.flirt_library_names().count(*va) != 0;
 }
 
 std::optional<std::string>
 PapaNativeStaticExtractor::flirt_name_at(std::uint64_t va) const {
-    ensure_flirt_primed();
-    const auto it = flirt_cache_.find(va);
-    if (it == flirt_cache_.end()) { return std::nullopt; }
+    const auto& names = backend_.flirt_library_names();
+    const auto  it    = names.find(va);
+    if (it == names.end()) { return std::nullopt; }
     return it->second;
 }
 

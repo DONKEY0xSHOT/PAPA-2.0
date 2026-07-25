@@ -10,7 +10,7 @@ namespace papa::render {
 namespace {
 
 // Split "A::B::C [id]" into ({A, B, C}, id), faithful to capa's parse_parts_id.
-// The trailing identifier is peeled off the last part at its final space.
+// The trailing identifier is peeled off the last part at its final space
 [[nodiscard]] std::pair<std::vector<std::string>, std::string>
 parse_parts_id(const std::string& s) {
     std::vector<std::string> parts;

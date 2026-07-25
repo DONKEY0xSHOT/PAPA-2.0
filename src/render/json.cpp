@@ -69,14 +69,14 @@ void emit_string_array(::papa::util::json::Writer& w,
     return ::papa::rules::to_string(s);
 }
 
-// Emit a bare image-base or similar value as capa's absolute address object.
+// Emit a bare image-base or similar value as capa's absolute address object
 void emit_absolute(::papa::util::json::Writer& w, std::uint64_t value) {
     emit_address(w,
                  ::papa::features::Address{::papa::features::AbsoluteVirtualAddress{value}});
 }
 
 // Field order and nesting mirror capa's StaticMetadata / StaticAnalysis so the
-// document round-trips through capa's own loader.
+// document round-trips through capa's own loader
 void emit_meta(::papa::util::json::Writer& w, const Metadata& m) {
     w.key("meta");
     w.begin_object();
@@ -153,7 +153,7 @@ void emit_meta(::papa::util::json::Writer& w, const Metadata& m) {
     w.end_object();    // meta
 }
 
-// Emit the parsed ATT&CK entries as capa's AttackSpec objects.
+// Emit the parsed ATT&CK entries as capa's AttackSpec objects
 void emit_attack_array(::papa::util::json::Writer&         w,
                        const std::vector<std::string>&    raw) {
     w.begin_array();
@@ -170,7 +170,7 @@ void emit_attack_array(::papa::util::json::Writer&         w,
     w.end_array();
 }
 
-// Emit the parsed MBC entries as capa's MBCSpec objects.
+// Emit the parsed MBC entries as capa's MBCSpec objects
 void emit_mbc_array(::papa::util::json::Writer&         w,
                     const std::vector<std::string>&    raw) {
     w.begin_array();
@@ -188,7 +188,7 @@ void emit_mbc_array(::papa::util::json::Writer&         w,
 }
 
 // Field order and shapes mirror capa's RuleMetadata so the JSON round-trips
-// through capa's own loader. maec is always emitted, empty when absent.
+// through capa's own loader. maec is always emitted, empty when absent
 void emit_rule_meta(::papa::util::json::Writer&     w,
                     const ::papa::rules::RuleMeta&  rm) {
     w.key("name");      w.value_string(rm.name);
@@ -216,13 +216,13 @@ void emit_rule_meta(::papa::util::json::Writer&     w,
     w.key("is_subscope_rule"); w.value_bool(rm.is_subscope_rule);
 
     // PAPA does not parse maec metadata, so the object is always empty, which
-    // matches capa's exclude_none output for the benign rules in scope.
+    // matches capa's exclude_none output for the benign rules in scope
     w.key("maec");
     w.begin_object();
     w.end_object();
 }
 
-// Encode a Number/OperandNumber value as capa's int-or-float JSON number.
+// Encode a Number/OperandNumber value as capa's int-or-float JSON number
 void emit_number_value(::papa::util::json::Writer&                                 w,
                        const std::variant<std::uint64_t, std::int64_t, double>&    v) {
     if (const auto* u = std::get_if<std::uint64_t>(&v))      { w.value_uint(*u); }
@@ -243,7 +243,7 @@ void emit_hex_bytes(::papa::util::json::Writer& w, std::span<const std::byte> by
 }
 
 // Serialize one feature in capa's freeze format: {type, <value field>, description?}.
-// Field names follow capa's FeatureModel attribute names (operand_offset, etc.).
+// Field names follow capa's FeatureModel attribute names (operand_offset, etc.)
 void emit_feature(::papa::util::json::Writer& w, const features::Feature& f) {
     using namespace ::papa::features;
     w.begin_object();
@@ -360,7 +360,7 @@ void emit_feature(::papa::util::json::Writer& w, const features::Feature& f) {
 }
 
 // Serialize one match-tree node: {success, node, children, locations, captures}.
-// captures is always empty because PAPA does not retain regex capture groups.
+// captures is always empty because PAPA does not retain regex capture groups
 void emit_match_node(::papa::util::json::Writer& w, const render::MatchNode& node) {
     w.begin_object();
     w.key("success"); w.value_bool(node.success);
@@ -418,7 +418,7 @@ void emit_rules(::papa::util::json::Writer& w, const ResultDocument& doc) {
 
         w.key("source"); w.value_string(rep.source_yaml);
 
-        // capa pairs each match address with the full match tree at that address.
+        // capa pairs each match address with the full match tree at that address
         w.key("matches");
         w.begin_array();
         for (const auto& [addr, node] : rep.matches) {

@@ -12,8 +12,8 @@ namespace pn = papa::features::extractors::papa_native;
 
 // Control-flow handlers (call/jmp/jcc/ret/leave) and shifts, ported from
 // envi/archs/i386/emu.py. A handler that redirects flow sets the program
-// counter to the target; the conditional jumps use vivisect's exact cond_*
-// algebra. These are what let an emulated function body run to its ret.
+// counter to the target. The conditional jumps use vivisect's exact cond_*
+// algebra. These are what let an emulated function body run to its ret
 
 namespace {
 
@@ -69,7 +69,7 @@ pn::DecodedInsn insn2(ZydisMnemonic m, pn::DecodedOperand a, pn::DecodedOperand 
     return insn;
 }
 
-// A stack-ready emulator with ESP near the top of the stack window.
+// A stack-ready emulator with ESP near the top of the stack window
 emu::IntelEmulator stacked() {
     emu::IntelEmulator e;
     e.memory().init_stack();

@@ -14,12 +14,12 @@ namespace pn = papa::features::extractors::papa_native;
 
 // The WorkspaceEmulator runFunction driver, exercised over real 32-bit machine
 // code placed in the sandboxed memory. Covers straight-line execution, branch
-// exploration, no-recurse calls, and the DoS caps (maxhit, step cap).
+// exploration, no-recurse calls, and the DoS caps (maxhit, step cap)
 
 namespace {
 
 // Records every instruction address the emulator visits, and the EAX value at
-// a chosen address.
+// a chosen address
 class Recorder : public emu::EmulationMonitor {
 public:
     std::vector<std::uint64_t> visited;
@@ -47,7 +47,7 @@ public:
 };
 
 // Records every intercepted call as (call-site va, resolved target pc), the way
-// vivisect's AnalysisMonitor.apicall receives the resolved call target.
+// vivisect's AnalysisMonitor.apicall receives the resolved call target
 class ApiCallRecorder : public emu::EmulationMonitor {
 public:
     struct Call {
@@ -70,7 +70,7 @@ TEST_CASE("emu workspace: prepare taints the entry registers and seeds the stack
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
     we.prepare(kBase);
-    // EAX is a taint sentinel, not a real pointer; ESP points into the stack.
+    // EAX is a taint sentinel, not a real pointer. ESP points into the stack
     CHECK(we.emu().regs().is_tainted(emu::kRegEax));
     CHECK_FALSE(we.emu().memory().is_valid_pointer(
         we.emu().regs().get_register(emu::kRegEax)));
@@ -80,7 +80,7 @@ TEST_CASE("emu workspace: prepare taints the entry registers and seeds the stack
 TEST_CASE("emu workspace: a straight-line function runs to its ret") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // xor eax, eax ; ret
+    // xor eax, eax / ret
     static const std::array<std::uint8_t, 3> code = {0x31, 0xC0, 0xC3};
     we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
     we.prepare(kBase);
@@ -95,7 +95,7 @@ TEST_CASE("emu workspace: a straight-line function runs to its ret") {
 TEST_CASE("emu workspace: a direct jmp is followed") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // jmp +0 (to the next instruction) ; ret
+    // jmp +0 (to the next instruction) / ret
     static const std::array<std::uint8_t, 3> code = {0xEB, 0x00, 0xC3};
     we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
     we.prepare(kBase);
@@ -109,7 +109,7 @@ TEST_CASE("emu workspace: a direct jmp is followed") {
 TEST_CASE("emu workspace: both sides of a conditional branch are explored") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // jz +1 ; ret (fall-through) ; ret (taken)
+    // jz +1 / ret (fall-through) / ret (taken)
     static const std::array<std::uint8_t, 4> code = {0x74, 0x01, 0xC3, 0xC3};
     we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
     we.prepare(kBase);
@@ -123,7 +123,7 @@ TEST_CASE("emu workspace: both sides of a conditional branch are explored") {
 TEST_CASE("emu workspace: a call does not recurse and taints the return value") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // call 0x402000 (unmapped target) ; ret
+    // call 0x402000 (unmapped target) / ret
     // E8 imm32 where imm32 = 0x402000 - (0x401000 + 5) = 0x0FFB
     static const std::array<std::uint8_t, 6> code = {
         0xE8, 0xFB, 0x0F, 0x00, 0x00, 0xC3};
@@ -134,7 +134,7 @@ TEST_CASE("emu workspace: a call does not recurse and taints the return value") 
     rec.watch_eip = kBase + 5;  // the ret, right after the call
     we.run_function(kBase, &rec);
 
-    // Reaching the ret proves we did not jump into the unmapped callee.
+    // Reaching the ret proves we did not jump into the unmapped callee
     CHECK(rec.saw(kBase + 5));
     REQUIRE(rec.watched);
     const std::optional<emu::TaintInfo> t = we.taints().lookup(rec.eax_at_watch);
@@ -145,7 +145,7 @@ TEST_CASE("emu workspace: a call does not recurse and taints the return value") 
 TEST_CASE("emu workspace: apicall reports the resolved indirect call target") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // mov eax, 0x00402000 ; call eax ; ret
+    // mov eax, 0x00402000 / call eax / ret
     static const std::array<std::uint8_t, 8> code = {
         0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3};
     we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
@@ -162,7 +162,7 @@ TEST_CASE("emu workspace: apicall reports the resolved indirect call target") {
 TEST_CASE("emu workspace: apicall reports a direct call target") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // call 0x402000 ; ret  (E8 imm32, imm32 = 0x402000 - (0x401000 + 5) = 0x0FFB)
+    // call 0x402000 / ret  (E8 imm32, imm32 = 0x402000 - (0x401000 + 5) = 0x0FFB)
     static const std::array<std::uint8_t, 6> code = {
         0xE8, 0xFB, 0x0F, 0x00, 0x00, 0xC3};
     we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
@@ -191,7 +191,7 @@ TEST_CASE("emu workspace: an infinite self-loop is bounded by maxhit") {
 TEST_CASE("emu workspace: a long run is bounded by the step cap") {
     const pn::Disassembler disasm(/*is_64bit=*/false);
     emu::WorkspaceEmulator we(disasm);
-    // A nop sled far longer than the step cap.
+    // A nop sled far longer than the step cap
     static const std::array<std::uint8_t, 0x10000> sled = [] {
         std::array<std::uint8_t, 0x10000> a{};
         a.fill(0x90);
@@ -205,9 +205,9 @@ TEST_CASE("emu workspace: a long run is bounded by the step cap") {
     CHECK(steps < sled.size());
 }
 
-// --- amd64: the workspace emulator must build the 64-bit register model, seed
+// amd64: the workspace emulator must build the 64-bit register model, seed
 // the 64-bit stack band, taint the amd64 entry registers (rax..r9), and run
-// 64-bit code (platarch/amd64.py taintregs; impemu sign-extended stack base). ---
+// 64-bit code (platarch/amd64.py taintregs, impemu sign-extended stack base)
 
 TEST_CASE("emu workspace amd64: prepare taints entry registers and seeds the 64-bit stack") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
@@ -223,7 +223,7 @@ TEST_CASE("emu workspace amd64: prepare taints entry registers and seeds the 64-
 TEST_CASE("emu workspace amd64: a 64-bit function runs to its ret") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
     emu::WorkspaceEmulator we(disasm);
-    // xor rax, rax ; ret  (REX.W 31 C0 ; C3)
+    // xor rax, rax / ret  (REX.W 31 C0 / C3)
     static const std::array<std::uint8_t, 4> code = {0x48, 0x31, 0xC0, 0xC3};
     const std::uint64_t base = 0x140001000ULL;
     we.add_map(base, emu::kMemRead | emu::kMemExec, code);

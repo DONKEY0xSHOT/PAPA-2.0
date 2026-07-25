@@ -55,7 +55,7 @@ void collect_matched_rules(const engine::Result&  result,
 
 // Sort match locations so PAPA's report is deterministic across runs. capa emits
 // them in Python set-iteration order, which is not reproducible, so the set of
-// locations matches where the analysis matches but the order may differ.
+// locations matches where the analysis matches but the order may differ
 void sort_addresses(std::vector<features::Address>& addrs) {
     std::sort(addrs.begin(), addrs.end(),
               [](const features::Address& a, const features::Address& b) {
@@ -63,7 +63,7 @@ void sort_addresses(std::vector<features::Address>& addrs) {
               });
 }
 
-// Translate a logic statement into capa's node type plus its extra fields.
+// Translate a logic statement into capa's node type plus its extra fields
 void fill_statement(MatchNode& node, const engine::Statement& st) {
     const std::string_view name = st.name();
     if (name == "some") {
@@ -85,11 +85,11 @@ void fill_statement(MatchNode& node, const engine::Statement& st) {
     }
 }
 
-// Guards against pathological reference chains (the rule graph is acyclic).
+// Guards against pathological reference chains (the rule graph is acyclic)
 constexpr int kMaxMatchDepth = 256;
 
 // Build capa's match tree from an engine result, splicing in the trees of rules
-// a `match:` feature references. Faithful to capa's Match.from_capa.
+// a `match:` feature references. Faithful to capa's Match.from_capa
 [[nodiscard]] MatchNode build_match(const rules::RuleSet&        ruleset,
                                     const engine::MatchResults&  matches,
                                     const engine::Result&        result,
@@ -111,7 +111,7 @@ constexpr int kMaxMatchDepth = 256;
         node.children.push_back(build_match(ruleset, matches, child, depth + 1));
     }
 
-    // Locations belong to feature nodes and the range statement, only on success.
+    // Locations belong to feature nodes and the range statement, only on success
     if (result.success && (node.is_feature || node.statement_type == "range")) {
         node.locations.assign(result.locations.begin(), result.locations.end());
         sort_addresses(node.locations);
@@ -130,7 +130,7 @@ constexpr int kMaxMatchDepth = 256;
     std::vector<features::Address> locs(result.locations.begin(), result.locations.end());
     sort_addresses(locs);
 
-    // Splice one referenced rule's matches in as children at the shared locations.
+    // Splice one referenced rule's matches in as children at the shared locations
     const auto splice_rule = [&](const std::string& rule_name) {
         const auto it = matches.find(rule_name);
         if (it == matches.end()) { return; }
@@ -148,7 +148,7 @@ constexpr int kMaxMatchDepth = 256;
     if (const rules::Rule* rule = ruleset.find(name); rule != nullptr) {
         if (rule->meta().is_subscope_rule) {
             // capa rewrites the node into the subscope it stands for, keeping the
-            // locations already gathered from the original match feature.
+            // locations already gathered from the original match feature
             node.is_feature = false;
             node.feature = nullptr;
             node.statement_type = "subscope";

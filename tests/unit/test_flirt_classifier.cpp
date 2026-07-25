@@ -22,7 +22,7 @@ namespace {
 
 // A scriptable FunctionContext. The maps stand in for the recovered functions,
 // their instruction xrefs, the import table, and the function-entry set, so the
-// classifier can be exercised without any binary, CFG, or disassembler.
+// classifier can be exercised without any binary, CFG, or disassembler
 class MockContext : public flirt::FunctionContext {
 public:
     std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> code;
@@ -63,7 +63,7 @@ public:
     }
 };
 
-// A module carrying one public symbol at offset 0.
+// A module carrying one public symbol at offset 0
 flirt::FlirtModule public_module(std::string name) {
     flirt::FlirtModule m;
     m.names.push_back({0, std::move(name), flirt::FlirtNameType::kPublic});
@@ -71,14 +71,14 @@ flirt::FlirtModule public_module(std::string name) {
 }
 
 // A module carrying one local symbol at offset 0, as a statically linked
-// library helper does.
+// library helper does
 flirt::FlirtModule local_module(std::string name) {
     flirt::FlirtModule m;
     m.names.push_back({0, std::move(name), flirt::FlirtNameType::kLocal});
     return m;
 }
 
-// Returns a matcher that yields the modules whose key byte leads the buffer.
+// Returns a matcher that yields the modules whose key byte leads the buffer
 flirt::ModuleMatchFn
 byte_dispatch(std::unordered_map<std::uint8_t, std::vector<const flirt::FlirtModule*>> table) {
     return [table = std::move(table)](std::span<const std::uint8_t> b)
@@ -114,7 +114,7 @@ TEST_CASE("flirt_classifier: a local name at offset zero still names the functio
 
     // A statically linked helper (e.g. _check_managed_app) carries only a local
     // name at offset 0. viv_utils.flirt.get_match_name takes the offset-0 name
-    // regardless of kind, so the function is still a library match.
+    // regardless of kind, so the function is still a library match
     const flirt::FlirtModule helper = local_module("_check_managed_app");
     flirt::FlirtClassifier::Cache cache;
     const flirt::FlirtClassifier classifier(byte_dispatch({{0xDDU, {&helper}}}), ctx, cache);
@@ -131,7 +131,7 @@ TEST_CASE("flirt_classifier: a name only at a non-zero offset names nothing") {
 
     // No name sits at offset 0, so get_match_name yields nothing and the match
     // confers no identity. A name only at a non-zero offset is a sibling marker,
-    // not this function's name.
+    // not this function's name
     flirt::FlirtModule m;
     m.names.push_back({0x40, "sibling", flirt::FlirtNameType::kPublic});
     flirt::FlirtClassifier::Cache cache;
@@ -154,7 +154,7 @@ TEST_CASE("flirt_classifier: a reference to an import is rejected") {
 
     // capa satisfies a named reference only via a local matched library function,
     // not an import, so a candidate whose only reference resolves to an imported
-    // API is rejected (this is why ___crtTlsAlloc@4 does not match).
+    // API is rejected (this is why ___crtTlsAlloc@4 does not match)
     CHECK_FALSE(classifier.classify(0x2000U).has_value());
 }
 
@@ -197,7 +197,7 @@ TEST_CASE("flirt_classifier: a data reference requires a data xref") {
     flirt::FlirtModule mod = public_module("d");
     mod.references.push_back({0x08U, "."});
 
-    // A data xref satisfies the "." reference.
+    // A data xref satisfies the "." reference
     {
         MockContext ctx;
         ctx.functions.insert(0x6000U);
@@ -210,7 +210,7 @@ TEST_CASE("flirt_classifier: a data reference requires a data xref") {
         CHECK(*name == "d");
     }
 
-    // A code xref does not satisfy a "." data reference.
+    // A code xref does not satisfy a "." data reference
     {
         MockContext ctx;
         ctx.functions.insert(0x6000U);
@@ -240,7 +240,7 @@ TEST_CASE("flirt_classifier: names at non-zero offsets mark sibling functions li
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x11U, 0x00U, 0x00U};
 
-    // A module that names itself at offset 0 and a sibling at offset 0x40.
+    // A module that names itself at offset 0 and a sibling at offset 0x40
     flirt::FlirtModule outer = public_module("outer");
     outer.names.push_back({0x40, "inner", flirt::FlirtNameType::kPublic});
 
@@ -248,11 +248,64 @@ TEST_CASE("flirt_classifier: names at non-zero offsets mark sibling functions li
     const flirt::FlirtClassifier classifier(byte_dispatch({{0x11U, {&outer}}}), ctx, cache);
 
     REQUIRE(classifier.classify(0x1000U).has_value());
-    // The name at offset 0x40 marks 0x1040 as the library function "inner".
+    // The name at offset 0x40 marks 0x1040 as the library function "inner"
     const auto it = cache.find(0x1040U);
     REQUIRE(it != cache.end());
     REQUIRE(it->second.has_value());
     CHECK(*it->second == "inner");
+}
+
+TEST_CASE("flirt_classifier: an accepted match reports the winning module") {
+    MockContext ctx;
+    ctx.functions.insert(0x1000U);
+    ctx.code[0x1000U] = {0x22U, 0x00U, 0x00U};
+
+    // A module that names itself at offset 0 and carries a local and a public
+    // sibling. The driver applies viv_utils.flirt's name loops from the winner,
+    // so the classifier just has to hand it over once, on acceptance
+    flirt::FlirtModule outer = public_module("outer");
+    outer.names.push_back({0x40, "inner_local", flirt::FlirtNameType::kLocal});
+    outer.names.push_back({0x80, "inner_public", flirt::FlirtNameType::kPublic});
+
+    std::vector<std::uint64_t>            match_vas;
+    std::vector<const flirt::FlirtModule*> winners;
+    const auto on_match = [&](std::uint64_t va, const flirt::FlirtModule& w) {
+        match_vas.push_back(va);
+        winners.push_back(&w);
+    };
+
+    flirt::FlirtClassifier::Cache cache;
+    const flirt::FlirtClassifier  classifier(byte_dispatch({{0x22U, {&outer}}}), ctx,
+                                             cache, on_match);
+
+    REQUIRE(classifier.classify(0x1000U).has_value());
+    REQUIRE(match_vas.size() == 1);
+    CHECK(match_vas[0] == 0x1000U);
+    REQUIRE(winners.size() == 1);
+    CHECK(winners[0] == &outer);
+    CHECK(winners[0]->names.size() == 3U);
+}
+
+TEST_CASE("flirt_classifier: a rejected candidate reports no match") {
+    MockContext ctx;
+    ctx.functions.insert(0x2000U);
+    ctx.code[0x2000U] = {0xAAU, 0x00U, 0x00U};
+    ctx.xrefs[0x2010U] = {0x9000U, /*is_code=*/true};  // resolves to nothing named
+
+    flirt::FlirtModule foo = public_module("foo");
+    foo.references.push_back({0x10U, "malloc"});
+
+    bool       fired = false;
+    const auto on_match = [&fired](std::uint64_t, const flirt::FlirtModule&) {
+        fired = true;
+    };
+
+    flirt::FlirtClassifier::Cache cache;
+    const flirt::FlirtClassifier  classifier(byte_dispatch({{0xAAU, {&foo}}}), ctx,
+                                             cache, on_match);
+
+    CHECK_FALSE(classifier.classify(0x2000U).has_value());
+    CHECK_FALSE(fired);
 }
 
 TEST_CASE("flirt_classifier: a virtual address that is not a function is never library") {

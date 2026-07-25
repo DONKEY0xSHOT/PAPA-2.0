@@ -12,7 +12,7 @@ namespace bits = papa::features::extractors::papa_native::emu::bits;
 // vivisect, including its boundary quirks (is_signed_overflow flags INT_MIN),
 // because the emulator's conditional-branch decisions depend on these flags and
 // "no implementation-level diff" is the directive. Vectors are hand-computed
-// from the Python formulas.
+// from the Python formulas
 
 TEST_CASE("emu bits: u_max is 2^(8*size)-1 with u_max(0)=0") {
     CHECK(bits::u_max(0) == 0x0ULL);
@@ -57,7 +57,7 @@ TEST_CASE("emu bits: is_unsigned_carry flags over-max and negative results") {
 }
 
 TEST_CASE("emu bits: is_signed_overflow flags results outside [-smax, smax]") {
-    // smax(1)=127. vivisect flags value < -smax, so -128 (INT8_MIN) overflows.
+    // smax(1)=127. vivisect flags value < -smax, so -128 (INT8_MIN) overflows
     CHECK(bits::is_signed_overflow(128LL, 1));
     CHECK(bits::is_signed_overflow(-128LL, 1));
     CHECK_FALSE(bits::is_signed_overflow(127LL, 1));

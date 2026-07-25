@@ -63,6 +63,12 @@ inline constexpr std::size_t   kMaxInsnsPerFunction  = 1U << 15;   // 32k
 inline constexpr std::size_t   kMaxFunctionsPerImage = 1U << 18;   // 256k
 inline constexpr std::size_t   kMaxInsnBytes         = 15;         // x86 hard limit
 
+// Table-size caps for counts a PE header declares. Each is also clamped to the
+// bytes the image can supply, so these are the outer trip-wire rather than the
+// primary bound. Real images stay far below both
+inline constexpr std::size_t   kMaxExportsPerImage   = 1U << 20;   // 1M
+inline constexpr std::size_t   kMaxPdataEntries      = 1U << 22;   // 4M
+
 // String extraction
 // kRepeatFillBytes lists bytes that, when filling a 4 KiB window, indicate
 // padding rather than user data (CAPA strings.py:fill_bytes)

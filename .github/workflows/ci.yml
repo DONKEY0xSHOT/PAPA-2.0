@@ -1,0 +1,123 @@
+name: CI
+
+# Build with the project's hardening + warnings-as-errors flags and run the full
+# unit-test suite on every push to main (and every PR into it). When a push to
+# main changes code (not just the README or tests), publish a GitHub release with
+# the built papa.exe
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test (Windows, Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The build flags (/W4 /WX /permissive-, stack protector, CFG/CET,
+      # _FORTIFY_SOURCE, source-prefix trimming, static CRT) live in the project's
+      # CMake, so a plain Release configure+build applies them
+      - name: Configure (CMake, Visual Studio 2022, x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so the
+      # suite runs green in CI without the (non-redistributed) sample binaries
+      - name: Run unit tests
+        shell: bash
+        run: ./build/tests/unit/Release/papa_unit_tests.exe
+
+      # PAPA ships as a single self-contained executable. Fail the build if the
+      # linker reintroduced a dependency on the Visual C++ redistributable or the
+      # UCRT, which would make papa.exe fail to start on a clean machine
+      - name: Verify papa.exe has no C/C++ runtime dependency
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * `
+                  -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                  -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Filter dumpbin.exe -Recurse |
+                     Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+          $deps = & $dumpbin.FullName /dependents build\tools\papa\Release\papa.exe
+          $deps | Write-Host
+          $forbidden = $deps | Select-String -Pattern 'MSVCP\d|VCRUNTIME|api-ms-win-crt|MSVCR\d'
+          if ($forbidden) {
+            throw "papa.exe depends on the C/C++ runtime: $($forbidden -join ', ')"
+          }
+          Write-Host "OK: papa.exe imports no C/C++ runtime DLL"
+
+      - name: Upload papa.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: papa-exe
+          path: build/tools/papa/Release/papa.exe
+          if-no-files-found: error
+
+  release:
+    name: Release on code change
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (full history for the change diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A release is cut only when the push touched code. src/include/tools/cmake/
+      # third_party and the root CMakeLists are code; the README, docs, and tests
+      # are not.
+      - name: Detect code changes
+        id: detect
+        shell: bash
+        run: |
+          before='${{ github.event.before }}'
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          else
+            base="$before"
+          fi
+          changed="$(git diff --name-only "$base" '${{ github.sha }}')"
+          printf 'changed files:\n%s\n' "$changed"
+          code=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              src/*|include/*|tools/*|cmake/*|third_party/*|CMakeLists.txt) code=true ;;
+            esac
+          done <<< "$changed"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Download papa.exe
+        if: steps.detect.outputs.code == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: papa-exe
+          path: dist
+
+      - name: Create release
+        if: steps.detect.outputs.code == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="v0.1.${{ github.run_number }}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --target "${{ github.sha }}" \
+            --generate-notes \
+            dist/papa.exe

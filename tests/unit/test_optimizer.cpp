@@ -53,7 +53,7 @@ TEST_CASE("optimizer: stable among equal-cost children and recurses through not"
 
     const auto inner_children = node.children()[0]->children();
     REQUIRE(inner_children.size() == 3);
-    // The two cost-1 features keep their source order, the cost-2 regex sinks.
+    // The two cost-1 features keep their source order, the cost-2 regex sinks
     CHECK(tag_of(*inner_children[0]) == features::FeatureTag::kApi);
     CHECK(tag_of(*inner_children[1]) == features::FeatureTag::kMnemonic);
     CHECK(tag_of(*inner_children[2]) == features::FeatureTag::kRegex);

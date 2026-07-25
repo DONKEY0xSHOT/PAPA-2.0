@@ -7,7 +7,7 @@
 
 namespace papa::features::extractors::papa_native::flirt {
 
-/// The six-byte ASCII magic that introduces every IDASGN file.
+/// The six-byte ASCII magic that introduces every IDASGN file
 inline constexpr std::array<std::byte, 6> kIdasgnMagic = {
     std::byte{'I'}, std::byte{'D'}, std::byte{'A'},
     std::byte{'S'}, std::byte{'G'}, std::byte{'N'},
@@ -16,25 +16,25 @@ inline constexpr std::array<std::byte, 6> kIdasgnMagic = {
 inline constexpr std::uint8_t  kMinSupportedVersion = 8;
 inline constexpr std::uint8_t  kMaxSupportedVersion = 10;
 
-/// Maximum FLAIR pattern length in bytes. Hard cap from the FLAIR SDK.
+/// Maximum FLAIR pattern length in bytes. Hard cap from the FLAIR SDK
 inline constexpr std::size_t   kMaxPatternLength    = 32;
 
-/// Defensive cap on recursion depth when parsing the pattern tree.
+/// Defensive cap on recursion depth when parsing the pattern tree
 inline constexpr std::size_t   kMaxTreeDepth        = 64;
 
-/// Defensive cap on inflated body size; rejects decompression bombs.
+/// Defensive cap on inflated body size. Rejects decompression bombs
 inline constexpr std::size_t   kMaxDecompressedSize = std::size_t{64} << 20;
 
-/// CRC16 polynomial used by FLAIR (reflected variant of 0x1021).
+/// CRC16 polynomial used by FLAIR (reflected variant of 0x1021)
 inline constexpr std::uint16_t kCrc16Polynomial     = 0x8408;
 
-/// Returns true when v is an IDASGN version this reader can parse.
+/// Returns true when v is an IDASGN version this reader can parse
 [[nodiscard]] constexpr bool is_supported_version(std::uint8_t v) noexcept {
     return v >= kMinSupportedVersion && v <= kMaxSupportedVersion;
 }
 
-/// Architecture tag from byte 6 of the header. We only act on x86/x64;
-/// other values are accepted and ignored.
+/// Architecture tag from byte 6 of the header. We only act on x86/x64.
+/// Other values are accepted and ignored
 enum class FlirtArch : std::uint8_t {
     kAny    = 0,
     kX86    = 1,
@@ -43,7 +43,7 @@ enum class FlirtArch : std::uint8_t {
 };
 
 /// Subset of FLAIR's SF_* feature-flag bits we care about. The
-/// compression bit determines whether the body needs DEFLATE inflate.
+/// compression bit determines whether the body needs DEFLATE inflate
 enum class FlirtFeature : std::uint16_t {
     kStartup        = 0x0001,
     kCtype_crc      = 0x0002,
@@ -53,8 +53,8 @@ enum class FlirtFeature : std::uint16_t {
 };
 
 /// Parsed prefix of a .sig file. Mirrors the v8/v9/v10 header layout
-/// per the FLAIR SDK; later fields are populated only when the version
-/// is high enough.
+/// per the FLAIR SDK. Later fields are populated only when the version
+/// is high enough
 struct FlirtHeader {
     std::uint8_t   version        {0};       // 8, 9, or 10
     FlirtArch      arch           {FlirtArch::kAny};

@@ -14,7 +14,7 @@ namespace {
 
 // Verifies a single leaf module against the function bytes. The CRC covers the
 // tail_length bytes that follow the 32-byte pattern region, the standard FLAIR
-// convention. A zero-length tail verifies on an empty subspan when present.
+// convention. A zero-length tail verifies on an empty subspan when present
 [[nodiscard]] bool module_verifies(const FlirtModule& module,
                                    std::span<const std::uint8_t> function_bytes) noexcept {
     const std::size_t needed = kMaxPatternLength + module.tail_length;
@@ -31,7 +31,7 @@ namespace {
     // pattern and CRC as a pattern wildcard plus a tail byte, so capa rejects the
     // wrong variant this way and papa must too. The stored offset is relative to
     // the end of the pattern and CRC region, exactly python-flirt's
-    // buf[byte_sig_size + crc_len + offset], not an absolute function offset.
+    // buf[byte_sig_size + crc_len + offset], not an absolute function offset
     for (const FlirtTailByte& tb : module.tail_bytes) {
         const std::size_t pos = kMaxPatternLength + module.tail_length + tb.offset;
         if (pos >= function_bytes.size() || function_bytes[pos] != tb.value) {
@@ -43,8 +43,8 @@ namespace {
 
 // Collects every leaf module that matches by pattern prefix, tail CRC, and tail
 // bytes. A node whose pattern fails prunes its whole subtree. This mirrors
-// python-flirt's filter chain (pattern, then CRC16, then tail bytes); referenced
-// functions are validated later by the classifier, not here.
+// python-flirt's filter chain (pattern, then CRC16, then tail bytes). Referenced
+// functions are validated later by the classifier, not here
 void collect_matching(const FlirtNode& node,
                       std::span<const std::uint8_t> function_bytes,
                       std::vector<const FlirtModule*>& out) {
@@ -65,7 +65,7 @@ void collect_matching(const FlirtNode& node,
 
 // Walks the node and its subtree. A node whose pattern fails to match prunes
 // the whole subtree. At a matching node any verifying leaf module wins,
-// otherwise the search descends into the children.
+// otherwise the search descends into the children
 [[nodiscard]] bool node_matches(const FlirtNode& node,
                                 std::span<const std::uint8_t> function_bytes) noexcept {
     if (!node.pattern.matches(function_bytes)) {

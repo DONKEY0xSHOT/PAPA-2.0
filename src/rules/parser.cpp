@@ -496,7 +496,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
 // bare symbol, so a single-dot native name like kernel32.CreateFileA is reduced
 // to CreateFileA. Ordinal imports (ws2_32.#1) and dotnet names (Class::Method)
 // keep their full form. This lets api rules match calls whose import resolves
-// through an API-Set dll (api-ms-win-...) rather than the classic dll.
+// through an API-Set dll (api-ms-win-...) rather than the classic dll
 [[nodiscard]] std::string trim_dll_part(std::string_view api) {
     if (api.find(".#") != std::string_view::npos) { return std::string(api); }
     std::size_t dots = 0;

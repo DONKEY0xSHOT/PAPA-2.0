@@ -63,7 +63,7 @@ struct FeatureEqKey {
 
 /// Map from a structurally-identified feature to the set of locations where
 /// it occurred, with auxiliary indices that let scanning evaluators (Substring,
-/// Regex, Bytes) iterate just the relevant tag without traversing the whole map.
+/// Regex, Bytes) iterate just the relevant tag without traversing the whole map
 class FeatureSet
     : public std::unordered_map<FeaturePtr,
                                 std::unordered_set<Address>,

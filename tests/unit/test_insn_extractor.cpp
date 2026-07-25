@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 the PAPA authors
-
 #include <ostream>
 
 #include "doctest.h"
@@ -227,7 +224,7 @@ namespace {
 }
 
 // chrome.exe carries the indirect-call shellcode pattern the cross-section
-// extractor must recognize. Cached like notepad to keep runtime low.
+// extractor must recognize. Cached like notepad to keep runtime low
 [[nodiscard]] const papa::pe::PeImage* chrome_image() {
     static std::optional<papa::pe::PeImage> cached;
     static bool tried = false;
@@ -243,7 +240,7 @@ namespace {
 }
 
 // Everything.exe is the 32-bit fixture, needed to exercise x86-specific number
-// width handling. Cached like the others to keep runtime low.
+// width handling. Cached like the others to keep runtime low
 [[nodiscard]] const papa::pe::PeImage* everything_image() {
     static std::optional<papa::pe::PeImage> cached;
     static bool tried = false;
@@ -281,7 +278,7 @@ TEST_CASE("insn: extract_number emits Number + OperandNumber for non-pointer imm
 
 TEST_CASE("insn: extract_flirt_call_api emits the FLIRT name and its stripped form") {
     // call <pcrel target 0x54a250>, where FLIRT identified the target as the
-    // statically-linked CRT routine __beginthreadex.
+    // statically-linked CRT routine __beginthreadex
     DecodedInsn ins = make_insn(0x004afdf4, "call");
     ins.zyd_mnem      = ZYDIS_MNEMONIC_CALL;
     ins.is_call       = true;
@@ -318,7 +315,7 @@ TEST_CASE("insn: extract_number masks a high-bit imm-only value to 32 bits on x8
     // push 0x80000002 (HKEY_LOCAL_MACHINE). Zydis sign-extends the imm32 to 64
     // bits, so the operand arrives as 0xffffffff80000002. On a 32-bit image the
     // number must be the 32-bit value 0x80000002, the way capa emits it, so the
-    // persist-via-Run and inspect-section rules see the constants they expect.
+    // persist-via-Run and inspect-section rules see the constants they expect
     DecodedInsn ins = make_insn(0x401000, "push");
     ins.zyd_mnem = ZYDIS_MNEMONIC_PUSH;
     ins.operand_count = 1;
@@ -336,7 +333,7 @@ TEST_CASE("insn: extract_number suppresses the number only for 'add esp, k'") {
     // capa's extract_op_number_features skips the immediate solely of
     // `add esp, imm` (the cdecl cleanup after a call), keyed on
     // opers[0].reg == REG_ESP. It does NOT skip `sub esp`, `add rsp`, or
-    // `sub rsp` (viv/insn.py), so neither do we.
+    // `sub rsp` (viv/insn.py), so neither do we
     const auto* x86 = everything_image();   // 32-bit
     const auto* x64 = notepad_image();       // 64-bit
     if (x86 == nullptr || x64 == nullptr) {
@@ -401,7 +398,7 @@ TEST_CASE("insn: extract_number does not add an Offset hint for 'sub reg, small'
         return;
     }
     // capa adds the struct-offset hint only for add, never sub, so a sub
-    // immediate yields Number + OperandNumber but no Offset.
+    // immediate yields Number + OperandNumber but no Offset
     DecodedInsn ins = make_insn(0x401000, "sub");
     ins.zyd_mnem = ZYDIS_MNEMONIC_SUB;
     ins.operand_count = 2;
@@ -443,7 +440,7 @@ TEST_CASE("insn: extract_offset emits Offset(0) for a bare [reg] dereference") {
         return;
     }
     // capa yields offset(0) for [reg] with no displacement. The runtime-linking
-    // rules count these mov reg, [reg] Flink walk steps via count(offset(0)).
+    // rules count these mov reg, [reg] Flink walk steps via count(offset(0))
     DecodedInsn ins = make_insn(0x401000, "mov");
     ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
     ins.operand_count = 2;
@@ -483,7 +480,7 @@ TEST_CASE("insn: extract_offset keeps a SIB-encoded stack-base offset") {
     // capa excludes the stack/frame base only for a plain [reg+disp] without a
     // SIB byte. [rsp+disp] forces a SIB byte (i386SibOper), so capa keeps its
     // offset and papa must too. The classification key is sib_encoded, not the
-    // operand kind, since papa keys kind on the index register.
+    // operand kind, since papa keys kind on the index register
     DecodedInsn ins = make_insn(0x401000, "mov");
     ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
     ins.operand_count = 2;
@@ -508,7 +505,7 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
     // This shape made papa over-emit number(0x30) and falsely match
     // get-process-heap-force-flags. capa treats the SIB displacement as an
     // offset only, so extract_number must stay silent and extract_offset must
-    // surface Offset(0x30).
+    // surface Offset(0x30)
     papa::features::extractors::papa_native::Disassembler dis(true);
     const std::array<std::byte, 9> bytes{
         std::byte{0x65}, std::byte{0x48}, std::byte{0x8B}, std::byte{0x04},
@@ -524,7 +521,7 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
     CHECK(offs[1].first->tag() == FeatureTag::kOperandOffset);
     // The 0x30 is an absolute address (vivisect's i386SibOper.imm) with disp 0,
     // so capa surfaces offset(0), not offset(0x30). This is what lets the
-    // runtime-linking rules count gs:[0x60] as one of their offset(0) steps.
+    // runtime-linking rules count gs:[0x60] as one of their offset(0) steps
     CHECK(offs[0].first->to_string() == "offset(0)");
 }
 
@@ -539,7 +536,7 @@ TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number"
     // capa emits no number from it: only the non-SIB i386RegMemOper lea surfaces
     // the displacement as a number (insn.py extract_op_offset_features). papa
     // over-emitted number(0xB8), falsely matching get-number-of-processors on
-    // msedge at 0x14009a8d0.
+    // msedge at 0x14009a8d0
     papa::features::extractors::papa_native::Disassembler dis(true);
     const std::array<std::byte, 8> bytes{
         std::byte{0x49}, std::byte{0x8D}, std::byte{0x8C}, std::byte{0x24},
@@ -567,7 +564,7 @@ TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number"
 }
 
 // A non-SIB base+disp lea is i386RegMemOper, where capa does surface the
-// displacement as a number, so papa must keep emitting it there.
+// displacement as a number, so papa must keep emitting it there
 TEST_CASE("insn: lea with a non-SIB base surfaces the displacement as a number") {
     const auto* img = notepad_image();
     if (img == nullptr) {
@@ -814,11 +811,11 @@ TEST_CASE("insn: extract_cross_section_flow flags an indirect call through a non
 
     // 0x14003da3b: call qword ptr [rip+0x265d9f] reads a function pointer from a
     // .rdata slot (not the IAT) in a different section than the .text call site.
-    // capa emits "cross section flow" here, so papa must too.
+    // capa emits "cross section flow" here, so papa must too
     CHECK(extract_cross_section_flow(decode_at(0x14003da3bULL), *img, table).has_value());
 
     // 0x14003d856: a call to the VirtualAllocEx IAT slot. capa skips import
-    // calls, so this must not be flagged as cross-section flow.
+    // calls, so this must not be flagged as cross-section flow
     CHECK_FALSE(extract_cross_section_flow(decode_at(0x14003d856ULL), *img, table).has_value());
 }
 

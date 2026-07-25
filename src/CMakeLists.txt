@@ -20,6 +20,14 @@ set(PAPA_LIB_SOURCES
     features/extractors/pefile.cpp
     features/extractors/papa_native/disassembler.cpp
     features/extractors/papa_native/cfg.cpp
+    features/extractors/papa_native/viv/location_db.cpp
+    features/extractors/papa_native/viv/xref_db.cpp
+    features/extractors/papa_native/viv/cf_context.cpp
+    features/extractors/papa_native/viv/codeblocks.cpp
+    features/extractors/papa_native/viv/discovery.cpp
+    features/extractors/papa_native/viv/discovery_passes.cpp
+    features/extractors/papa_native/viv/flirt_analysis.cpp
+    features/extractors/papa_native/viv/engine.cpp
     features/extractors/papa_native/global_.cpp
     features/extractors/papa_native/insn.cpp
     features/extractors/papa_native/indirect_calls.cpp
@@ -30,7 +38,6 @@ set(PAPA_LIB_SOURCES
     features/extractors/papa_native/backend.cpp
     features/extractors/papa_native/extractor.cpp
     features/extractors/papa_native/library_signatures.cpp
-    features/extractors/papa_native/flirt_backend_context.cpp
     features/extractors/papa_native/flirt/flirt_crc16.cpp
     features/extractors/papa_native/flirt/flirt_decompress.cpp
     features/extractors/papa_native/flirt/flirt_tree.cpp

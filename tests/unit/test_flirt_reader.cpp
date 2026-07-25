@@ -38,17 +38,17 @@ void append_zeroes(std::vector<std::uint8_t>& buf, std::size_t n) {
 }
 
 // Big-endian u16, used for the on-disk module CRC16 which the format stores
-// most-significant byte first.
+// most-significant byte first
 void append_u16_be(std::vector<std::uint8_t>& buf, std::uint16_t v) {
     buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
     buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
 }
 
-// Offset of the little-endian features word inside every header.
+// Offset of the little-endian features word inside every header
 constexpr std::size_t kFeaturesOffset = 16;
 
 // Clears the compression bit so the body that follows is read as plain
-// uncompressed tree bytes.
+// uncompressed tree bytes
 void clear_compression_bit(std::vector<std::uint8_t>& header) {
     header[kFeaturesOffset] = static_cast<std::uint8_t>(
         header[kFeaturesOffset] & ~0x10U);
@@ -56,7 +56,7 @@ void clear_compression_bit(std::vector<std::uint8_t>& header) {
 
 // FLAIR vint16 encoder (the read_max_2_bytes inverse). Values up to 0x7F
 // fit in one byte. Values up to 0x7FFF take two bytes with the high bit of
-// the lead byte set and the upper 7 bits of the value in the lead byte.
+// the lead byte set and the upper 7 bits of the value in the lead byte
 void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
     if (v < 0x80U) {
         buf.push_back(static_cast<std::uint8_t>(v));
@@ -69,7 +69,7 @@ void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
 // One node child header: a pattern length, an all-clear variant mask, then
 // the literal bytes in file order. With no wildcards the parser's internal
 // double reversal cancels, so file order is preserved. Versions >= 10 read
-// the length as a vint16, so we emit it that way.
+// the length as a vint16, so we emit it that way
 void append_child_pattern(std::vector<std::uint8_t>& buf,
                           std::span<const std::uint8_t> pattern_bytes) {
     append_vle16(buf, static_cast<std::uint16_t>(pattern_bytes.size()));
@@ -79,7 +79,7 @@ void append_child_pattern(std::vector<std::uint8_t>& buf,
 
 // One node child header with explicit wildcards. Mask bit (length-1-i) marks
 // segment position i as a wildcard. The literal bytes cover the non-wildcard
-// positions in file order. Lengths below 0x10 carry a vint16 mask.
+// positions in file order. Lengths below 0x10 carry a vint16 mask
 void append_child_pattern_masked(std::vector<std::uint8_t>& buf,
                                  std::uint16_t length, std::uint16_t mask,
                                  std::span<const std::uint8_t> literals) {
@@ -92,7 +92,7 @@ void append_child_pattern_masked(std::vector<std::uint8_t>& buf,
 // caller emits so it can group several modules under one CRC. Emits a
 // function size, a single public name with a zero relative offset, then a
 // trailing parsing-flags byte. The name's first character is >= 0x20 so the
-// parser does not consume an optional leading flag byte.
+// parser does not consume an optional leading flag byte
 void append_module_body(std::vector<std::uint8_t>& buf,
                         std::uint32_t function_size,
                         std::string_view name,
@@ -107,7 +107,7 @@ void append_module_body(std::vector<std::uint8_t>& buf,
 
 // Emit one name record inside a module: the relative offset, an optional
 // name-flag byte (a value below 0x20, e.g. LOCAL=0x02) when nonzero, the name
-// text, then the trailing parsing-flags byte that terminates the name.
+// text, then the trailing parsing-flags byte that terminates the name
 void append_name_record(std::vector<std::uint8_t>& buf, std::uint16_t relative_offset,
                         std::uint8_t name_flags, std::string_view name,
                         std::uint8_t trailing_flags) {
@@ -122,7 +122,7 @@ void append_name_record(std::vector<std::uint8_t>& buf, std::uint16_t relative_o
 }
 
 // Returns a minimal but well-formed FLIRT header for a given version.
-// library_name is an empty string when ln_len == 0. ctype is left blank.
+// library_name is an empty string when ln_len == 0. ctype is left blank
 std::vector<std::uint8_t> build_header(std::uint8_t version, std::uint8_t ln_len = 0) {
     std::vector<std::uint8_t> buf;
     buf.reserve(64);
@@ -152,7 +152,7 @@ std::vector<std::uint8_t> build_header(std::uint8_t version, std::uint8_t ln_len
     return buf;
 }
 
-// Wraps a header (compression cleared) plus a raw body into a full buffer.
+// Wraps a header (compression cleared) plus a raw body into a full buffer
 std::vector<std::uint8_t> sig_with_body(std::span<const std::uint8_t> body) {
     auto buf = build_header(10);
     clear_compression_bit(buf);
@@ -421,7 +421,7 @@ TEST_CASE("flirt_reader: leaf with two colliding modules") {
     append_u8(body, 0x08);
     append_u16_be(body, 0x1234);
     // First module sets MORE_MODULES_WITH_SAME_CRC (0x08) so a second
-    // module follows under the same crc without a fresh crc header.
+    // module follows under the same crc without a fresh crc header
     append_module_body(body, 0x10, "foo", 0x08);
     append_module_body(body, 0x18, "bar", 0x00);
 
@@ -459,7 +459,7 @@ TEST_CASE("flirt_reader: truncated body returns truncated error") {
 TEST_CASE("flirt_reader: pattern longer than cap is a bad node") {
     std::vector<std::uint8_t> body;
     append_vle16(body, 1);
-    // kMaxPatternLength is 32. Encode a 33-byte pattern length.
+    // kMaxPatternLength is 32. Encode a 33-byte pattern length
     append_vle16(body, 33);
     append_vle16(body, 0);  // empty variant mask
     body.insert(body.end(), 33, std::uint8_t{0x90});
@@ -475,7 +475,7 @@ TEST_CASE("flirt_reader: variant mask marks wildcard positions") {
     append_vle16(body, 1);  // root child count
     // A 3-byte segment with the middle position wildcarded. A wildcard at
     // local position 1 sets mask bit (length - 1 - 1) = bit 1. The two
-    // literal bytes cover positions 0 and 2 in file order.
+    // literal bytes cover positions 0 and 2 in file order
     const std::array<std::uint8_t, 2> literals{0x55, 0xEC};
     append_child_pattern_masked(body, 3, 0x02, literals);
     append_vle16(body, 0);  // leaf
@@ -541,18 +541,18 @@ TEST_CASE("flirt_reader: a module retains names, tail bytes, and references") {
 
     append_vle16(body, 0x40);                     // function_size
     // Three names: public foo @rel 0, local bar @rel +5, public baz @rel +3.
-    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta).
+    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta)
     constexpr std::uint8_t kMorePublicNames = 0x01;
     constexpr std::uint8_t kLocalFlag       = 0x02;
     constexpr std::uint8_t kTailAndRefs     = 0x02 | 0x04;
     append_name_record(body, 0, 0,          "foo", kMorePublicNames);
     append_name_record(body, 5, kLocalFlag, "bar", kMorePublicNames);
     append_name_record(body, 3, 0,          "baz", kTailAndRefs);
-    // Tail bytes: count 1, absolute offset 0x20, value 0xAB.
+    // Tail bytes: count 1, absolute offset 0x20, value 0xAB
     append_vle16(body, 1);
     append_vle16(body, 0x20);
     append_u8(body, 0xAB);
-    // Referenced functions: count 1, absolute offset 0x10, name "malloc".
+    // Referenced functions: count 1, absolute offset 0x10, name "malloc"
     append_vle16(body, 1);
     append_vle16(body, 0x10);
     append_u8(body, 6);
@@ -594,7 +594,7 @@ TEST_CASE("flirt_reader: leaf with two distinct-crc module groups") {
     append_child_pattern(body, pat);
     append_vle16(body, 0);  // leaf
     // First group sets MORE_MODULES (0x10) so a second group with its own
-    // crc header follows.
+    // crc header follows
     append_u8(body, 0x08);
     append_u16_be(body, 0xAAAA);
     append_module_body(body, 0x10, "foo", 0x10);

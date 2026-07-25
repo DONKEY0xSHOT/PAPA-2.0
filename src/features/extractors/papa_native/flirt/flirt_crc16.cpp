@@ -16,7 +16,7 @@ std::uint16_t flirt_crc16(std::span<const std::uint8_t> data) noexcept {
             }
         }
     }
-    // FLAIR completes the CRC with a one's-complement and a byte swap.
+    // FLAIR completes the CRC with a one's-complement and a byte swap
     const auto inverted = static_cast<std::uint16_t>(~crc);
     return static_cast<std::uint16_t>((inverted << 8) | (inverted >> 8));
 }

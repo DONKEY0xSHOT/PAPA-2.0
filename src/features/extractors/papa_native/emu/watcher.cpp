@@ -8,7 +8,7 @@ namespace papa::features::extractors::papa_native::emu {
 namespace {
 
 // The all-zero and all-FF byte runs vivisect parses as bad opcodes
-// (archGetBadOps): markers of disassembling data as code.
+// (archGetBadOps): markers of disassembling data as code
 [[nodiscard]] bool is_bad_op_bytes(const DecodedInsn& insn) noexcept {
     if (insn.raw_bytes.size() < 2) {
         return false;
@@ -18,7 +18,7 @@ namespace {
     return (b0 == 0x00 && b1 == 0x00) || (b0 == 0xFF && b1 == 0xFF);
 }
 
-// round(count / total, 3) >= threshold, matching emucode's ratio test.
+// round(count / total, 3) >= threshold, matching emucode's ratio test
 [[nodiscard]] bool ratio_at_least(std::size_t count, std::size_t total,
                                   double threshold) noexcept {
     if (total == 0) {
@@ -33,12 +33,12 @@ namespace {
 
 void Watcher::prehook(WorkspaceEmulator& emu, const DecodedInsn& insn,
                       std::uint64_t /*eip*/) {
-    // Privileged I/O: not a normal function path.
+    // Privileged I/O: not a normal function path
     if (insn.zyd_mnem == ZYDIS_MNEMONIC_OUT) {
         emu.stop_emu();
         return;
     }
-    // `int` with eax == 1 is the process-exit pattern: stop, but still count it.
+    // `int` with eax == 1 is the process-exit pattern: stop, but still count it
     if (insn.zyd_mnem == ZYDIS_MNEMONIC_INT &&
         emu.emu().regs().get_register(kRegEax) == 1U) {
         emu.stop_emu();

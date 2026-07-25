@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 the PAPA authors
-
 // MSVC: <ostream> must precede doctest so std::string pretty-printing compiles
 #include <ostream>
 
@@ -54,7 +51,7 @@ TEST_CASE("decode rejects a garbage byte stream") {
 TEST_CASE("decode flags a SIB-encoded base+disp memory operand") {
     Disassembler d(true);
     // 49 8D 8C 24 B8 00 00 00 : lea rcx, [r12 + 0xB8]
-    // r12 as a base forces a SIB byte, which vivisect splits into i386SibOper.
+    // r12 as a base forces a SIB byte, which vivisect splits into i386SibOper
     const auto bytes = make_bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
@@ -174,7 +171,7 @@ TEST_CASE("decode classifies kSib on an x64 SIB-encoded absolute address") {
     // 8B 04 25 30 00 00 00 : mov eax, [0x30]
     // On x64 a non-RIP absolute address must be SIB-encoded (mod=00, rm=100,
     // base=101). vivisect models this as i386SibOper, whose displacement is an
-    // offset source, not a Number source, so the kind must be kSib not kImmMem.
+    // offset source, not a Number source, so the kind must be kSib not kImmMem
     const auto bytes = make_bytes(0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
@@ -190,7 +187,7 @@ TEST_CASE("decode classifies kSib on a gs segment-relative SIB access") {
     // 65 48 8B 04 25 30 00 00 00 : mov rax, gs:[0x30]  (TEB self-pointer read)
     // This is the shape that made papa over-emit number(0x30) and falsely match
     // get-process-heap-force-flags. It is SIB-encoded, hence kSib (offset), and
-    // capa never produces a Number for it.
+    // capa never produces a Number for it
     const auto bytes = make_bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
@@ -242,7 +239,7 @@ TEST_CASE("decode flags unconditional jmp as not falling through") {
 // INS_DEBUG (int3), INS_HALT (hlt), INS_INVALIDOP (ud0/ud1/ud2), INS_OFLOW
 // (into), INS_TRET (iret), and INS_TRAP (int N, except the platform syscall
 // gate). papa must stop a block on these too, or recovery walks an int3 pad
-// into the next function (the ipconfig get-MAC over-merge).
+// into the next function (the ipconfig get-MAC over-merge)
 TEST_CASE("decode flags int3 as not falling through") {
     Disassembler d(true);
     // CC : int3

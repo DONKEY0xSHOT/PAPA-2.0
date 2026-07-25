@@ -14,7 +14,7 @@ namespace pn = papa::features::extractors::papa_native;
 // get_branches enumerates an instruction's control-flow successors, resolving
 // indirect targets from live emulator state. A faithful port of
 // envi/archs/i386/disasm.py getBranches(emu=self), including the SIB scale-4
-// pointer-table walk that recovers switch cases. Branch flags mirror envi BR_*.
+// pointer-table walk that recovers switch cases. Branch flags mirror envi BR_*
 
 namespace {
 
@@ -126,12 +126,12 @@ TEST_CASE("emu branches: a return has no branches") {
 
 TEST_CASE("emu branches: a SIB scale-4 jump table walks the pointer array") {
     // jmp [idx*4 + table]: get_branches reads consecutive pointers from the
-    // table base and yields each valid one, stopping at the first invalid entry.
+    // table base and yields each valid one, stopping at the first invalid entry
     emu::IntelEmulator e;
-    // A code region the table entries point into.
+    // A code region the table entries point into
     static constexpr std::array<std::uint8_t, 0x40> code{};
     e.memory().add_map(0x401000, emu::kMemRead | emu::kMemExec, code);
-    // The table: three valid targets then a zero (invalid) terminator.
+    // The table: three valid targets then a zero (invalid) terminator
     static const std::array<std::uint8_t, 16> table = {
         0x00, 0x10, 0x40, 0x00,  // 0x00401000
         0x10, 0x10, 0x40, 0x00,  // 0x00401010

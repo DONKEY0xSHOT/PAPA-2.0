@@ -132,7 +132,7 @@ extract_stack_string(const BasicBlock& bb, bool is_64bit) {
     return std::nullopt;
 }
 
-/// Per-basic-block feature aggregate consumed by capabilities orchestration.
+/// Per-basic-block feature aggregate consumed by capabilities orchestration
 std::vector<FeatureWithAddress>
 extract_basic_block_features(const BasicBlock& bb, bool is_64bit) {
     std::vector<FeatureWithAddress> out;

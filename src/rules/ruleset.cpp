@@ -146,7 +146,7 @@ Expected<RuleSet> RuleSet::from_rules(std::vector<std::unique_ptr<Rule>> rules) 
     rs.rules_ = std::move(rules);
 
     // Reorder each rule's statement children so cheap, selective features
-    // evaluate first, the way capa's optimizer does. Parity-neutral on results.
+    // evaluate first, the way capa's optimizer does. Parity-neutral on results
     for (auto& r : rs.rules_) {
         if (r && r->statement_) { optimize(*r->statement_); }
     }

@@ -16,22 +16,10 @@ struct Definition {
     std::optional<std::uint64_t> value;        // resolved constant when known
 };
 
-// Backward scan within fn for the most recent destructive write to target_reg
-// preceding call_va.
-//
-// Returns nullopt when:
-//   - call_va is not contained in any basic block of fn
-//   - target_reg is ZYDIS_REGISTER_NONE
-//   - no destructive write is found before the BB starts
-//
-// When a write is found:
-//   - mov reg, imm           -> Definition{va, imm}
-//   - mov reg, [imm32]       -> Definition{va, imm32}
-//   - mov reg, [rip+disp]    -> Definition{va, rip + length + disp}
-//   - any other destructive  -> Definition{va, nullopt}
-//
-// Aliasing of partial-width registers is resolved through
-// ZydisRegisterGetLargestEnclosing so eax/ax/al all map to rax on x64.
+/// The most recent destructive write to target_reg before call_va, found by
+/// scanning back through its basic block. The value is carried only when the
+/// write is a constant or a fixed-address load. Partial-width registers alias
+/// through their largest enclosing register, so eax and al resolve as rax
 [[nodiscard]] std::optional<Definition>
 find_definition(const Function&     fn,
                 std::uint64_t       call_va,

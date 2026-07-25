@@ -47,7 +47,7 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
     return oss.str();
 }
 
-// Pad a string to at least twenty cells, matching capa's width() header helper.
+// Pad a string to at least twenty cells, matching capa's width() header helper
 [[nodiscard]] std::string pad20(std::string_view s) {
     std::string out(s);
     if (out.size() < 20) { out.append(20 - out.size(), ' '); }
@@ -71,7 +71,7 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
     return out;
 }
 
-// Usable console width capa renders against: COLUMNS if set, else 80, less one.
+// Usable console width capa renders against: COLUMNS if set, else 80, less one
 [[nodiscard]] int default_console_width() {
     int columns = 80;
     std::string value;
@@ -96,7 +96,7 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
     return columns - 1;
 }
 
-// Capability rules in capa's (namespace, name) order, excluding building blocks.
+// Capability rules in capa's (namespace, name) order, excluding building blocks
 [[nodiscard]] std::vector<const RuleReport*>
 capability_rules(const ResultDocument& doc) {
     std::vector<const RuleReport*> out;
@@ -135,14 +135,14 @@ capability_rules(const ResultDocument& doc) {
 }
 
 // Group parsed specs by their leading part (tactic/objective), then render rows.
-// capa colors the group and the detail name cyan, leaving the id default.
+// capa colors the group and the detail name cyan, leaving the id default
 [[nodiscard]] std::string
 render_spec_table(const std::vector<const RuleReport*>& caps,
                   std::vector<std::string> rules::RuleMeta::* field,
                   std::string_view group_header, std::string_view detail_header,
                   int width, bool color) {
     // ATT&CK and MBC share the same parse shape, so one parser serves both:
-    // parts[0] is the group, parts[1] and parts[2] the detail and sub-detail.
+    // parts[0] is the group, parts[1] and parts[2] the detail and sub-detail
     std::map<std::string, std::set<std::tuple<std::string, std::string, std::string>>> groups;
     for (const auto* rep : caps) {
         for (const auto& spec : rep->meta.*field) {
@@ -174,7 +174,7 @@ render_spec_table(const std::vector<const RuleReport*>& caps,
 }
 
 // capa colors the capability name cyan, leaving the namespace and any "(N
-// matches)" suffix default.
+// matches)" suffix default
 [[nodiscard]] std::string
 render_capabilities(const ResultDocument& doc,
                     const std::vector<const RuleReport*>& caps, int width, bool color) {
@@ -182,7 +182,7 @@ render_capabilities(const ResultDocument& doc,
     t.columns = {table::Column{pad20("Capability")}, table::Column{"Namespace"}};
     t.min_width = 100;
     for (const auto* rep : caps) {
-        // A rule pulled in by another capability rule is not listed on its own.
+        // A rule pulled in by another capability rule is not listed on its own
         if (doc.matched_subrules.count(rep->meta.name) != 0) { continue; }
         table::Cell capability;
         capability.add(rep->meta.name, table::Style::kCyan);
@@ -197,7 +197,7 @@ render_capabilities(const ResultDocument& doc,
     return table::render(t, width, color);
 }
 
-// Default report: the meta, ATT&CK, MBC and capability tables capa prints.
+// Default report: the meta, ATT&CK, MBC and capability tables capa prints
 void emit_default(const ResultDocument& doc, std::ostream& out, bool color) {
     const int width = default_console_width();
     const std::vector<const RuleReport*> caps = capability_rules(doc);
@@ -209,12 +209,12 @@ void emit_default(const ResultDocument& doc, std::ostream& out, bool color) {
                                 "MBC Behavior", width, color);
     report += render_capabilities(doc, caps, width, color);
 
-    // capa prints render_default()'s value, which adds one trailing newline.
+    // capa prints render_default()'s value, which adds one trailing newline
     report.push_back('\n');
     out << report;
 }
 
-// Plain header used by the verbose modes, which keep PAPA's own layout.
+// Plain header used by the verbose modes, which keep PAPA's own layout
 void emit_header(const ResultDocument& doc, std::ostream& out) {
     out << "PAPA " << doc.meta.version << '\n';
     out << "sample: " << doc.meta.sample_path.string() << '\n';
@@ -237,7 +237,7 @@ group_by_namespace(const ResultDocument& doc) {
     for (const auto& [_name, rep] : doc.rules) {
         // Library rules are building blocks for other rules, not capabilities.
         // capa matches them and keeps them in --json but never lists them in its
-        // text report, so the text renderer skips them to match that output.
+        // text report, so the text renderer skips them to match that output
         if (rep.meta.lib) { continue; }
         const std::string ns =
             rep.meta.namespace_.value_or(std::string(kNoNamespace));

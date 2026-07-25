@@ -43,7 +43,7 @@ using MatchResults = std::unordered_map<
     std::string,
     std::vector<std::pair<features::Address, Result>>>;
 
-/// Base class for nodes in a rule's logical tree.
+/// Base class for nodes in a rule's logical tree
 class Statement {
 public:
     virtual ~Statement() = default;
@@ -54,7 +54,7 @@ public:
     /// Boolean-only fast path used by RuleSet::match for the cheap probe pass.
     /// Skips the Result tree entirely, eliminating per-evaluation allocations.
     /// The default delegates to evaluate(fs, true) so subclasses that have not
-    /// overridden it remain correct.
+    /// overridden it remain correct
     [[nodiscard]] virtual bool evaluate_quick(const features::FeatureSet& fs) const {
         return evaluate(fs, /*short_circuit=*/true).success;
     }

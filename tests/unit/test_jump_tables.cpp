@@ -17,7 +17,7 @@ namespace {
 
 // Decode a contiguous byte buffer into a straight-line instruction window at
 // ascending VAs. The buffer must outlive the returned window because each
-// DecodedInsn keeps a raw_bytes span into it.
+// DecodedInsn keeps a raw_bytes span into it
 std::vector<pn::DecodedInsn> decode_window(std::span<const std::byte> buf,
                                            std::uint64_t base_va,
                                            const pn::Disassembler& dis) {
@@ -71,7 +71,7 @@ TEST_CASE("jump_tables: resolves the MSVC x64 indexed-jump idiom") {
     REQUIRE_FALSE(window.back().branch_target.has_value());
 
     // Synthetic table: entry k is the RVA (0xab90 + k*0x10), so each target is
-    // 0x14000ab90 + k*0x10, all inside the function range.
+    // 0x14000ab90 + k*0x10, all inside the function range
     const auto reader = [](std::uint64_t va) -> std::optional<std::uint32_t> {
         if (va < kTableVa) { return std::nullopt; }
         const std::uint64_t k = (va - kTableVa) / 4U;
@@ -96,7 +96,7 @@ TEST_CASE("jump_tables: stops at the first entry outside the function range") {
     const auto window = decode_window(buf, kDispatchVa, dis);
     REQUIRE(window.size() == 8);
 
-    // Five in-range entries, then an offset that lands outside [lo, hi).
+    // Five in-range entries, then an offset that lands outside [lo, hi)
     const auto reader = [](std::uint64_t va) -> std::optional<std::uint32_t> {
         const std::uint64_t k = (va - kTableVa) / 4U;
         return static_cast<std::uint32_t>(k < 5U ? 0xab90U + k * 0x10U : 0x200000U);
@@ -120,7 +120,7 @@ TEST_CASE("jump_tables: resolves the x86 memory-indirect indexed jump") {
     REQUIRE(window.back().operands[0].kind == pn::OperandKind::kSib);
 
     constexpr std::uint64_t kTable = 0x00452400ULL;
-    // Four in-range case targets, then a dword outside the section range -> stop.
+    // Four in-range case targets, then a dword outside the section range -> stop
     const auto reader = [](std::uint64_t va) -> std::optional<std::uint32_t> {
         if (va < kTable) { return std::nullopt; }
         const std::uint64_t k = (va - kTable) / 4U;
@@ -166,7 +166,7 @@ TEST_CASE("jump_tables: memory-indirect resolver ignores a base-register table")
 
 TEST_CASE("jump_tables: returns nullopt when the window is not a jump table") {
     const pn::Disassembler dis(true);
-    // mov eax, 1 / ret -- no indirect jump at all.
+    // mov eax, 1 / ret -- no indirect jump at all
     const auto buf = to_bytes({0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3});
     const auto window = decode_window(buf, 0x140001000ULL, dis);
     const auto reader = [](std::uint64_t) -> std::optional<std::uint32_t> {
@@ -175,4 +175,123 @@ TEST_CASE("jump_tables: returns nullopt when the window is not a jump table") {
     const auto res = pn::resolve_indexed_jump_table(
         window, /*is_64bit=*/true, 0ULL, ~0ULL, reader);
     CHECK_FALSE(res.has_value());
+}
+
+TEST_CASE("jump_tables: emulator-driven resolver uses the path-sensitive base") {
+    // The real cmd.exe dispatch block at 0x14000f154 (function 0x14000ef40):
+    //   cmp eax,0x7c / ja +0x44 / movzx eax,byte [r12+rax+0xf738] /
+    //   mov ecx,[r12+rax*4+0xf720] / add rcx,r12 / jmp rcx
+    // r12 holds the image base at the dispatch (a lea sets it far above, at
+    // 0x14000f099, past an intervening pop r12), so only emulation recovers the
+    // base a static lea scan cannot. The offset table at 0x14000f720 holds the
+    // real image-base-relative RVAs, ending at a non-code dword
+    const pn::Disassembler dis(true);
+    const auto disp_buf = to_bytes({
+        0x83, 0xf8, 0x7c,
+        0x77, 0x44,
+        0x41, 0x0f, 0xb6, 0x84, 0x04, 0x38, 0xf7, 0x00, 0x00,
+        0x41, 0x8b, 0x8c, 0x84, 0x20, 0xf7, 0x00, 0x00,
+        0x49, 0x03, 0xcc,
+        0xff, 0xe1});
+    const auto window = decode_window(disp_buf, 0x14000f154ULL, dis);
+    REQUIRE(window.back().is_jump);
+    REQUIRE_FALSE(window.back().branch_target.has_value());
+
+    constexpr std::uint64_t kIb = 0x140000000ULL;
+    // The real offset table read from cmd.exe at RVA 0xf720: six distinct in-text
+    // RVAs, then 0x05050500 which rebases outside .text and stops the walk
+    const std::uint32_t kTable[] = {0xf0ae, 0xf0ba, 0xf173, 0xf17c,
+                                    0xf5d7, 0xf19d, 0x05050500};
+    const auto read_entry = [&](std::uint64_t va) -> std::optional<std::uint32_t> {
+        if (va < kIb + 0xf720ULL) { return std::nullopt; }
+        const std::uint64_t i = (va - (kIb + 0xf720ULL)) / 4ULL;
+        if (i >= sizeof(kTable) / sizeof(kTable[0])) { return std::nullopt; }
+        return kTable[i];
+    };
+
+    pn::SwitchEnv env;
+    env.image_base = kIb;
+    env.read_entry = read_entry;
+    env.is_probably_code = [](std::uint64_t va) {
+        return va >= 0x140001000ULL && va < 0x140010000ULL;  // .text extent
+    };
+    // The emulator resolves r12 to the image base at the dispatch
+    env.base_reg_value = [](ZydisRegister reg) -> std::optional<std::uint64_t> {
+        if (reg == ZYDIS_REGISTER_R12) { return 0x140000000ULL; }
+        return std::nullopt;
+    };
+
+    const auto jt = pn::resolve_switch_jump_table(window, /*is_64bit=*/true, env);
+    REQUIRE(jt.has_value());
+    CHECK(jt->table_va == kIb + 0xf720ULL);
+    REQUIRE(jt->targets.size() == 6U);
+    CHECK(jt->targets[0] == 0x14000f0aeULL);
+    CHECK(jt->targets[1] == 0x14000f0baULL);
+    CHECK(jt->targets[2] == 0x14000f173ULL);
+    CHECK(jt->targets[3] == 0x14000f17cULL);
+    CHECK(jt->targets[4] == 0x14000f5d7ULL);
+    CHECK(jt->targets[5] == 0x14000f19dULL);
+    CHECK(jt->table_size == 6U * 4U);
+}
+
+TEST_CASE("jump_tables: emulator-driven resolver bails when the base is not the image base") {
+    const pn::Disassembler dis(true);
+    const auto disp_buf = to_bytes({
+        0x41, 0x8b, 0x8c, 0x84, 0x20, 0xf7, 0x00, 0x00,
+        0x49, 0x03, 0xcc,
+        0xff, 0xe1});
+    const auto window = decode_window(disp_buf, 0x14000f14aULL, dis);
+
+    pn::SwitchEnv env;
+    env.image_base = 0x140000000ULL;
+    env.read_entry = [](std::uint64_t) -> std::optional<std::uint32_t> { return 0xf0ae; };
+    env.is_probably_code = [](std::uint64_t) { return true; };
+    // The base register does not resolve to the image base (a stale value or an
+    // unreachable dispatch), so the table cannot be rebased and resolution bails
+    env.base_reg_value = [](ZydisRegister) -> std::optional<std::uint64_t> {
+        return 0x140034330ULL;
+    };
+    const auto jt = pn::resolve_switch_jump_table(window, /*is_64bit=*/true, env);
+    CHECK_FALSE(jt.has_value());
+}
+
+TEST_CASE("jump_tables: resolves the MSVC x64 two-level indexed switch") {
+    const pn::Disassembler dis(true);
+    // lea r12, [rip+152460]  at 0x14000ef9d, so r12 = 0x140034370
+    const auto lea_buf = to_bytes({0x4c, 0x8d, 0x25, 0x8c, 0x53, 0x02, 0x00});
+    // The dispatch at 0x14000f154 (real cmd_x64 bytes):
+    //   cmp eax,124 / ja +.. / movzx eax,byte [r12+rax+0xf738] /
+    //   mov ecx,[r12+rax*4+0xf720] / add rcx,r12 / jmp rcx
+    const auto disp_buf = to_bytes({
+        0x83, 0xf8, 0x7c,
+        0x77, 0x44,
+        0x41, 0x0f, 0xb6, 0x84, 0x04, 0x38, 0xf7, 0x00, 0x00,
+        0x41, 0x8b, 0x8c, 0x84, 0x20, 0xf7, 0x00, 0x00,
+        0x49, 0x03, 0xcc,
+        0xff, 0xe1});
+    auto window = decode_window(lea_buf, 0x14000ef9dULL, dis);
+    auto dispatch = decode_window(disp_buf, 0x14000f154ULL, dis);
+    for (auto& d : dispatch) { window.push_back(std::move(d)); }
+
+    constexpr std::uint64_t kBaseVa = 0x140034330ULL;
+    const std::uint64_t     map_va  = kBaseVa + 0xf738ULL;
+    const std::uint64_t     off_va  = kBaseVa + 0xf720ULL;
+    // The byte index-map remaps each of the 125 switch values onto one of three
+    // offset-table entries, so there are three distinct case targets
+    const auto read_u8 = [&](std::uint64_t va) -> std::optional<std::uint8_t> {
+        if (va < map_va || va >= map_va + 125ULL) { return std::nullopt; }
+        return static_cast<std::uint8_t>((va - map_va) % 3ULL);
+    };
+    const auto read_u32 = [&](std::uint64_t va) -> std::optional<std::uint32_t> {
+        if (va < off_va) { return std::nullopt; }
+        const std::uint64_t i = (va - off_va) / 4ULL;
+        return static_cast<std::uint32_t>(0xf000ULL + i * 0x100ULL);
+    };
+    const auto jt = pn::resolve_two_level_indexed_jump_table(
+        window, /*is_64bit=*/true, 0x140000000ULL, 0x141000000ULL, read_u32, read_u8);
+    REQUIRE(jt.has_value());
+    REQUIRE(jt->targets.size() == 3);
+    CHECK(jt->targets[0] == kBaseVa + 0xf000ULL);
+    CHECK(jt->targets[1] == kBaseVa + 0xf100ULL);
+    CHECK(jt->targets[2] == kBaseVa + 0xf200ULL);
 }

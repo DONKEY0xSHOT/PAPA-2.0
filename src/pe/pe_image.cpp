@@ -68,6 +68,24 @@ const ParsedSection* PeImage::section_containing_rva(std::uint64_t rva) const no
     return nullptr;
 }
 
+std::size_t PeImage::readable_bytes_at_rva(std::uint64_t rva) const noexcept {
+    const auto off = rva_to_file_offset(rva);
+    if (!off.has_value() || *off >= buffer_.size()) {
+        return 0;
+    }
+    std::size_t avail = buffer_.size() - static_cast<std::size_t>(*off);
+    // Mapped data stops at the end of the containing section's raw bytes
+    if (const auto* s = section_containing_rva(rva); s != nullptr) {
+        const std::uint64_t delta = rva - s->virtual_address;
+        if (delta >= s->raw_size) {
+            return 0;
+        }
+        avail = std::min<std::size_t>(
+            avail, static_cast<std::size_t>(s->raw_size - delta));
+    }
+    return avail;
+}
+
 bool PeImage::probe_readable(std::uint64_t rva, std::size_t n) const noexcept {
     const auto* s = section_containing_rva(rva);
     if (s == nullptr) {

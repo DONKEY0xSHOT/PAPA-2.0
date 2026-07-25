@@ -7,6 +7,8 @@
 #include "papa/pe/pe_image.h"
 
 #include <utility>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -32,16 +34,24 @@ public:
     [[nodiscard]] const std::vector<Function>&  functions()    const noexcept;
     [[nodiscard]] const ImportTable&            imports()      const noexcept;
 
+    /// The library functions FLIRT named during analysis, keyed by address. This
+    /// is the workspace library state capa's is_library_function reads, produced
+    /// by the single FLIRT pass that ran while functions were being made
+    [[nodiscard]] const std::unordered_map<std::uint64_t, std::string>&
+    flirt_library_names() const noexcept;
+
 private:
     PapaNativeBackend(const ::papa::pe::PeImage& image,
                       Disassembler               disasm,
                       std::vector<Function>      funcs,
-                      ImportTable                imps);
+                      ImportTable                imps,
+                      std::unordered_map<std::uint64_t, std::string> lib_names);
 
     const ::papa::pe::PeImage* image_{nullptr};
     Disassembler               disasm_;
     std::vector<Function>      functions_;
     ImportTable                imports_;
+    std::unordered_map<std::uint64_t, std::string> flirt_library_names_;
 };
 
 }  // namespace papa::features::extractors::papa_native

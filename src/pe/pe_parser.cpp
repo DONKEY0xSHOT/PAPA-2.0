@@ -154,7 +154,7 @@ struct DataDirectory {
             // Resolve the DLLs commonly linked by ordinal (ws2_32, oleaut32) to
             // their symbol names the way vivisect's ordlookup does, so api and
             // import features use the name (getsockname) rather than the ordinal.
-            // A resolved import is then a named one.
+            // A resolved import is then a named one
             if (const auto name = lookup_ordinal_name(normalized_dll, item.ordinal);
                 name.has_value()) {
                 item.name       = std::string{*name};
@@ -245,9 +245,22 @@ struct DataDirectory {
         return Unexpected{make_error(ErrorKind::kBadPe, "truncated export directory")};
     }
 
-    std::vector<std::string> name_by_func_index(edir.NumberOfFunctions);
+    // NumberOfFunctions and NumberOfNames are attacker-controlled 32-bit header
+    // fields, so neither may size an allocation or bound a loop on its own. Clamp
+    // each to the entries the image can actually supply, which leaves every valid
+    // PE untouched and stops a crafted count from asking for gigabytes
+    const std::uint32_t func_count = static_cast<std::uint32_t>(std::min<std::size_t>(
+        {edir.NumberOfFunctions,
+         image.readable_bytes_at_rva(edir.AddressOfFunctions) / sizeof(std::uint32_t),
+         constants::kMaxExportsPerImage}));
+    const std::uint32_t name_count = static_cast<std::uint32_t>(std::min<std::size_t>(
+        {edir.NumberOfNames,
+         image.readable_bytes_at_rva(edir.AddressOfNames) / sizeof(std::uint32_t),
+         constants::kMaxExportsPerImage}));
 
-    for (std::uint32_t i = 0; i < edir.NumberOfNames; ++i) {
+    std::vector<std::string> name_by_func_index(func_count);
+
+    for (std::uint32_t i = 0; i < name_count; ++i) {
         const std::uint64_t name_rva_off =
             std::uint64_t{edir.AddressOfNames} + i * sizeof(std::uint32_t);
         const std::uint64_t ord_off =
@@ -261,17 +274,17 @@ struct DataDirectory {
         std::uint16_t func_idx = 0;
         if (!read_le<std::uint32_t>(*name_rva_bytes, 0, name_rva)) { continue; }
         if (!read_le<std::uint16_t>(*ord_bytes, 0, func_idx))      { continue; }
-        if (func_idx >= edir.NumberOfFunctions) { continue; }
+        if (func_idx >= func_count) { continue; }
 
         auto s = read_cstring_at_rva(image, name_rva);
         if (!s) { continue; }
         name_by_func_index[func_idx] = std::move(*s);
     }
 
-    out.reserve(edir.NumberOfFunctions);
+    out.reserve(func_count);
     const std::uint32_t export_dir_end = dd.rva + dd.size;
 
-    for (std::uint32_t i = 0; i < edir.NumberOfFunctions; ++i) {
+    for (std::uint32_t i = 0; i < func_count; ++i) {
         const std::uint64_t func_rva_off =
             std::uint64_t{edir.AddressOfFunctions} + i * sizeof(std::uint32_t);
         auto func_bytes = image.read_at_rva(func_rva_off, sizeof(std::uint32_t));
@@ -351,7 +364,7 @@ struct DataDirectory {
 // vivisect PE.parseRelocations. Every entry is retained including the type-0
 // ABSOLUTE block padding so the pointers pass sees the same set vivisect does.
 // A corrupt directory is tolerated: the walk stops and the partial list stands,
-// matching vivisect's log-and-return behavior rather than failing the parse.
+// matching vivisect's log-and-return behavior rather than failing the parse
 [[nodiscard]] std::vector<ParsedRelocation> parse_relocations(
     const PeImage& image, const std::vector<ImageDataDirectory>& dirs) {
     std::vector<ParsedRelocation> out;
@@ -359,7 +372,7 @@ struct DataDirectory {
     if (dd.rva == 0 || dd.size == 0) { return out; }
 
     // Read the whole directory, clamped to the bytes actually mapped in the
-    // containing section, then walk fixed-size block headers within it.
+    // containing section, then walk fixed-size block headers within it
     std::uint64_t avail = dd.size;
     if (const auto* s = image.section_containing_rva(dd.rva); s != nullptr) {
         const std::uint64_t delta     = dd.rva - s->virtual_address;

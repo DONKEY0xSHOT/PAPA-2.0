@@ -6,6 +6,14 @@ set(PAPA_UNIT_TEST_SOURCES
     test_pe_parser.cpp
     test_disassembler.cpp
     test_cfg.cpp
+    test_viv_location_db.cpp
+    test_viv_xref_db.cpp
+    test_viv_cf_context.cpp
+    test_viv_codeblocks.cpp
+    test_viv_discovery.cpp
+    test_viv_discovery_passes.cpp
+    test_viv_engine.cpp
+    test_viv_flirt_analysis.cpp
     test_jump_tables.cpp
     test_noreturn.cpp
     test_address.cpp

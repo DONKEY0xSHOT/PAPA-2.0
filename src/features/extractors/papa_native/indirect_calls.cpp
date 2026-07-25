@@ -102,7 +102,7 @@ scan_block_backward(const BasicBlock& bb, std::size_t upto,
 }
 
 // Locate the block whose entry equals va. basic_blocks is sorted by entry VA,
-// so a binary search keeps the predecessor walk cheap on large functions.
+// so a binary search keeps the predecessor walk cheap on large functions
 [[nodiscard]] const BasicBlock* block_at(const Function& fn, std::uint64_t va) noexcept {
     const auto it = std::lower_bound(
         fn.basic_blocks.begin(), fn.basic_blocks.end(), va,
@@ -115,7 +115,7 @@ scan_block_backward(const BasicBlock& bb, std::size_t upto,
 // breadth-first walk over predecessor blocks, returning the nearest reaching
 // definition. This approximates the emulation-based resolution capa performs:
 // the register is loaded from the IAT once and called later past a guard, so
-// the closest backward write is the one an emulator would observe at the call.
+// the closest backward write is the one an emulator would observe at the call
 [[nodiscard]] std::optional<Definition>
 define_at_entry(const Function& fn, const BasicBlock& start,
                 ZydisRegister reg, bool is_64bit) {
@@ -183,7 +183,7 @@ find_definition(const Function&    fn,
 
     // The register is set up in an earlier block, as compilers routinely do for
     // an import loaded once and called past a guard. Search predecessors for the
-    // nearest reaching definition.
+    // nearest reaching definition
     return define_at_entry(fn, *host, target_reg, is_64bit);
 }
 

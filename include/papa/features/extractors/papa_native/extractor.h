@@ -76,29 +76,22 @@ public:
     void set_function_name(std::uint64_t va, std::string name);
 
     /// Replace the bundled library-signature table with caller-supplied entries.
-    /// Used by tests and by callers that ship their own pattern packs.
+    /// Used by tests and by callers that ship their own pattern packs
     void set_library_signatures(LibrarySignatureSet sigs) noexcept;
 
     [[nodiscard]] const PapaNativeBackend& backend() const noexcept { return backend_; }
 
     // The library name FLIRT assigned to the function at va, or nullopt when it
     // is not a named library function. Used to name calls to statically-linked
-    // library routines (e.g. _beginthreadex) and the report's library functions.
+    // library routines (e.g. _beginthreadex) and the report's library functions
     [[nodiscard]] std::optional<std::string> flirt_name_at(std::uint64_t va) const;
 
 private:
-    // Classify every recovered function once, populating flirt_cache_ so library
-    // names are available for any VA. Idempotent.
-    void ensure_flirt_primed() const;
-
-    PapaNativeBackend                                       backend_;
-    std::unordered_map<std::uint64_t, std::string>          function_names_;
-    LibrarySignatureSet                                     library_sigs_;
-    // Memoizes FLIRT library classifications across the per-function calls the
-    // orchestrator makes, so reference recursion is not repeated and a match's
-    // offset names mark sibling functions regardless of query order.
-    mutable flirt::FlirtClassifier::Cache                   flirt_cache_;
-    mutable bool                                            flirt_primed_{false};
+    PapaNativeBackend                              backend_;
+    std::unordered_map<std::uint64_t, std::string> function_names_;
+    // Supplies the structural thunk check. The FLIRT signatures themselves are
+    // consumed during analysis, so the library names come from the backend
+    LibrarySignatureSet                            library_sigs_;
 };
 
 }  // namespace papa::features::extractors::papa_native

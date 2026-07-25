@@ -10,11 +10,11 @@ namespace {
 
 // Bytes read per function for matching. Only the 32-byte pattern and the CRC
 // tail window (at most 0xFF bytes past it) are inspected, so a small window
-// suffices and keeps the cold library-classification pass cheap.
+// suffices and keeps the cold library-classification pass cheap
 constexpr std::size_t kMatchWindow     = 0x200;
 
-// Recursion bound on reference chains. Real signature graphs are shallow; the
-// cap keeps a crafted, cyclic input from exhausting the stack.
+// Recursion bound on reference chains. Real signature graphs are shallow. The
+// cap keeps a crafted, cyclic input from exhausting the stack
 constexpr std::size_t kMaxClassifyDepth = 64;
 
 // The name a module assigns at the function entry: the name at offset 0,
@@ -22,7 +22,7 @@ constexpr std::size_t kMaxClassifyDepth = 64;
 // viv_utils.flirt.get_match_name, which returns the first offset-0 name without
 // filtering by kind, so a statically linked helper that carries only a local
 // name (such as _check_managed_app) is still named. A module with no offset-0
-// name confers no identity.
+// name confers no identity
 [[nodiscard]] std::optional<std::string> match_name(const FlirtModule& module) {
     for (const FlirtName& n : module.names) {
         if (n.offset == 0) {
@@ -35,9 +35,14 @@ constexpr std::size_t kMaxClassifyDepth = 64;
 }  // namespace
 
 FlirtClassifier::FlirtClassifier(ModuleMatchFn matcher,
-                                 const FunctionContext& context,
-                                 Cache& cache) noexcept
-    : matcher_(std::move(matcher)), context_(&context), cache_(&cache) {}
+                                 const FunctionContext& context, Cache& cache,
+                                 OnMatch       on_match,
+                                 LibraryLookup library_lookup) noexcept
+    : matcher_(std::move(matcher)),
+      context_(&context),
+      cache_(&cache),
+      on_match_(std::move(on_match)),
+      library_lookup_(std::move(library_lookup)) {}
 
 std::optional<std::string> FlirtClassifier::classify(std::uint64_t va) const {
     return classify_at(va, 0);
@@ -50,11 +55,11 @@ FlirtClassifier::classify_at(std::uint64_t va, std::size_t depth) const {
     }
     if (depth >= kMaxClassifyDepth || !context_->is_function_entry(va)) {
         // Transient negatives (depth cap, not a function) are left uncached so a
-        // shallower visit can still resolve the same address.
+        // shallower visit can still resolve the same address
         return std::nullopt;
     }
 
-    // Tentatively cache a negative so a reference cycle back to va terminates.
+    // Tentatively cache a negative so a reference cycle back to va terminates
     (*cache_)[va] = std::nullopt;
 
     const std::span<const std::uint8_t> bytes = context_->code_at(va, kMatchWindow);
@@ -77,20 +82,23 @@ FlirtClassifier::classify_at(std::uint64_t va, std::size_t depth) const {
             winner = module;
         } else if (*result != *name) {
             // Surviving candidates disagree on the name, so the match is
-            // ambiguous and confers no identity.
+            // ambiguous and confers no identity
             return std::nullopt;
         }
     }
 
-    // A match also names the functions at its other offsets (locals and extra
-    // publics), marking them library too. This is how a containing signature
-    // identifies a sibling whose own bytes no signature matches, matching
-    // viv_utils.flirt's add_function_flirt_match over match.names.
+    // A match also names the functions at its other offsets, so a sibling whose
+    // own bytes no signature matches is still identified. The memo records them
+    // here, and the driver's on_match hook applies viv_utils.flirt's name loops
+    // (creating a local sibling's function, marking each named address library)
     if (winner != nullptr) {
         for (const FlirtName& named : winner->names) {
             if (named.offset != 0) {
                 (*cache_)[va + static_cast<std::uint64_t>(named.offset)] = named.name;
             }
+        }
+        if (on_match_) {
+            on_match_(va, *winner);
         }
     }
 
@@ -107,7 +115,7 @@ bool FlirtClassifier::references_satisfied(const FlirtModule& module,
             return false;
         }
 
-        // A "." reference asserts a data reference rather than a named call.
+        // A "." reference asserts a data reference rather than a named call
         if (ref.name == ".") {
             if (xref->is_code) {
                 return false;
@@ -118,13 +126,16 @@ bool FlirtClassifier::references_satisfied(const FlirtModule& module,
             return false;
         }
 
-        // capa's viv_utils.flirt validates a named reference only against a local
-        // function that is itself a matched library function of that name. A
-        // reference that resolves to an import is not accepted, so a signature
-        // whose only reference is an imported API (for example ___crtTlsAlloc@4
-        // referencing TlsAlloc) does not match.
-        const std::optional<std::string> target_name =
+        // capa validates a named reference only against a local function that is
+        // itself a matched library function of that name, never an import, so a
+        // signature whose only reference is an imported API does not match. It
+        // recurses first, then reads the workspace library state, which may carry
+        // a name an earlier signature file assigned
+        std::optional<std::string> target_name =
             classify_at(xref->target, depth + 1);
+        if (library_lookup_) {
+            target_name = library_lookup_(xref->target);
+        }
         if (!target_name.has_value() || *target_name != ref.name) {
             return false;
         }

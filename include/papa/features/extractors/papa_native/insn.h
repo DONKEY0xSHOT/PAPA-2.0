@@ -137,27 +137,18 @@ extract_cross_section_flow(const DecodedInsn&         ins,
 // skipping). Returns the import row, or nullptr when the target is not an
 // import. Register-indirect calls (kReg) are out of scope because resolving
 // them needs the function context for a backward slice. Shared by API feature
-// extraction and the no-return oracle so both agree on what a call reaches.
+// extraction and the no-return oracle so both agree on what a call reaches
 [[nodiscard]] const ::papa::pe::ParsedImport*
 resolve_direct_call_import(const DecodedInsn&         ins,
                            const ::papa::pe::PeImage& image,
                            const ImportTable&         imports,
                            const Disassembler&        disasm);
 
-// Resolve every API name implied by a CALL or thunk-style JMP instruction
-//
-// For direct IAT calls (kImmMem and kRipRel) the operand encodes the IAT slot
-// directly and we look it up in imports.by_iat_va.
-//
-// For PC-relative calls (kPcRel) the target may be a thunk
-// We follow up to kThunkChainDepthDelta levels of unconditional JMP/CALL with
-// optional CET ENDBRANCH skipping, decoding through disasm at each step.
-//
-// For register-indirect calls (kReg) we backward-slice with find_definition
-// from indirect_calls.h to learn the resolved value (if any) and look it up.
-//
-// Each emitted Api feature uses the symbol variants from generate_symbols so
-// rules can match dotted, bare, or AW-stripped spellings interchangeably.
+/// Every API name a call or thunk-style jump implies. A direct IAT operand is
+/// looked up straight away, a PC-relative target is followed through its thunk
+/// chain, and a register target is backward-sliced to its definition. Each name
+/// is emitted in the spelling variants rules may use, so dotted, bare, and
+/// AW-stripped forms all match
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_api_features(const Function&            fn,
                      const BasicBlock&          bb,
@@ -171,7 +162,7 @@ extract_api_features(const Function&            fn,
 // _beginthreadex that are not imports. `flirt_name` returns the function's
 // library name for a VA, or nullopt when it is not a named library function.
 // A leading-underscore name also yields its stripped form (capa: _fwrite ->
-// fwrite), so a rule can match either spelling.
+// fwrite), so a rule can match either spelling
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_flirt_call_api(
     const DecodedInsn& ins,

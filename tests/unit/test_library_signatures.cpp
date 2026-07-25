@@ -21,7 +21,7 @@ using papa::features::extractors::papa_native::OperandKind;
 namespace {
 
 /// Build a single-block, single-instruction function used to exercise the
-/// thunk classifier.
+/// thunk classifier
 [[nodiscard]] Function make_single_insn_function(DecodedInsn ins) {
     Function fn;
     fn.va = ins.va;

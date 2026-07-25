@@ -26,7 +26,7 @@ reg_index_from_zydis(ZydisRegister reg, bool is_64bit) noexcept {
             case ZYDIS_REGISTER_R14: return kRegR14;
             case ZYDIS_REGISTER_R15: return kRegR15;
             case ZYDIS_REGISTER_RIP: return kRegRip;
-            // 32-bit lanes: writing zero-extends into the parent (RMETA_LOW32).
+            // 32-bit lanes: writing zero-extends into the parent (RMETA_LOW32)
             case ZYDIS_REGISTER_EAX: return make_meta_reg(0, 32, kRegRax);
             case ZYDIS_REGISTER_ECX: return make_meta_reg(0, 32, kRegRcx);
             case ZYDIS_REGISTER_EDX: return make_meta_reg(0, 32, kRegRdx);
@@ -207,13 +207,13 @@ void IntelEmulator::set_oper_value(const DecodedInsn& insn, std::size_t idx,
             mem_.write_value(get_oper_addr(insn, idx), value, op.width_bytes);
             break;
         default:
-            // Immediate / pc-relative operands cannot be written.
+            // Immediate / pc-relative operands cannot be written
             break;
     }
 }
 
 namespace {
-// XMM register index (0..15) for an SSE register operand, else nullopt.
+// XMM register index (0..15) for an SSE register operand, else nullopt
 [[nodiscard]] std::optional<std::uint32_t> xmm_index(ZydisRegister reg) noexcept {
     if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM15) {
         return static_cast<std::uint32_t>(reg - ZYDIS_REGISTER_XMM0);
@@ -230,7 +230,7 @@ Xmm IntelEmulator::read_simd_oper(const DecodedInsn& insn, std::size_t idx,
         if (const auto xi = xmm_index(op.base_reg); xi.has_value()) {
             return regs_.get_xmm(*xi);
         }
-        // General-purpose register source (the movd/movq reg form).
+        // General-purpose register source (the movd/movq reg form)
         const std::uint64_t v = register_value(op.base_reg);
         for (std::size_t i = 0; i < width && i < out.size(); ++i) {
             out[i] = static_cast<std::uint8_t>((v >> (8U * i)) & 0xFFU);
@@ -250,7 +250,7 @@ void IntelEmulator::write_simd_oper(const DecodedInsn& insn, std::size_t idx,
     const DecodedOperand& op = insn.operands[idx];
     if (op.kind == OperandKind::kReg) {
         if (const auto xi = xmm_index(op.base_reg); xi.has_value()) {
-            // XMM destination: low `width` bytes set, the upper bytes cleared.
+            // XMM destination: low `width` bytes set, the upper bytes cleared
             Xmm v{};
             for (std::size_t i = 0; i < width && i < v.size(); ++i) {
                 v[i] = value[i];
@@ -258,7 +258,7 @@ void IntelEmulator::write_simd_oper(const DecodedInsn& insn, std::size_t idx,
             regs_.set_xmm(*xi, v);
             return;
         }
-        // General-purpose register destination (the movd/movq reg form).
+        // General-purpose register destination (the movd/movq reg form)
         std::uint64_t v = 0;
         for (std::size_t i = 0; i < width && i < 8U; ++i) {
             v |= static_cast<std::uint64_t>(value[i]) << (8U * i);
@@ -355,7 +355,7 @@ namespace {
 // The accumulator/data register lane for a given operand size (the _emu_*GpReg
 // trick): al/ax/eax(/rax) for base rax, dl/dx/edx(/rdx) for base rdx. In 64-bit
 // mode the 4-byte lane is a zero-extend lane (writing eax clears the upper 32
-// bits of rax); the 8-byte accumulator is the real register itself.
+// bits of rax). The 8-byte accumulator is the real register itself
 [[nodiscard]] std::uint32_t gp_lane(std::uint32_t base, std::size_t size,
                                     bool is_64bit) noexcept {
     if (size == 1) {
@@ -372,7 +372,7 @@ namespace {
 
 // High 64 bits of the unsigned 64x64 product, via 32-bit halves (portable, no
 // intrinsics, no undefined >>64). Used for 64-bit mul/imul where the product
-// spans rdx:rax.
+// spans rdx:rax
 [[nodiscard]] std::uint64_t umul_hi(std::uint64_t a, std::uint64_t b) noexcept {
     const std::uint64_t a_lo = a & 0xFFFFFFFFULL;
     const std::uint64_t a_hi = a >> 32;
@@ -387,7 +387,7 @@ namespace {
     return hh + (lh >> 32) + (hl >> 32) + (cross >> 32);
 }
 
-// High 64 bits of the signed 64x64 product, derived from the unsigned high.
+// High 64 bits of the signed 64x64 product, derived from the unsigned high
 [[nodiscard]] std::uint64_t smul_hi(std::uint64_t a, std::uint64_t b) noexcept {
     std::uint64_t hi = umul_hi(a, b);
     if ((a >> 63) != 0) {
@@ -400,8 +400,8 @@ namespace {
 }
 
 // Unsigned 128/64 long division. Never traps (unlike the hardware DIV or the
-// _udiv128 intrinsic); the quotient is masked to 64 bits to match vivisect,
-// whose Python-bigint quotient is truncated by setRegister.
+// _udiv128 intrinsic). The quotient is masked to 64 bits to match vivisect,
+// whose Python-bigint quotient is truncated by setRegister
 struct Div128 {
     std::uint64_t quot;
     std::uint64_t rem;
@@ -417,7 +417,7 @@ struct Div128 {
         rem = (rem << 1) | bit;
         quot <<= 1;
         // rem_top catches the 65-bit overflow: a set top bit means the true
-        // remainder already exceeds the 64-bit divisor.
+        // remainder already exceeds the 64-bit divisor
         if (rem_top != 0 || rem >= d) {
             rem -= d;
             quot |= 1ULL;
@@ -437,13 +437,13 @@ std::vector<Branch> IntelEmulator::get_branches(const DecodedInsn& insn) const {
     std::uint32_t flags = 0;
     bool addb = false;
 
-    // A conditional branch makes even the fall-through conditional.
+    // A conditional branch makes even the fall-through conditional
     if (insn.is_jump && insn.is_conditional) {
         flags |= kBrCond;
         addb = true;
     }
 
-    // Fall-through edge (unless the instruction never falls through).
+    // Fall-through edge (unless the instruction never falls through)
     if (insn.is_fallthrough) {
         ret.push_back(Branch{insn.va + insn.length, flags | kBrFall});
     }
@@ -459,7 +459,7 @@ std::vector<Branch> IntelEmulator::get_branches(const DecodedInsn& insn) const {
         const DecodedOperand& op0 = insn.operands[0];
         if (op0.kind == OperandKind::kSib && op0.scale == 4) {
             // Jump table: read consecutive pointers from the table base and
-            // yield each valid one, stopping at the first invalid entry.
+            // yield each valid one, stopping at the first invalid entry
             std::uint64_t base = static_cast<std::uint64_t>(op0.disp);
             if (op0.base_reg != ZYDIS_REGISTER_NONE) {
                 base += register_value(op0.base_reg);
@@ -515,7 +515,7 @@ bool IntelEmulator::condition_met(ZydisMnemonic mnem) const noexcept {
         case ZYDIS_MNEMONIC_JNP:   return !pf;                 // cond_np
         case ZYDIS_MNEMONIC_JCXZ:  return regs_.get_register(kRegCx) == 0;
         case ZYDIS_MNEMONIC_JECXZ: return regs_.get_register(kRegEcx) == 0;
-        // SETcc share the same condition algebra as the matching Jcc.
+        // SETcc share the same condition algebra as the matching Jcc
         case ZYDIS_MNEMONIC_SETB:   return cf;
         case ZYDIS_MNEMONIC_SETNB:  return !cf;
         case ZYDIS_MNEMONIC_SETBE:  return cf || zf;
@@ -532,7 +532,7 @@ bool IntelEmulator::condition_met(ZydisMnemonic mnem) const noexcept {
         case ZYDIS_MNEMONIC_SETNS:  return !sf;
         case ZYDIS_MNEMONIC_SETP:   return pf;
         case ZYDIS_MNEMONIC_SETNP:  return !pf;
-        // CMOVcc share the same condition algebra as the matching Jcc.
+        // CMOVcc share the same condition algebra as the matching Jcc
         case ZYDIS_MNEMONIC_CMOVB:   return cf;
         case ZYDIS_MNEMONIC_CMOVNB:  return !cf;
         case ZYDIS_MNEMONIC_CMOVBE:  return cf || zf;
@@ -558,11 +558,11 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
     ExecResult result = ExecResult::kContinue;
     std::optional<std::uint64_t> next_pc;
 
-    // dst size for the common two-operand and one-operand arithmetic shapes.
+    // dst size for the common two-operand and one-operand arithmetic shapes
     const std::size_t dsize =
         insn.operand_count > 0 ? insn.operands[0].width_bytes : 4;
 
-    // add / adc core (emu.py i_add). carry_in folds CF for adc.
+    // add / adc core (emu.py i_add). carry_in folds CF for adc
     const auto op_add = [&](bool carry_in) {
         const std::uint64_t dst = get_oper_value(insn, 0);
         std::uint64_t src = get_oper_value(insn, 1);
@@ -748,7 +748,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
 
         case ZYDIS_MNEMONIC_CALL:
             // i_call: push the return address, then jump. The WorkspaceEmulator
-            // intercepts IF_CALL (func_only) before this matters for discovery.
+            // intercepts IF_CALL (func_only) before this matters for discovery
             do_push(insn.va + insn.length, ptr_size());
             next_pc = get_oper_value(insn, 0);
             break;
@@ -791,7 +791,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         }
 
         case ZYDIS_MNEMONIC_LEAVE: {
-            // i_leave: ESP = EBP, then EBP = pop().
+            // i_leave: ESP = EBP, then EBP = pop()
             regs_.set_register(kRegEsp, regs_.get_register(kRegEbp));
             regs_.set_register(kRegEbp, do_pop(ptr_size()));
             break;
@@ -806,7 +806,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             }
             const std::uint64_t shifted = dst << src;
             // The carry is the last bit shifted out, read from dst so a 64-bit
-            // shift never needs an undefined >>64 of `shifted`.
+            // shift never needs an undefined >>64 of `shifted`
             const std::uint64_t cf = (dst >> (8U * dsize - src)) & 1ULL;
             const std::uint64_t res = bits::unsigned_(shifted, dsize);
             regs_.set_flag(kEflagsCf, cf != 0);
@@ -871,7 +871,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             const std::uint64_t a =
                 regs_.get_register(gp_lane(kRegEax, dsize, is_64bit_));
             if (dsize == 8) {
-                // 64-bit mul: the product spans rdx:rax (envi Amd64Emulator).
+                // 64-bit mul: the product spans rdx:rax (envi Amd64Emulator)
                 const std::uint64_t lo = a * val;
                 const std::uint64_t hi = umul_hi(a, val);
                 regs_.set_register(kRegRax, lo);
@@ -898,14 +898,14 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_IMUL: {
             std::uint64_t res = 0;
             if (insn.operand_count == 1 && dsize == 8) {
-                // 64-bit one-operand imul: signed product spans rdx:rax.
+                // 64-bit one-operand imul: signed product spans rdx:rax
                 const std::uint64_t aval = regs_.get_register(kRegRax);
                 const std::uint64_t bval = get_oper_value(insn, 0);
                 const std::uint64_t lo = aval * bval;
                 const std::uint64_t hi = smul_hi(aval, bval);
                 regs_.set_register(kRegRax, lo);
                 regs_.set_register(kRegRdx, hi);
-                // CF/OF clear iff the full product sign-extends from rax alone.
+                // CF/OF clear iff the full product sign-extends from rax alone
                 const bool fits = ((lo >> 63) == 0 && hi == 0) ||
                                   ((lo >> 63) != 0 && hi == 0xFFFFFFFFFFFFFFFFULL);
                 regs_.set_flag(kEflagsCf, !fits);
@@ -930,7 +930,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
                 regs_.set_flag(kEflagsCf, of);
                 regs_.set_flag(kEflagsOf, of);
             } else {
-                // Two- and three-operand forms multiply the last two operands.
+                // Two- and three-operand forms multiply the last two operands
                 const std::size_t lhs = insn.operand_count == 3 ? 1 : 0;
                 std::uint64_t a = get_oper_value(insn, lhs);
                 std::uint64_t b = get_oper_value(insn, lhs + 1);
@@ -970,7 +970,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
                 regs_.set_register(gp_lane(kRegEax, 4, is_64bit_), tot / val);
                 regs_.set_register(gp_lane(kRegEdx, 4, is_64bit_), tot % val);
             } else {
-                // 64-bit div: rdx:rax / val via 128-bit long division.
+                // 64-bit div: rdx:rax / val via 128-bit long division
                 const Div128 dr = udiv128(regs_.get_register(kRegRdx),
                                           regs_.get_register(kRegRax), val);
                 regs_.set_register(kRegRax, dr.quot);
@@ -1030,7 +1030,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             } else {
                 // 64-bit idiv: signed rdx:rax / val via 128-bit division. The
                 // quotient takes the sign of dividend^divisor, the remainder the
-                // sign of the dividend (envi Amd64Emulator.i_idiv).
+                // sign of the dividend (envi Amd64Emulator.i_idiv)
                 std::uint64_t hi = regs_.get_register(kRegRdx);
                 std::uint64_t lo = regs_.get_register(kRegRax);
                 const bool dividend_neg = (hi >> 63) != 0;
@@ -1054,7 +1054,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         }
 
         case ZYDIS_MNEMONIC_CDQ:
-            // Sign-extend eax into edx (i_cwd).
+            // Sign-extend eax into edx (i_cwd)
             regs_.set_register(kRegEdx,
                                bits::is_signed(regs_.get_register(kRegEax), 4)
                                    ? 0xFFFFFFFFULL
@@ -1062,7 +1062,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             break;
 
         case ZYDIS_MNEMONIC_CWD:
-            // Sign-extend ax into dx.
+            // Sign-extend ax into dx
             regs_.set_register(kRegDx,
                                bits::is_signed(regs_.get_register(kRegAx), 2)
                                    ? 0xFFFFULL
@@ -1070,20 +1070,20 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             break;
 
         case ZYDIS_MNEMONIC_CBW:
-            // Sign-extend al into ax (i_cbw).
+            // Sign-extend al into ax (i_cbw)
             regs_.set_register(
                 kRegAx, bits::sign_extend(regs_.get_register(kRegAl), 1, 2));
             break;
 
         case ZYDIS_MNEMONIC_CWDE:
-            // Sign-extend ax into eax (zero-extends into rax in 64-bit mode).
+            // Sign-extend ax into eax (zero-extends into rax in 64-bit mode)
             regs_.set_register(
                 gp_lane(kRegEax, 4, is_64bit_),
                 bits::sign_extend(regs_.get_register(kRegAx), 2, 4));
             break;
 
         case ZYDIS_MNEMONIC_CDQE:
-            // amd64: sign-extend eax into rax.
+            // amd64: sign-extend eax into rax
             regs_.set_register(
                 kRegRax,
                 bits::sign_extend(
@@ -1091,7 +1091,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             break;
 
         case ZYDIS_MNEMONIC_CQO:
-            // amd64: sign-extend rax into rdx.
+            // amd64: sign-extend rax into rdx
             regs_.set_register(kRegRdx,
                                bits::is_signed(regs_.get_register(kRegRax), 8)
                                    ? 0xFFFFFFFFFFFFFFFFULL
@@ -1139,7 +1139,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
 
         // SSE/AVX moves: faithful byte copies through the XMM register file, so
         // a function whose prologue or body uses SSE (buffer init, crypto)
-        // emulates to its ret instead of bailing on an unmodeled opcode.
+        // emulates to its ret instead of bailing on an unmodeled opcode
         case ZYDIS_MNEMONIC_MOVUPS:
         case ZYDIS_MNEMONIC_MOVUPD:
         case ZYDIS_MNEMONIC_MOVAPS:
@@ -1159,7 +1159,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_MOVSD:
             // The SSE scalar-double move shares this mnemonic with the MOVS
             // string op. The SSE form has an XMM operand. The string form is not
-            // modeled (its bail before a ret simply costs recall, not safety).
+            // modeled (its bail before a ret simply costs recall, not safety)
             if (xmm_index(insn.operands[0].base_reg).has_value() ||
                 xmm_index(insn.operands[1].base_reg).has_value()) {
                 write_simd_oper(insn, 0, read_simd_oper(insn, 1, 8), 8);
@@ -1221,7 +1221,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_CMOVP:
         case ZYDIS_MNEMONIC_CMOVNP:
             // Conditional move: write the source only when the flags condition
-            // holds (emu.py i_cmov uses the same cond_* algebra as Jcc).
+            // holds (emu.py i_cmov uses the same cond_* algebra as Jcc)
             if (condition_met(insn.zyd_mnem)) {
                 set_oper_value(insn, 0, get_oper_value(insn, 1));
             }
@@ -1233,7 +1233,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_BTC: {
             // Bit test: CF is the addressed bit. bts/btr/btc also set, reset, or
             // complement it. The index is reduced modulo the operand width (the
-            // register and immediate forms).
+            // register and immediate forms)
             const std::uint64_t dst = get_oper_value(insn, 0);
             const std::uint64_t bitidx = get_oper_value(insn, 1) % (8ULL * dsize);
             const std::uint64_t mask = 1ULL << bitidx;
@@ -1296,7 +1296,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         }
         case ZYDIS_MNEMONIC_CMPXCHG: {
             // Compare the accumulator with dst. Equal: dst = src, ZF set. Else
-            // the accumulator takes dst, ZF clear (emu.py i_cmpxchg).
+            // the accumulator takes dst, ZF clear (emu.py i_cmpxchg)
             const std::uint32_t acc = gp_lane(kRegEax, dsize, is_64bit_);
             const std::uint64_t dst = get_oper_value(insn, 0);
             if (bits::unsigned_(regs_.get_register(acc), dsize) ==

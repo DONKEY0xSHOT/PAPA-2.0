@@ -88,11 +88,13 @@ Not::Not(std::unique_ptr<Statement> kid) {
 Result Not::evaluate(const features::FeatureSet& fs, bool /*sc*/) const {
     Result r;
     r.node = this;
+
     // Not needs the precise truth value of its child
     // Passing short_circuit=false ensures child evaluation is not truncated
     auto cr = children_[0]->evaluate(fs, /*sc=*/false);
     r.success = !cr.success;
     r.children.push_back(std::move(cr));
+
     // A successful Not carries no locations of its own because negation
     // has no positive binding to report
     return r;
@@ -190,7 +192,6 @@ Result FeatureStatement::evaluate(const features::FeatureSet& fs, bool sc) const
     return feature_->evaluate(fs, sc);
 }
 
-// index_rule_matches
 void index_rule_matches(features::FeatureSet& fs,
                         const rules::Rule& rule,
                         std::span<const features::Address> addresses) {
@@ -214,7 +215,7 @@ void index_rule_matches(features::FeatureSet& fs,
 
 // evaluate_quick fast paths
 // These avoid every Result/vector allocation that the full evaluate() builds
-// for the renderer; the probe pass in match() only needs a boolean
+// for the renderer. The probe pass in match() only needs a boolean
 
 bool And::evaluate_quick(const features::FeatureSet& fs) const {
     for (const auto& child : children_) {
