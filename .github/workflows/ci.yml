@@ -1,7 +1,7 @@
 name: CI
 
 # Check the coding standards, build and test on the supported platform, and
-# publish a release when a push to main changed the code itself.
+# publish a release when a push to main changed the code itself
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The rules a compiler cannot catch (CLAUDE.md 7.4): no semicolons or
+      # The rules a compiler cannot catch: no semicolons or
       # trailing periods in comments, no non-ASCII, no absolute or personal
       # paths. The language subset and warnings-as-errors are enforced by the
       # build itself, in the next job.
@@ -42,7 +42,7 @@ jobs:
       # The build flags (/W4 /WX /permissive-, stack protector, CFG/CET,
       # source-prefix trimming, static CRT) live in the project's CMake, so a
       # plain Release configure and build applies them. Warnings are errors, so
-      # this step is also the language-standard gate.
+      # this step is also the language-standard gate
       - name: Configure (CMake, Visual Studio 2022, x64)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON
 
@@ -50,13 +50,11 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so
-      # the suite runs green in CI without the (non-redistributed) samples.
+      # the suite runs green in CI without the (non-redistributed) samples
       - name: Test (Release)
         run: ctest --test-dir build --output-on-failure -C Release
 
-      # PAPA ships as a single self-contained executable. Fail the build if the
-      # linker reintroduced a dependency on the Visual C++ redistributable or
-      # the UCRT, which would make papa.exe fail to start on a clean machine.
+      # PAPA ships as a single self-contained executable
       - name: Verify papa.exe has no C/C++ runtime dependency
         shell: pwsh
         run: |
@@ -95,9 +93,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A release is cut only when the push touched code. src, include, the CLI,
-      # the CMake modules, third_party, and the root CMakeLists are code. The
-      # README, docs, tests, and the standards script are not.
+      # A release is cut only when the push touched code
       - name: Detect code changes
         id: detect
         shell: bash
