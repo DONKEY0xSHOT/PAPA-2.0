@@ -27,7 +27,6 @@ std::optional<std::uint64_t> PeImage::rva_to_file_offset(std::uint64_t rva) cons
         return std::uint64_t{s->raw_offset} + delta;
     }
 
-    // Headers
     // Section headers start at file offset 0 and span SizeOfHeaders
     if (rva < buffer_.size()) {
         // Only trust this fallback for small RVAs typical of PE headers
