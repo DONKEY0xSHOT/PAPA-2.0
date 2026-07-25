@@ -1,9 +1,7 @@
 name: CI
 
-# Build with the project's hardening + warnings-as-errors flags and run the full
-# unit-test suite on every push to main (and every PR into it). When a push to
-# main changes code (not just the README or tests), publish a GitHub release with
-# the built papa.exe
+# Check the coding standards, build and test on the supported platform, and
+# publish a release when a push to main changed the code itself.
 
 on:
   push:
@@ -11,35 +9,54 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  standards:
+    name: Coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The rules a compiler cannot catch (CLAUDE.md 7.4): no semicolons or
+      # trailing periods in comments, no non-ASCII, no absolute or personal
+      # paths. The language subset and warnings-as-errors are enforced by the
+      # build itself, in the next job.
+      - name: Check coding standards
+        run: python3 tools/check_standards.py
+
   build-and-test:
     name: Build and test (Windows, Release)
+    needs: standards
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       # The build flags (/W4 /WX /permissive-, stack protector, CFG/CET,
-      # _FORTIFY_SOURCE, source-prefix trimming, static CRT) live in the project's
-      # CMake, so a plain Release configure+build applies them
+      # source-prefix trimming, static CRT) live in the project's CMake, so a
+      # plain Release configure and build applies them. Warnings are errors, so
+      # this step is also the language-standard gate.
       - name: Configure (CMake, Visual Studio 2022, x64)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON
 
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
-      # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so the
-      # suite runs green in CI without the (non-redistributed) sample binaries
-      - name: Run unit tests
-        shell: bash
-        run: ./build/tests/unit/Release/papa_unit_tests.exe
+      # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so
+      # the suite runs green in CI without the (non-redistributed) samples.
+      - name: Test (Release)
+        run: ctest --test-dir build --output-on-failure -C Release
 
       # PAPA ships as a single self-contained executable. Fail the build if the
-      # linker reintroduced a dependency on the Visual C++ redistributable or the
-      # UCRT, which would make papa.exe fail to start on a clean machine
+      # linker reintroduced a dependency on the Visual C++ redistributable or
+      # the UCRT, which would make papa.exe fail to start on a clean machine.
       - name: Verify papa.exe has no C/C++ runtime dependency
         shell: pwsh
         run: |
@@ -78,9 +95,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A release is cut only when the push touched code. src/include/tools/cmake/
-      # third_party and the root CMakeLists are code; the README, docs, and tests
-      # are not.
+      # A release is cut only when the push touched code. src, include, the CLI,
+      # the CMake modules, third_party, and the root CMakeLists are code. The
+      # README, docs, tests, and the standards script are not.
       - name: Detect code changes
         id: detect
         shell: bash
@@ -97,7 +114,7 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in
-              src/*|include/*|tools/*|cmake/*|third_party/*|CMakeLists.txt) code=true ;;
+              src/*|include/*|tools/papa/*|cmake/*|third_party/*|CMakeLists.txt) code=true ;;
             esac
           done <<< "$changed"
           echo "code=$code" >> "$GITHUB_OUTPUT"

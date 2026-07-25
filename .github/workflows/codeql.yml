@@ -1,5 +1,9 @@
 name: codeql
 
+# CodeQL needs to watch a real build. PAPA targets Windows and MSVC, which is
+# the toolchain it is developed and validated against, so the analysis builds
+# there rather than cross-building with a compiler the project is not tested on.
+
 on:
   push:
     branches: [main]
@@ -11,7 +15,7 @@ on:
 jobs:
   analyze:
     name: CodeQL / C++
-    runs-on: ubuntu-22.04
+    runs-on: windows-latest
     permissions:
       actions: read
       contents: read
@@ -20,11 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-12 cmake ninja-build
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -32,12 +31,9 @@ jobs:
           queries: security-extended,security-and-quality
 
       - name: Configure and build
-        env:
-          CC: gcc-12
-          CXX: g++-12
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake --build build --config Release --parallel
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
