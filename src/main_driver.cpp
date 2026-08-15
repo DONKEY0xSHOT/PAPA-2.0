@@ -16,11 +16,15 @@
 #include "papa/rules/ruleset.h"
 #include "papa/version.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -48,6 +52,7 @@ constexpr std::string_view kUsage =
     "      --vverbose      Most verbose text output, includes rule sources\n"
     "  -o, --output <path> Write report to a file instead of stdout\n"
     "  -q, --quiet         Suppress informational messages on stderr\n"
+    "      --timing        Print a per-phase wall-clock breakdown on stderr\n"
     "  -h, --help          Show this message and exit\n"
     "      --version       Print version information and exit\n"
     "\n"
@@ -76,6 +81,51 @@ read_entire_file(const std::filesystem::path& path) {
     return buf;
 }
 
+using SteadyClock = std::chrono::steady_clock;
+
+// Wall-clock accumulator behind --timing
+// Phases are appended in completion order so the report reads as a timeline,
+// and a disabled log does no work beyond an early return
+class PhaseLog {
+public:
+    explicit PhaseLog(bool enabled) noexcept : enabled_{enabled} {}
+
+    [[nodiscard]] bool enabled() const noexcept { return enabled_; }
+
+    // Close a phase that began at start and file it under name
+    void record(std::string_view name, SteadyClock::time_point start) {
+        if (!enabled_) { return; }
+        const std::chrono::duration<double> span = SteadyClock::now() - start;
+        phases_.emplace_back(std::string(name), span.count());
+    }
+
+    void report(std::ostream& out) const {
+        if (!enabled_ || phases_.empty()) { return; }
+        double      total = 0.0;
+        std::size_t width = 5U;
+        for (const auto& [name, secs] : phases_) {
+            total += secs;
+            width = std::max(width, name.size());
+        }
+        const int label_width = static_cast<int>(width);
+        out << "\npapa phase timing\n";
+        for (const auto& [name, secs] : phases_) {
+            const double share = total > 0.0 ? secs / total * 100.0 : 0.0;
+            out << "  " << std::left << std::setw(label_width) << name
+                << std::right << std::fixed << std::setprecision(3)
+                << std::setw(10) << secs << " s"
+                << std::setw(7) << std::setprecision(1) << share << " %\n";
+        }
+        out << "  " << std::left << std::setw(label_width) << "TOTAL"
+            << std::right << std::fixed << std::setprecision(3)
+            << std::setw(10) << total << " s\n";
+    }
+
+private:
+    bool                                        enabled_;
+    std::vector<std::pair<std::string, double>> phases_;
+};
+
 // True when stdout is an interactive console rather than a file or pipe.
 // capa colors its report only in this case, so PAPA does the same
 [[nodiscard]] bool stdout_is_terminal() noexcept {
@@ -101,6 +151,7 @@ ParseResult parse_args(int argc, const char* const* argv) {
         if (arg == "--help" || arg == "-h") { a.show_help = true; continue; }
         if (arg == "--version")             { a.show_version = true; continue; }
         if (arg == "--quiet" || arg == "-q") { a.quiet = true; continue; }
+        if (arg == "--timing")              { a.timing = true; continue; }
         if (arg == "--json"  || arg == "-j") { a.output = OutputMode::kJson; continue; }
         if (arg == "--verbose" || arg == "-v") {
             // -v on its own gives verbose
@@ -163,45 +214,63 @@ int run(const Args& args) {
         return kExitMissingFile;
     }
 
+    PhaseLog timing{args.timing};
+
+    auto mark = SteadyClock::now();
     const auto sample_buf_opt = read_entire_file(args.sample_path);
     if (!sample_buf_opt.has_value()) {
         std::cerr << "error: cannot read sample: " << args.sample_path << '\n';
         return kExitMissingFile;
     }
     const auto& sample_buf = *sample_buf_opt;
+    timing.record("read sample", mark);
 
+    mark = SteadyClock::now();
     auto image = pe::PeParser::parse_file(args.sample_path);
     if (!image) {
         std::cerr << "error: not a parseable PE file: "
                   << image.error().detail << '\n';
         return kExitInvalidFileType;
     }
+    timing.record("parse PE", mark);
 
     if (!std::filesystem::exists(args.rules_dir)) {
         std::cerr << "error: rules directory not found: " << args.rules_dir
                   << '\n';
         return kExitInvalidRule;
     }
+    mark = SteadyClock::now();
     auto ruleset = rules::RuleSet::from_directory(args.rules_dir);
     if (!ruleset) {
         std::cerr << "error: failed to load rules: "
                   << ruleset.error().detail << '\n';
         return kExitInvalidRule;
     }
+    timing.record("load rules", mark);
 
     // capa colors its text report only for an interactive console, and only when
     // the report goes to stdout rather than a file
     const bool color = args.output_path.empty() && stdout_is_terminal();
 
+    // The file features are a pure function of the parsed image, and both the
+    // limitation pre-pass and the full pipeline need exactly the same set, so
+    // carve the file once and share it
+    mark = SteadyClock::now();
+    features::extractors::PefileFeatureExtractor pe_only(*image);
+    const auto file_features = pe_only.extract_file_features();
+    timing.record("file features", mark);
+
     // First-pass file-only check for static-limitation rules
     {
-        features::extractors::PefileFeatureExtractor pe_only(*image);
-        auto file_caps = capabilities::find_file_capabilities(*ruleset, pe_only);
+        mark = SteadyClock::now();
+        auto file_caps =
+            capabilities::find_file_capabilities(*ruleset, pe_only, &file_features);
         if (!file_caps) {
             std::cerr << "error: file-scope match failed: "
                       << file_caps.error().detail << '\n';
             return kExitUnexpectedFailure;
         }
+        timing.record("file pre-pass", mark);
         if (capabilities::has_static_limitation(*ruleset, *file_caps)) {
             if (!args.quiet) {
                 std::cerr << "static-only limitation rule matched; "
@@ -226,27 +295,43 @@ int run(const Args& args) {
             } else {
                 render::text::render(doc, std::cout, render::text::Verbosity::kDefault, color);
             }
+            timing.report(std::cerr);
             return kExitFileLimitation;
         }
     }
 
     // Full code pipeline
+    mark = SteadyClock::now();
     auto backend = features::extractors::papa_native::PapaNativeBackend::build(*image);
     if (!backend) {
         std::cerr << "error: backend build failed: "
                   << backend.error().detail << '\n';
         return kExitUnexpectedFailure;
     }
+    timing.record("cfg discovery", mark);
+
+    mark = SteadyClock::now();
     features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
+    timing.record("extractor init", mark);
 
-    auto caps = capabilities::static_::find_static_capabilities(*ruleset, extractor);
+    mark = SteadyClock::now();
+    auto caps = capabilities::static_::find_static_capabilities(
+        *ruleset, extractor, /*threads=*/0U, &file_features);
     if (!caps) {
         std::cerr << "error: capability discovery failed: "
                   << caps.error().detail << '\n';
         return kExitUnexpectedFailure;
     }
+    timing.record("extract + match", mark);
+    if (timing.enabled()) {
+        std::cerr << "  workers " << caps->workers
+                  << "  per-function " << caps->parallel_seconds
+                  << " s  reduce " << caps->reduce_seconds
+                  << " s  file-scope " << caps->file_scope_seconds << " s\n";
+    }
 
+    mark = SteadyClock::now();
     std::vector<std::string> rules_paths{args.rules_dir.string()};
     auto meta = collect_metadata(
         std::span<const std::byte>(sample_buf),
@@ -266,7 +351,11 @@ int run(const Args& args) {
             lib.name = extractor.flirt_name_at(abs->v).value_or("?");
         }
     }
+    timing.record("metadata", mark);
+
+    mark = SteadyClock::now();
     auto doc = render::build_document(std::move(meta), *ruleset, caps->all_matches);
+    timing.record("build document", mark);
 
     // Route the report to a file when --output was given, otherwise stdout
     std::ofstream file_out;
@@ -281,6 +370,7 @@ int run(const Args& args) {
         out = &file_out;
     }
 
+    mark = SteadyClock::now();
     switch (args.output) {
         case OutputMode::kJson:
             // capa emits compact JSON (model_dump_json) then a trailing newline
@@ -297,6 +387,10 @@ int run(const Args& args) {
             render::text::render(doc, *out, render::text::Verbosity::kDefault, color);
             break;
     }
+    out->flush();
+    timing.record("render", mark);
+
+    timing.report(std::cerr);
     return kExitOk;
 }
 
