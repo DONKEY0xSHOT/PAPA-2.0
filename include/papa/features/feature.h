@@ -113,6 +113,13 @@ public:
     [[nodiscard]] virtual engine::Result evaluate(const FeatureSet& fs,
                                                   bool short_circuit) const;
 
+    // Boolean form of evaluate for the probe pass
+    // Every override must answer exactly what evaluate reports in Result::success,
+    // but without building a Result or copying the matched location set. The probe
+    // runs for every leaf of every rule at every scope, so those allocations
+    // dominated matching
+    [[nodiscard]] virtual bool matches(const FeatureSet& fs) const;
+
     // Structural hash
     // Implementations must guarantee that equal features always hash equal
     [[nodiscard]] virtual std::size_t hash() const noexcept = 0;
