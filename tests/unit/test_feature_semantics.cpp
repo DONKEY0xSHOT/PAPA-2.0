@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -266,3 +267,71 @@ TEST_CASE("Different feature kinds never collide in a FeatureSet") {
 }
 
 }  // TEST_SUITE
+
+TEST_CASE("feature semantics: matches agrees with evaluate success for every kind") {
+    // The probe pass calls matches while the reporting pass calls evaluate.
+    // If the two ever disagree a rule would match without a match tree, or
+    // build a tree for a rule that did not match, so pin them together here
+    FeatureSet fs;
+    fs.add(make<String>("hello world"), va(0x1000));
+    fs.add(make<String>("GetProcAddress"), va(0x1004));
+    fs.add(make<Bytes>(bytes_of({0xDE, 0xAD, 0xBE, 0xEF})), va(0x1008));
+    fs.add(make<Number>(0x40), va(0x100C));
+    fs.add(make<Number>(0x40), va(0x1010));
+    fs.add(make<Os>("windows"), va(0x1014));
+    fs.add(make<Arch>("amd64"), va(0x1018));
+    fs.add(make<Api>("CreateFileA"), va(0x101C));
+
+    std::vector<FeaturePtr> probes;
+    probes.push_back(make<String>("hello world"));
+    probes.push_back(make<String>("absent"));
+    probes.push_back(make<Substring>("lo wo"));
+    probes.push_back(make<Substring>("nope"));
+    probes.push_back(make<Regex>("/Get.*Address/"));
+    probes.push_back(make<Regex>("/^nomatch$/"));
+    probes.push_back(make<Bytes>(bytes_of({0xDE, 0xAD})));
+    probes.push_back(make<Bytes>(bytes_of({0xAA, 0xBB})));
+    probes.push_back(make<Number>(0x40));
+    probes.push_back(make<Number>(0x41));
+    probes.push_back(make<Os>("windows"));
+    probes.push_back(make<Os>("linux"));
+    probes.push_back(make<Os>("any"));
+    probes.push_back(make<Arch>("amd64"));
+    probes.push_back(make<Arch>("i386"));
+    probes.push_back(make<Arch>("any"));
+    probes.push_back(make<Api>("CreateFileA"));
+    probes.push_back(make<Api>("NotPresent"));
+
+    for (const auto& p : probes) {
+        CAPTURE(p->to_string());
+        CHECK(p->matches(fs) == p->evaluate(fs, true).success);
+    }
+
+    // The empty set must agree too
+    const FeatureSet empty;
+    for (const auto& p : probes) {
+        CAPTURE(p->to_string());
+        CHECK(p->matches(empty) == p->evaluate(empty, true).success);
+    }
+}
+
+TEST_CASE("engine: Range evaluate_quick agrees with evaluate success") {
+    FeatureSet fs;
+    fs.add(make<Number>(7), va(0x2000));
+    fs.add(make<Number>(7), va(0x2004));
+    fs.add(make<Number>(7), va(0x2008));
+
+    struct Bound { std::size_t min; std::size_t max; };
+    const Bound bounds[] = {
+        {0, 0}, {0, 2}, {0, 3}, {1, 3}, {3, 3}, {4, 10},
+        {0, std::numeric_limits<std::size_t>::max()},
+    };
+    for (const auto& b : bounds) {
+        CAPTURE(b.min);
+        CAPTURE(b.max);
+        const papa::engine::Range present(make<Number>(7), b.min, b.max);
+        CHECK(present.evaluate_quick(fs) == present.evaluate(fs, true).success);
+        const papa::engine::Range absent(make<Number>(99), b.min, b.max);
+        CHECK(absent.evaluate_quick(fs) == absent.evaluate(fs, true).success);
+    }
+}
