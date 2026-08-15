@@ -67,6 +67,7 @@ set(PAPA_LIB_SOURCES
     util/hash.cpp
     util/json_writer.cpp
     util/string_utils.cpp
+    rules/feature_index.cpp
     rules/optimizer.cpp
     rules/parser.cpp
     rules/ruleset.cpp
@@ -102,3 +103,5 @@ target_link_libraries(papa_lib
 set_target_properties(papa_lib PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+
+papa_enable_lto(papa_lib)
