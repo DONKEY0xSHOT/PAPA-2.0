@@ -75,10 +75,6 @@ public:
     // Names are typically derived from PE exports plus PDB lookup when available
     void set_function_name(std::uint64_t va, std::string name);
 
-    /// Replace the bundled library-signature table with caller-supplied entries.
-    /// Used by tests and by callers that ship their own pattern packs
-    void set_library_signatures(LibrarySignatureSet sigs) noexcept;
-
     [[nodiscard]] const PapaNativeBackend& backend() const noexcept { return backend_; }
 
     // The library name FLIRT assigned to the function at va, or nullopt when it
@@ -89,9 +85,6 @@ public:
 private:
     PapaNativeBackend                              backend_;
     std::unordered_map<std::uint64_t, std::string> function_names_;
-    // Supplies the structural thunk check. The FLIRT signatures themselves are
-    // consumed during analysis, so the library names come from the backend
-    LibrarySignatureSet                            library_sigs_;
 };
 
 }  // namespace papa::features::extractors::papa_native
