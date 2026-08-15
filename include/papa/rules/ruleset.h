@@ -4,6 +4,7 @@
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
 #include "papa/features/feature.h"
+#include "papa/rules/feature_index.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
@@ -86,6 +87,7 @@ private:
     std::unordered_map<std::string, const Rule*>                by_name_;
     std::unordered_map<std::string, std::vector<const Rule*>>   by_namespace_;
     std::unordered_map<Scope, std::vector<const Rule*>>         by_scope_topo_;
+    std::unordered_map<Scope, RuleFeatureIndex>                 index_by_scope_;
 };
 
 }  // namespace papa::rules

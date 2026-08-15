@@ -25,6 +25,7 @@ struct Args {
     bool                      quiet{false};
     bool                      show_help{false};
     bool                      show_version{false};
+    bool                      timing{false};   // phase breakdown on stderr
 };
 
 // Exit codes

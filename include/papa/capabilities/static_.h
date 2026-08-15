@@ -50,6 +50,12 @@ struct StaticCapabilities {
     std::size_t                             feature_count{0};
     std::vector<features::Address>          library_functions;
     std::vector<FunctionFeatureCount>       per_function_feature_counts;
+    // Split of this stage for the --timing report, so the parallel per-function
+    // work can be told apart from the serial file-scope tail
+    double                                  parallel_seconds{0.0};
+    double                                  reduce_seconds{0.0};
+    double                                  file_scope_seconds{0.0};
+    unsigned                                workers{1};
 };
 
 [[nodiscard]] InstructionCapabilities
@@ -74,9 +80,18 @@ find_code_capabilities(
     const ::papa::features::extractors::FunctionHandle&        fh);
 
 // Top-level entry: walk every function and roll matches up to file scope
+// Per-function analysis is independent, so it runs across threads. threads=0
+// picks one worker per hardware thread and threads=1 forces the serial path.
+// The reduction always runs afterwards in recovered-function order, so the
+// result does not depend on the worker count
+// cached_file_features skips a second whole-file carve when the caller already
+// extracted them for the limitation pre-pass
 [[nodiscard]] Expected<StaticCapabilities>
 find_static_capabilities(
     const ::papa::rules::RuleSet&                              rules,
-    const ::papa::features::extractors::StaticFeatureExtractor& extractor);
+    const ::papa::features::extractors::StaticFeatureExtractor& extractor,
+    unsigned                                                   threads = 0U,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>*
+        cached_file_features = nullptr);
 
 }  // namespace papa::capabilities::static_

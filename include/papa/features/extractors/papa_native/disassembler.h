@@ -63,8 +63,8 @@ struct DecodedInsn {
     bool          is_fallthrough { true };
 };
 
-// One Disassembler instance is not thread-safe
-// Use one instance per thread when running in parallel
+// Safe to share across threads. decode holds all of its state in locals and
+// only reads the Zydis decoder, which is immutable after construction
 class Disassembler {
 public:
     explicit Disassembler(bool is_64bit);

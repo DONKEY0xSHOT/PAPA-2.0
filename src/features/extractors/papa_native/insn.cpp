@@ -223,12 +223,16 @@ read_string_at_va(const ::papa::pe::PeImage& image, std::uint64_t va) {
 
 namespace {
 
-/// Single-shared interned Mnemonic per Zydis enum value.
+/// Interned Mnemonic per Zydis enum value.
 /// Most binaries use ~30 distinct mnemonics across 100K+ instructions, so
-/// interning replaces 100K+ allocations with a one-time static table fill
+/// interning replaces 100K+ allocations with a one-time table fill.
+/// The table is per-thread because per-function extraction runs in parallel
+/// and a shared lazily-filled table would be a data race on the shared_ptr.
+/// Features compare structurally, so two threads producing equal Mnemonic
+/// objects still collapse to one FeatureSet entry
 [[nodiscard]] const features::FeaturePtr&
 interned_mnemonic(ZydisMnemonic m, std::string_view text) {
-    static std::array<features::FeaturePtr, ZYDIS_MNEMONIC_MAX_VALUE + 1> table{};
+    thread_local std::array<features::FeaturePtr, ZYDIS_MNEMONIC_MAX_VALUE + 1> table{};
     auto& slot = table[static_cast<std::size_t>(m)];
     if (!slot) {
         slot = std::make_shared<const features::Mnemonic>(std::string(text));

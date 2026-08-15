@@ -60,6 +60,11 @@ engine::Result Feature::evaluate(const FeatureSet& fs, bool /*short_circuit*/) c
     return r;
 }
 
+bool Feature::matches(const FeatureSet& fs) const {
+    const FeaturePtr probe(std::shared_ptr<const Feature>{}, this);
+    return fs.find(probe) != fs.end();
+}
+
 void FeatureSet::add(FeaturePtr f, const Address& a) {
     if (!f) { return; }
     const FeatureTag tag = f->tag();

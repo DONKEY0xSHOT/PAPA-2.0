@@ -78,12 +78,7 @@ insn_from_handle(const base::InsnHandle& ih) {
 }  // namespace
 
 PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
-    : backend_(std::move(backend)),
-      library_sigs_(LibrarySignatureSet::make_default()) {}
-
-void PapaNativeStaticExtractor::set_library_signatures(LibrarySignatureSet sigs) noexcept {
-    library_sigs_ = std::move(sigs);
-}
+    : backend_(std::move(backend)) {}
 
 features::Address PapaNativeStaticExtractor::get_base_address() const {
     return va_addr(backend_.image().image_base());
@@ -270,7 +265,7 @@ bool PapaNativeStaticExtractor::is_library_function(
     if (fn->likely_library) { return true; }
 
     // Structural thunks are library code regardless of any signature
-    if (library_sigs_.is_thunk(*fn)) { return true; }
+    if (LibrarySignatureSet::is_thunk(*fn)) { return true; }
 
     // FLIRT identified the library functions during analysis, the way capa's
     // signature analyzers run as workspace modules while functions are made, so

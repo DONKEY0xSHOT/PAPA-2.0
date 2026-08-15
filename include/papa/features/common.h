@@ -38,6 +38,7 @@ class Substring : public String {
 public:
     explicit Substring(std::string value, std::string desc = {});
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
 };
 
 // Regex scans every String feature in fs via std::regex_search
@@ -47,6 +48,7 @@ class Regex : public String {
 public:
     explicit Regex(std::string literal, std::string desc = {});
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
 
     [[nodiscard]] const std::string& pattern() const noexcept { return pattern_; }
     [[nodiscard]] bool case_insensitive() const noexcept { return case_insensitive_; }
@@ -70,6 +72,7 @@ public:
     [[nodiscard]] std::span<const std::byte> value() const noexcept { return value_; }
 
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
     [[nodiscard]] std::string    to_string() const override;
@@ -180,6 +183,7 @@ public:
     [[nodiscard]] const std::string& value() const noexcept { return value_; }
 
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
     [[nodiscard]] std::string    to_string() const override;
@@ -194,6 +198,7 @@ public:
     [[nodiscard]] const std::string& value() const noexcept { return value_; }
 
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
     [[nodiscard]] std::string    to_string() const override;

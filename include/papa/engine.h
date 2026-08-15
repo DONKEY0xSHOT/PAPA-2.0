@@ -127,6 +127,7 @@ class Range : public Statement {
 public:
     Range(features::FeaturePtr feat, std::size_t min, std::size_t max);
     [[nodiscard]] Result evaluate(const features::FeatureSet& fs, bool sc) const override;
+    [[nodiscard]] bool   evaluate_quick(const features::FeatureSet& fs) const override;
     [[nodiscard]] std::string_view name() const noexcept override { return "count"; }
 
     [[nodiscard]] std::size_t min() const noexcept { return min_; }

@@ -254,10 +254,19 @@ bool Some::evaluate_quick(const features::FeatureSet& fs) const {
     return false;
 }
 
+bool Range::evaluate_quick(const features::FeatureSet& fs) const {
+    const auto        it  = fs.find(feat_);
+    const std::size_t cnt = (it == fs.end()) ? 0 : it->second.size();
+    // Same vacuous-truth edge case as evaluate, without the Result
+    if (min_ == 0 && cnt == 0) { return true; }
+    return (cnt >= min_) && (cnt <= max_);
+}
+
 bool FeatureStatement::evaluate_quick(const features::FeatureSet& fs) const {
-    // Delegate to the feature's own evaluate path so subclass-specific scans
-    // (substring, regex, bytes-prefix) all reach the right semantics
-    return feature_->evaluate(fs, /*sc=*/true).success;
+    // Delegate to the feature's boolean path so subclass-specific scans
+    // (substring, regex, bytes-prefix, os/arch wildcards) reach the right
+    // semantics without building a Result or copying the location set
+    return feature_->matches(fs);
 }
 
 // match

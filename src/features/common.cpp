@@ -107,6 +107,14 @@ engine::Result Substring::evaluate(const FeatureSet& fs, bool sc) const {
     return r;
 }
 
+bool Substring::matches(const FeatureSet& fs) const {
+    for (const auto& f : fs.strings()) {
+        const auto& s = static_cast<const String&>(*f);
+        if (s.value().find(value_) != std::string::npos) { return true; }
+    }
+    return false;
+}
+
 // Regex
 Regex::Regex(std::string literal, std::string desc)
     : String(FeatureTag::kRegex, "regex", std::move(literal), std::move(desc)) {
@@ -148,6 +156,15 @@ engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
     return r;
 }
 
+bool Regex::matches(const FeatureSet& fs) const {
+    if (!compiled_ok_) { return false; }
+    for (const auto& f : fs.strings()) {
+        const auto& s = static_cast<const String&>(*f);
+        if (std::regex_search(s.value(), compiled_)) { return true; }
+    }
+    return false;
+}
+
 // Bytes
 Bytes::Bytes(std::vector<std::byte> value, std::string desc)
     : Feature(FeatureTag::kBytes, "bytes", std::move(desc)),
@@ -172,6 +189,16 @@ engine::Result Bytes::evaluate(const FeatureSet& fs, bool sc) const {
         }
     }
     return r;
+}
+
+bool Bytes::matches(const FeatureSet& fs) const {
+    for (const auto& f : fs.bytes_features()) {
+        const auto& b = static_cast<const Bytes&>(*f);
+        auto cand = b.value();
+        if (cand.size() < value_.size()) { continue; }
+        if (std::equal(value_.begin(), value_.end(), cand.begin())) { return true; }
+    }
+    return false;
 }
 
 std::size_t Bytes::hash() const noexcept {
@@ -370,6 +397,17 @@ engine::Result Os::evaluate(const FeatureSet& fs, bool sc) const {
     return r;
 }
 
+bool Os::matches(const FeatureSet& fs) const {
+    if (Feature::matches(fs)) { return true; }
+    const bool self_any = (value_ == kAnyWildcard);
+    for (const auto& [f, locs] : fs) {
+        if (!f || f->tag() != FeatureTag::kOs) { continue; }
+        const auto& other = static_cast<const Os&>(*f);
+        if (self_any || other.value_ == kAnyWildcard) { return true; }
+    }
+    return false;
+}
+
 std::size_t Os::hash() const noexcept {
     return mix_tag(tag_, std::hash<std::string>{}(value_));
 }
@@ -405,6 +443,17 @@ engine::Result Arch::evaluate(const FeatureSet& fs, bool sc) const {
         }
     }
     return r;
+}
+
+bool Arch::matches(const FeatureSet& fs) const {
+    if (Feature::matches(fs)) { return true; }
+    const bool self_any = (value_ == kAnyWildcard);
+    for (const auto& [f, locs] : fs) {
+        if (!f || f->tag() != FeatureTag::kArch) { continue; }
+        const auto& other = static_cast<const Arch&>(*f);
+        if (self_any || other.value_ == kAnyWildcard) { return true; }
+    }
+    return false;
 }
 
 std::size_t Arch::hash() const noexcept {
