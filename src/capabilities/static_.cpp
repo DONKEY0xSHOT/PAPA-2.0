@@ -9,7 +9,12 @@
 #include "papa/rules/ruleset.h"
 #include "papa/rules/scope.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <exception>
+#include <mutex>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -19,6 +24,74 @@ namespace {
 
 namespace base = ::papa::features::extractors;
 
+// One recovered function's analysis output, held until the ordered reduction
+struct FunctionSlot {
+    CodeCapabilities  caps;
+    bool              library{false};
+};
+
+// Smallest number of functions worth handing to one worker. Spawning a thread
+// costs more than analyzing a handful of tiny functions, so a small image stays
+// serial and a large one still scales
+inline constexpr std::size_t kMinFunctionsPerWorker = 24U;
+
+// Clamp a requested worker count to something sensible for the work on hand.
+// A requested count of zero means decide automatically
+[[nodiscard]] unsigned resolve_worker_count(unsigned requested, std::size_t work) noexcept {
+    if (requested == 1U || work <= kMinFunctionsPerWorker) { return 1U; }
+
+    unsigned want = requested;
+    if (want == 0U) {
+        want = std::thread::hardware_concurrency();
+        if (want == 0U) { want = 1U; }
+    }
+
+    // Never spawn more workers than there is work to keep them busy
+    const auto by_work = static_cast<unsigned>(work / kMinFunctionsPerWorker);
+    if (by_work < want) { want = by_work; }
+    return want == 0U ? 1U : want;
+}
+
+// Run body(i) for every i in [0, n) across workers threads, claiming indices
+// from a shared counter so an expensive function cannot stall a whole stripe.
+// An escaping exception is captured and returned rather than left to terminate
+// the process from a worker thread
+template <typename Body>
+[[nodiscard]] std::exception_ptr
+run_indexed(std::size_t n, unsigned workers, Body&& body) {
+    std::atomic<std::size_t> next{0};
+    std::exception_ptr       first_error;
+    std::mutex               error_mutex;
+
+    const auto worker = [&]() noexcept {
+        try {
+            // Claiming one index at a time keeps a slow function from stalling
+            // a whole stripe. Relaxed is enough because the join orders the
+            // writes that the reduction later reads
+            for (;;) {
+                const std::size_t i = next.fetch_add(1U, std::memory_order_relaxed);
+                if (i >= n) { break; }
+                body(i);
+            }
+        } catch (...) {
+            const std::lock_guard<std::mutex> lock(error_mutex);
+            if (!first_error) { first_error = std::current_exception(); }
+        }
+    };
+
+    if (workers <= 1U) {
+        worker();
+        return first_error;
+    }
+
+    std::vector<std::thread> pool;
+    pool.reserve(workers - 1U);
+    for (unsigned w = 1U; w < workers; ++w) { pool.emplace_back(worker); }
+    worker();
+    for (auto& t : pool) { t.join(); }
+    return first_error;
+}
+
 // Append every entry of src into dst, overwriting any conflicting per-rule
 // match list. Same-rule entries from different scopes never conflict because
 // CAPA encodes scope into the address space, but we still append rather than
@@ -27,7 +100,11 @@ void merge_into(::papa::engine::MatchResults& dst,
                 ::papa::engine::MatchResults  src) {
     for (auto& [rule_name, addr_pairs] : src) {
         auto& slot = dst[rule_name];
-        slot.reserve(slot.size() + addr_pairs.size());
+        // No reserve here on purpose. Reserving exactly size + incoming grows
+        // capacity by just the incoming count, which defeats the geometric
+        // growth and reallocates on every merge. Merging one rule across a few
+        // thousand functions then costs a quadratic number of element moves,
+        // which measured as the single largest cost in the whole run
         for (auto& p : addr_pairs) {
             slot.push_back(std::move(p));
         }
@@ -192,8 +269,10 @@ find_code_capabilities(
 
 ::papa::Expected<StaticCapabilities>
 find_static_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor) {
+    const ::papa::rules::RuleSet&                       rules,
+    const base::StaticFeatureExtractor&                 extractor,
+    unsigned                                            threads,
+    const std::vector<base::FeatureWithAddress>*        cached_file_features) {
     StaticCapabilities caps;
     ::papa::engine::MatchResults all_fn_matches;
     ::papa::engine::MatchResults all_bb_matches;
@@ -203,28 +282,68 @@ find_static_capabilities(
     // and re-extracting them per-instruction was the dominant allocation cost
     const auto globals = extractor.extract_global_features();
 
-    const auto fhs = extractor.get_functions();
-    caps.per_function_feature_counts.reserve(fhs.size());
-    for (const auto& fh : fhs) {
+    const auto        fhs = extractor.get_functions();
+    const std::size_t n   = fhs.size();
+    caps.per_function_feature_counts.reserve(n);
+
+    // One slot per recovered function, filled in place so no worker ever needs
+    // to see another's output. Only matches are retained here, not feature
+    // sets, and most functions match nothing, so the slots stay small
+    std::vector<FunctionSlot> slots(n);
+
+    const auto analyze_one = [&](std::size_t i) {
         // Library functions are skipped entirely
         // Their matches would inflate the corpus-wide hit count without
         // representing real capabilities authored by the binary's developers
-        if (extractor.is_library_function(fh.addr)) {
-            caps.library_functions.push_back(fh.addr);
-            caps.per_function_feature_counts.push_back({fh.addr, 0U});
+        if (extractor.is_library_function(fhs[i].addr)) {
+            slots[i].library = true;
+            return;
+        }
+        slots[i].caps = find_code_capabilities_inner(rules, extractor, fhs[i], globals);
+    };
+
+    const unsigned workers = resolve_worker_count(threads, n);
+    caps.workers = workers;
+
+    const auto t_par = std::chrono::steady_clock::now();
+    if (auto err = run_indexed(n, workers, analyze_one)) {
+        std::rethrow_exception(err);
+    }
+    caps.parallel_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t_par).count();
+
+    const auto t_reduce = std::chrono::steady_clock::now();
+    // Reduce in recovered-function order so the output never depends on which
+    // worker finished first
+    for (std::size_t i = 0; i < n; ++i) {
+        if (slots[i].library) {
+            caps.library_functions.push_back(fhs[i].addr);
+            caps.per_function_feature_counts.push_back({fhs[i].addr, 0U});
             continue;
         }
-        auto code_caps = find_code_capabilities_inner(rules, extractor, fh, globals);
-        caps.per_function_feature_counts.push_back({fh.addr, code_caps.feature_count});
+        auto& code_caps = slots[i].caps;
+        caps.per_function_feature_counts.push_back({fhs[i].addr, code_caps.feature_count});
         merge_into(all_fn_matches,   std::move(code_caps.function_matches));
         merge_into(all_bb_matches,   std::move(code_caps.bb_matches));
         merge_into(all_insn_matches, std::move(code_caps.insn_matches));
     }
 
+    caps.reduce_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t_reduce).count();
+
+    const auto t_file = std::chrono::steady_clock::now();
     // Build the file-scope feature set from extractor-provided features plus
     // injected MatchedRule features for every match seen below file scope
     features::FeatureSet file_fs;
-    absorb_into(file_fs, extractor.extract_file_features());
+    if (cached_file_features != nullptr) {
+        // Shares the immutable feature objects rather than carving the file a
+        // second time. The pre-pass derived them from the same image
+        for (const auto& [feat, addr] : *cached_file_features) {
+            file_fs.add(feat, addr);
+        }
+    } else {
+        absorb_into(file_fs, extractor.extract_file_features());
+    }
     absorb_into(file_fs, extractor.extract_global_features());
     inject_match_features(file_fs, rules, all_fn_matches);
     inject_match_features(file_fs, rules, all_bb_matches);
@@ -239,6 +358,8 @@ find_static_capabilities(
     merge_into(caps.all_matches, std::move(all_fn_matches));
     merge_into(caps.all_matches, std::move(all_bb_matches));
     merge_into(caps.all_matches, std::move(all_insn_matches));
+    caps.file_scope_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t_file).count();
 
     return caps;
 }
