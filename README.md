@@ -14,15 +14,24 @@ PAPA keeps CAPA's rule semantics and report format, but it's much faster!
   CAPA reports works unchanged.
 - **No runtime** - a single native executable that imports only `kernel32.dll`,
   so it runs on a clean machine with no Visual C++ redistributable installed!
-- **Much faster : )** - roughly 7x on small to medium binaries.
+- **Much faster : )** - 7x to 45x, and the gap widens as the binary grows.
 - **Minimal dependencies** - only Zydis for disassembly, miniz for zlib
   decompression (needed for FLIRT) & doctest for unit testing.
 
 ## Performance
 
 Measured against `capa.exe 9.4.0` with the matching `capa-rules-9.4.0` ruleset on
-the same machine (`--json`, output redirected).
-PAPA is usually ~7X faster on small to medium binaries!
+the same machine (`--json`, output redirected), on a 4-core i5-7500.
+
+| Sample          |    Size | CAPA     | PAPA    | Speedup  |
+|-----------------|--------:|---------:|--------:|--------: |
+| calc            |   27 KB |   11.5 s |   1.6 s |    ~7x   |
+| notepad         |  196 KB |   49.4 s |   3.0 s |    ~16.5x|
+| 7z              |  549 KB |  215.6 s |   4.8 s |    ~45x  |
+| msedge          |  4.92 MB| 1283.5 s |   30.9 s|    ~41.5x|
+
+Smaller binaries are dominated by a fixed startup cost (loading and compiling the rule corpus), 
+while larger binaries need more time for actual code analysis, making the speedup increasingly significant!
 
 
 ## Testing
