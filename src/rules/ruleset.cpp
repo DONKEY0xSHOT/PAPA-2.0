@@ -11,6 +11,8 @@
 #include "papa/rules/scope.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
 #include <iostream>
 #include <cstddef>
 #include <filesystem>
@@ -133,8 +135,16 @@ std::span<const Rule* const> RuleSet::rules_in_namespace(std::string_view ns) co
 
 std::pair<features::FeatureSet, engine::MatchResults>
 RuleSet::match(Scope scope, features::FeatureSet fs, const features::Address& addr) const {
-    const auto topo = rules_by_scope(scope);
-    return engine::match(topo, std::move(fs), addr);
+    const auto it = index_by_scope_.find(scope);
+    if (it == index_by_scope_.end()) {
+        return engine::match(rules_by_scope(scope), std::move(fs), addr);
+    }
+
+    // Reused per thread so a match cycle does not allocate. The index preserves
+    // the topological order, which same-scope match references depend on
+    thread_local std::vector<const Rule*> candidates;
+    it->second.select(fs, candidates);
+    return engine::match(candidates, std::move(fs), addr);
 }
 
 // pipeline
@@ -159,6 +169,12 @@ Expected<RuleSet> RuleSet::from_rules(std::vector<std::unique_ptr<Rule>> rules) 
 
     auto topo = rs.topologically_sort();
     if (!topo) { return Unexpected{topo.error()}; }
+
+    // Index each scope's rules by the features they cannot match without, so a
+    // match cycle only evaluates the rules a feature set could satisfy
+    for (const auto& [scope, ordered] : rs.by_scope_topo_) {
+        rs.index_by_scope_[scope].build(ordered);
+    }
 
     return rs;
 }
