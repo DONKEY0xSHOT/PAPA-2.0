@@ -37,8 +37,11 @@ namespace_starts_with(std::string_view ns, std::string_view prefix) noexcept {
 }  // namespace
 
 ::papa::Expected<FileCapabilities>
-find_file_capabilities(const ::papa::rules::RuleSet&                            rules,
-                       const ::papa::features::extractors::StaticFeatureExtractor& extractor) {
+find_file_capabilities(
+    const ::papa::rules::RuleSet&                                     rules,
+    const ::papa::features::extractors::StaticFeatureExtractor&       extractor,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>*
+        cached_file_features) {
     // Collect file and global features up front so we can reuse the FeatureSet
     // across the file match plus any caller that wants the same vocabulary
     features::FeatureSet fs;
@@ -47,9 +50,17 @@ find_file_capabilities(const ::papa::rules::RuleSet&                            
         for (auto& [feat, addr] : globals) {
             fs.add(std::move(feat), addr);
         }
-        auto file_feats = extractor.extract_file_features();
-        for (auto& [feat, addr] : file_feats) {
-            fs.add(std::move(feat), addr);
+        if (cached_file_features != nullptr) {
+            // Copying shares the immutable feature objects through their
+            // refcounts, which is far cheaper than carving the file again
+            for (const auto& [feat, addr] : *cached_file_features) {
+                fs.add(feat, addr);
+            }
+        } else {
+            auto file_feats = extractor.extract_file_features();
+            for (auto& [feat, addr] : file_feats) {
+                fs.add(std::move(feat), addr);
+            }
         }
     }
 
