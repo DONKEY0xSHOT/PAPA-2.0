@@ -12,8 +12,6 @@ target_link_libraries(papa_cli
         papa_project_options
 )
 
-papa_enable_lto(papa_cli)
-
 # Embed the vendored FLIRT signatures as RCDATA. Resources live in the exe,
 # not the static lib, because registry() locks them from the running module.
 if(MSVC)
