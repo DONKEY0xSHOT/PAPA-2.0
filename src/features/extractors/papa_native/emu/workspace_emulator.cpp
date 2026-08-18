@@ -1,5 +1,6 @@
 #include "papa/features/extractors/papa_native/emu/workspace_emulator.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -25,7 +26,7 @@ constexpr std::array<std::uint32_t, 9> kTaintRegs64 = {
 };
 
 constexpr std::size_t kFuncStackTaints = 20;
-constexpr std::size_t kMaxInsnBytes = 15;
+constexpr std::size_t kMaxInsnBytes = constants::kMaxInsnBytes;
 
 }  // namespace
 
@@ -85,8 +86,12 @@ std::optional<DecodedInsn> WorkspaceEmulator::decode_at(std::uint64_t va) const 
     if (bytes.empty()) {
         return std::nullopt;
     }
+    // Copied into the member buffer, because the returned instruction spans
+    // these bytes and the local vector is gone by then
+    const std::size_t n = std::min(bytes.size(), decode_buf_.size());
+    std::copy_n(bytes.begin(), n, decode_buf_.begin());
     const std::span<const std::byte> code =
-        std::as_bytes(std::span<const std::uint8_t>(bytes));
+        std::as_bytes(std::span<const std::uint8_t>(decode_buf_.data(), n));
     Expected<DecodedInsn> decoded = disasm_.decode(code, va);
     if (!decoded.has_value()) {
         return std::nullopt;
