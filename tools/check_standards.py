@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Check the source tree against the project's coding standards.
+"""Check the source tree against the project's coding standards (CLAUDE.md 7.4).
+
+Run it from the project root with no arguments. Exits non-zero and prints every
+violation with its file and line, so CI failures point straight at the fix.
+
+The rules enforced here are the ones a compiler cannot catch. Everything else
+(warnings as errors, the language subset) is enforced by the build itself.
 """
 from __future__ import annotations
 
@@ -13,6 +19,9 @@ SOURCE_SUFFIXES = (".cpp", ".h")
 
 # Abbreviations that legitimately end a sentence with a period
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "..")
+
+# Longest run of consecutive comment lines allowed anywhere in the tree
+MAX_COMMENT_LINES = 2
 
 # Paths that would leak a developer's checkout or identity into the tree
 PII_PATTERNS = (
@@ -42,6 +51,25 @@ def check_file(path: Path, root: Path) -> list[str]:
         return [f"{path.relative_to(root)}: not valid UTF-8"]
 
     lines = text.splitlines()
+
+    # A comment run is at most two lines. Anything longer is rationale or
+    # history, which belongs in the docs rather than beside the code
+    index = 0
+    while index < len(lines):
+        if lines[index].lstrip().startswith("//"):
+            end = index
+            while end < len(lines) and lines[end].lstrip().startswith("//"):
+                end += 1
+            if end - index > MAX_COMMENT_LINES:
+                where = f"{path.relative_to(root)}:{index + 1}"
+                problems.append(
+                    f"{where}: comment run is {end - index} lines, "
+                    f"the limit is {MAX_COMMENT_LINES}"
+                )
+            index = end
+        else:
+            index += 1
+
     for index, line in enumerate(lines):
         where = f"{path.relative_to(root)}:{index + 1}"
         stripped = line.strip()
@@ -66,6 +94,16 @@ def check_file(path: Path, root: Path) -> list[str]:
 
         if ";" in stripped:
             problems.append(f"{where}: semicolon in a comment, split it into two lines")
+
+        # A backslash at the end of a // comment splices the next line into the
+        # comment, so whatever follows silently disappears. Harmless when the
+        # next line is another comment and a deleted statement when it is not.
+        # GCC reports this as -Wcomment, but the Windows build does not, so it
+        # is checked here rather than left to one platform
+        if stripped.endswith("\\"):
+            problems.append(
+                f"{where}: comment ends with a backslash, which swallows the next line"
+            )
 
         # A comment must not end with a period. Only the last line of a comment
         # run is the end of that comment
