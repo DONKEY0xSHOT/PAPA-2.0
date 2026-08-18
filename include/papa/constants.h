@@ -58,8 +58,20 @@ inline constexpr std::size_t   kMaxOperandCount      = 5;
 inline constexpr std::size_t   kMaxOperandIndex      = kMaxOperandCount - 1;
 inline constexpr std::size_t   kMinStringLength      = 4;
 
-// CFG recovery caps act as trip-wires against crafted inputs
-inline constexpr std::size_t   kMaxInsnsPerFunction  = 1U << 15;   // 32k
+// CFG recovery caps act as trip-wires against crafted inputs.
+//
+// kMaxInsnsPerFunction bounds the memory one code flow holds, not the work it
+// does. The flow walk decodes each address at most once across the whole image
+// (the shared location DB gate), so total decoding is already bounded by the
+// size of the executable region. What is not otherwise bounded is the decoded
+// instruction map one flow accumulates, which holds a full DecodedInsn per
+// address. Cutting a flow short changes analysis rather than merely limiting
+// it, because the addresses it did not reach stay undefined and the later
+// pointer passes then re-seed them as separate functions, so the value has to
+// sit far above real usage. Measured across the forty-two-binary corpus the
+// largest single flow is 36,141 instructions (Everything.exe, a stripped x86
+// image with no .pdata), with a median of 1,293. Re-measure before lowering
+inline constexpr std::size_t   kMaxInsnsPerFunction  = 1U << 20;   // 1M
 inline constexpr std::size_t   kMaxFunctionsPerImage = 1U << 18;   // 256k
 inline constexpr std::size_t   kMaxInsnBytes         = 15;         // x86 hard limit
 
@@ -68,6 +80,39 @@ inline constexpr std::size_t   kMaxInsnBytes         = 15;         // x86 hard l
 // primary bound. Real images stay far below both
 inline constexpr std::size_t   kMaxExportsPerImage   = 1U << 20;   // 1M
 inline constexpr std::size_t   kMaxPdataEntries      = 1U << 22;   // 4M
+inline constexpr std::size_t   kMaxSectionsPerImage  = 1U << 12;   // 4k
+
+// Import-table walks are terminated by a null entry the file supplies, so a
+// table with no terminator inside a mapped region iterates until a read fails.
+// Each iteration allocates, which is the amplification. Both are far above any
+// real image, where a few thousand imports across a few hundred DLLs is large
+inline constexpr std::size_t   kMaxImportDescriptors = 1U << 14;   // 16k DLLs
+inline constexpr std::size_t   kMaxImportsPerDll     = 1U << 16;   // 64k symbols
+
+// Base relocations expand roughly four-fold: each two-byte entry becomes an
+// eight-byte record, so a relocation directory the size of the file produces a
+// vector several times larger. Large images carry a few hundred thousand
+inline constexpr std::size_t   kMaxRelocations       = 1U << 24;   // 16M
+
+// Largest sample accepted, a trip-wire rather than a working limit. Analysis
+// allocates several structures proportional to the image, so an absurdly large
+// input multiplies rather than merely occupying its own size. The biggest PE in
+// the validation corpus is 35 MB
+inline constexpr std::size_t   kMaxSampleBytes       = 1ULL << 31;  // 2G
+
+// Most strings a single extraction pass will return. Real images average about
+// one string per 84 bytes, so the largest sample in the validation corpus (a
+// 35 MB bundle) yields roughly 435,000. A file of repeated "AAAA\0" reaches one
+// per five bytes, seventeen times denser, and each one carries a std::string.
+// Set an order of magnitude above real usage, so it bounds the crafted case
+// without reaching the honest one
+inline constexpr std::size_t   kMaxStringsPerPass    = 1U << 22;   // 4M
+
+// Total bytes the discovery emulator will copy into its backing maps. Section
+// extents may legally overlap, so the sum of their sizes is not bounded by the
+// file size and a crafted table can ask for orders of magnitude more than the
+// sample occupies. Well above any real image, which maps its own size once
+inline constexpr std::size_t   kMaxEmuImageBytes     = 1U << 29;   // 512M
 
 // String extraction
 // kRepeatFillBytes lists bytes that, when filling a 4 KiB window, indicate

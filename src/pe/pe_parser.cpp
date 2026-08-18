@@ -124,7 +124,7 @@ struct DataDirectory {
         ? constants::kImageOrdinalFlag64
         : std::uint64_t{constants::kImageOrdinalFlag32};
 
-    for (std::size_t slot = 0;; ++slot) {
+    for (std::size_t slot = 0; slot < constants::kMaxImportsPerDll; ++slot) {
         const std::uint64_t slot_rva = std::uint64_t{ilt_rva} + slot * ptr_size;
         auto bytes = image.read_at_rva(slot_rva, ptr_size);
         if (!bytes) { return Unexpected{bytes.error()}; }
@@ -180,7 +180,7 @@ struct DataDirectory {
     const auto dd = get_data_directory(dirs, constants::kImageDirectoryEntryImport);
     if (dd.rva == 0 || dd.size == 0) { return out; }
 
-    for (std::size_t i = 0;; ++i) {
+    for (std::size_t i = 0; i < constants::kMaxImportDescriptors; ++i) {
         const std::uint64_t desc_rva =
             std::uint64_t{dd.rva} + i * sizeof(ImageImportDescriptor);
         auto bytes = image.read_at_rva(desc_rva, sizeof(ImageImportDescriptor));
@@ -206,7 +206,7 @@ struct DataDirectory {
     const auto dd = get_data_directory(dirs, constants::kImageDirectoryEntryDelayImport);
     if (dd.rva == 0 || dd.size == 0) { return out; }
 
-    for (std::size_t i = 0;; ++i) {
+    for (std::size_t i = 0; i < constants::kMaxImportDescriptors; ++i) {
         const std::uint64_t desc_rva =
             std::uint64_t{dd.rva} + i * sizeof(ImageDelayImportDescriptor);
         auto bytes = image.read_at_rva(desc_rva, sizeof(ImageDelayImportDescriptor));
@@ -282,7 +282,10 @@ struct DataDirectory {
     }
 
     out.reserve(func_count);
-    const std::uint32_t export_dir_end = dd.rva + dd.size;
+    // Widened before the addition. Both halves are header fields, so a crafted
+    // rva near the top of the range would wrap and produce an end below the
+    // start, which turns the forwarder test below into a coin flip
+    const std::uint64_t export_dir_end = std::uint64_t{dd.rva} + dd.size;
 
     for (std::uint32_t i = 0; i < func_count; ++i) {
         const std::uint64_t func_rva_off =
@@ -405,6 +408,9 @@ struct DataDirectory {
             if (!read_le<std::uint16_t>(relbytes, roff, entry)) { break; }
             const auto rtype  = static_cast<std::uint16_t>(entry >> 12);
             const auto offset = static_cast<std::uint32_t>(entry & 0x0fffu);
+            if (out.size() >= constants::kMaxRelocations) {
+                return out;
+            }
             out.push_back(ParsedRelocation{page_rva + offset, rtype});
         }
         pos += chunk_size;
@@ -494,8 +500,13 @@ Expected<PeImage> PeParser::parse(std::vector<std::byte> buffer) {
 
     const std::uint32_t sec_off =
         dir_off + num_dirs * static_cast<std::uint32_t>(sizeof(ImageDataDirectory));
-    img.sections_.reserve(fh.NumberOfSections);
-    for (std::uint16_t i = 0; i < fh.NumberOfSections; ++i) {
+    // NumberOfSections is a raw header field, so clamp before it sizes an
+    // allocation. The Windows loader itself refuses far fewer than this, and a
+    // truncated table is caught per header below
+    const std::uint16_t num_sections = static_cast<std::uint16_t>(
+        std::min<std::size_t>(fh.NumberOfSections, constants::kMaxSectionsPerImage));
+    img.sections_.reserve(num_sections);
+    for (std::uint16_t i = 0; i < num_sections; ++i) {
         ImageSectionHeader sh{};
         if (!read_le<ImageSectionHeader>(
                 buf, sec_off + i * sizeof(ImageSectionHeader), sh)) {
