@@ -20,6 +20,11 @@ set(PAPA_CLANG_WARNINGS
     -Wold-style-cast
     -Wcast-align
     -Wunused
+    # Off because every aggregate in the tree either gives its members default
+    # initializers or is value-initialized with {}, so naming only the leading
+    # members still leaves the rest fully defined. The warning reports that safe
+    # omission, and padding each site with {} to silence it reads worse
+    -Wno-missing-field-initializers
     -Woverloaded-virtual
     -Wconversion
     -Wsign-conversion
@@ -35,7 +40,12 @@ set(PAPA_GCC_WARNINGS
     -Wduplicated-cond
     -Wduplicated-branches
     -Wlogical-op
-    -Wuseless-cast
+    # -Wuseless-cast is deliberately not here. Whether a width cast is redundant
+    # depends on the data model, so it contradicts -Wconversion in portable
+    # code: narrowing a std::uint64_t to a std::size_t needs a cast on a 32-bit
+    # target and -Wconversion demands one, while on LP64 the two are the same
+    # type and -Wuseless-cast rejects the very same cast. No single spelling
+    # satisfies both, and the defensive cast is the safer of the two
 )
 
 function(papa_set_compiler_warnings TARGET)
