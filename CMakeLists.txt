@@ -12,7 +12,11 @@ endif()
 project(papa
     VERSION 0.1.0
     DESCRIPTION "C++ port of CAPA static PE capability detector"
-    LANGUAGES CXX
+    # C as well as C++, because two vendored dependencies are C libraries:
+    # Zydis and the miniz amalgamation the FLIRT reader inflates .sig bodies
+    # with. Visual Studio's generator tolerates the omission, so this only
+    # surfaced as a configure failure on the Makefile and Ninja generators
+    LANGUAGES C CXX
 )
 
 cmake_policy(SET CMP0091 NEW)
