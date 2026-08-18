@@ -19,6 +19,14 @@ inline constexpr std::size_t   kMaxEmuSteps = 4096;     // total executed insns
 inline constexpr std::size_t   kMaxTodoQueue = 4096;    // queued branch paths
 inline constexpr std::uint32_t kDefaultMaxHit = 1;      // visits per address
 
+// Total overlay entries the work queue may hold across every pending path.
+// The queue length alone is not a memory bound, because each queued path
+// carries the emulated writes made so far and the overlay is capped per
+// snapshot rather than across the queue. A run that writes heavily and then
+// branches repeatedly would otherwise multiply one large overlay by the queue
+// length. Real functions write a few dozen stack bytes, so this never binds
+inline constexpr std::size_t   kMaxQueuedOverlayEntries = 1U << 22;
+
 // A hook called around each emulated instruction (impemu EmulationMonitor). The
 // discovery watcher derives from this to observe the instruction stream and
 // stop emulation when it has seen enough

@@ -2,9 +2,11 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace papa::features::extractors::papa_native::emu {
 
@@ -136,14 +138,32 @@ std::size_t WorkspaceEmulator::run_function(std::uint64_t funcva,
                                             std::uint32_t maxhit) {
     emustop_ = false;
     std::unordered_map<std::uint64_t, std::uint32_t> hits;
-    std::vector<std::pair<std::uint64_t, Snapshot>> todo;
-    todo.emplace_back(funcva, get_snap());
+    // Paths share their snapshot rather than each deep-copying it. Every branch
+    // of one instruction resumes from the identical state, and a popped path
+    // only reads it, so sharing is observationally the same and keeps the queue
+    // from multiplying one overlay by the number of pending paths
+    std::vector<std::pair<std::uint64_t, std::shared_ptr<const Snapshot>>> todo;
+    std::size_t queued_overlay = 0;
+    const auto  push_path = [&todo, &queued_overlay](
+                               std::uint64_t va,
+                               const std::shared_ptr<const Snapshot>& snap) {
+        const std::size_t cost = snap->mem.overlay.size();
+        if (todo.size() >= kMaxTodoQueue ||
+            queued_overlay + cost > kMaxQueuedOverlayEntries) {
+            return false;
+        }
+        queued_overlay += cost;
+        todo.emplace_back(va, snap);
+        return true;
+    };
+    push_path(funcva, std::make_shared<const Snapshot>(get_snap()));
 
     std::size_t steps = 0;
     while (!todo.empty()) {
         auto [va, snap] = todo.back();
         todo.pop_back();
-        set_snap(snap);
+        queued_overlay -= snap->mem.overlay.size();
+        set_snap(*snap);
         emu_.set_program_counter(va);
 
         while (steps < kMaxEmuSteps) {
@@ -200,12 +220,12 @@ std::size_t WorkspaceEmulator::run_function(std::uint64_t funcva,
             if (!iscall) {
                 const std::vector<std::uint64_t> blist = check_branches(*op);
                 if (!blist.empty()) {
-                    const Snapshot branch_snap = get_snap();
+                    const auto branch_snap =
+                        std::make_shared<const Snapshot>(get_snap());
                     for (const std::uint64_t bva : blist) {
-                        if (todo.size() >= kMaxTodoQueue) {
+                        if (!push_path(bva, branch_snap)) {
                             break;
                         }
-                        todo.emplace_back(bva, branch_snap);
                     }
                     break;
                 }
