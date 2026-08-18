@@ -62,15 +62,6 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
     return out;
 }
 
-[[nodiscard]] std::string join_newline(const std::vector<std::string>& lines) {
-    std::string out;
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        if (i != 0) { out.push_back('\n'); }
-        out.append(lines[i]);
-    }
-    return out;
-}
-
 // Usable console width capa renders against: COLUMNS if set, else 80, less one
 [[nodiscard]] int default_console_width() {
     int columns = 80;
