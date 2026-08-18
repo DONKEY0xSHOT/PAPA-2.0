@@ -749,7 +749,7 @@ Expected<Node> Parser::parse_mapping(std::size_t indent) {
         const std::size_t kcol  = ln.indent + 1;
         // Quoted keys get unquoted (CAPA rules also use plain keys interchangeably)
         std::string key;
-        std::string_view kraw = kv->first;
+        const std::string_view kraw = kv->first;
         if (!kraw.empty() && kraw.front() == '"') {
             if (kraw.size() < 2 || kraw.back() != '"') {
                 return Unexpected{yaml_err(kline, kcol, "unterminated double-quoted key")};
@@ -768,7 +768,7 @@ Expected<Node> Parser::parse_mapping(std::size_t indent) {
         } else {
             key = std::string{rtrim(kraw)};
         }
-        std::string_view vraw = kv->second;
+        const std::string_view vraw = kv->second;
         ++cursor_;
         Node value;
         // Treat comment-only inline values the same as an empty value
