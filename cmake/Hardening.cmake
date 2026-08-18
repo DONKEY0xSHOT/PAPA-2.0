@@ -17,14 +17,11 @@ function(papa_set_hardening TARGET)
             /NXCOMPAT
             /HIGHENTROPYVA
             /guard:cf
-            # Shadow-stack enforcement of returns on CET hardware, the return
-            # side of the control-flow guarantee /guard:cf gives to indirect
-            # calls. Ignored by CPUs without it, so it costs nothing elsewhere
+            # Shadow-stack enforcement of returns on CET hardware, the return side of what
+            # /guard:cf gives indirect calls. Ignored by CPUs without it
             /CETCOMPAT
-            # Every parser in the tree recurses over sample-derived structure.
-            # Each one is depth-bounded, but the bounds multiply through nested
-            # parsers, so the default 1 MB reserve is the thinnest margin in the
-            # process. Reserving 8 MB does not commit the pages
+            # Every parser recurses over sample-derived structure and the depth bounds
+            # multiply, so the default 1 MB reserve is the thinnest margin in the process
             /STACK:8388608
         )
     elseif(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

@@ -12,10 +12,8 @@ endif()
 project(papa
     VERSION 0.1.0
     DESCRIPTION "C++ port of CAPA static PE capability detector"
-    # C as well as C++, because two vendored dependencies are C libraries:
-    # Zydis and the miniz amalgamation the FLIRT reader inflates .sig bodies
-    # with. Visual Studio's generator tolerates the omission, so this only
-    # surfaced as a configure failure on the Makefile and Ninja generators
+    # C as well as C++, because Zydis and miniz are C libraries. Visual Studio's
+    # generator tolerates the omission, so only Makefile and Ninja builds failed
     LANGUAGES C CXX
 )
 

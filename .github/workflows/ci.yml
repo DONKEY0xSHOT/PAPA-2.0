@@ -24,10 +24,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The rules a compiler cannot catch: no semicolons or
-      # trailing periods in comments, no non-ASCII, no absolute or personal
-      # paths. The language subset and warnings-as-errors are enforced by the
-      # build itself, in the next job.
+      # The rules a compiler cannot catch: comment style, non-ASCII, and personal
+      # paths. The language subset and warnings are enforced by the build itself
       - name: Check coding standards
         run: python3 tools/check_standards.py
 
@@ -39,10 +37,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The build flags (/W4 /WX /permissive-, stack protector, CFG/CET,
-      # source-prefix trimming, static CRT) live in the project's CMake, so a
-      # plain Release configure and build applies them. Warnings are errors, so
-      # this step is also the language-standard gate
+      # The build flags live in the project's CMake, so a plain Release configure
+      # applies them. Warnings are errors, so this is also the standard gate
       - name: Configure (CMake, Visual Studio 2022, x64)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON
 
