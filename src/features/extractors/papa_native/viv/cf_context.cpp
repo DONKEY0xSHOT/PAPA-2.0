@@ -1,5 +1,7 @@
 #include "papa/features/extractors/papa_native/viv/cf_context.h"
 
+#include "papa/constants.h"
+
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
@@ -118,6 +120,13 @@ void CodeFlowContext::report_function(std::uint64_t va) {
 }
 
 void CodeFlowContext::add_entry_point(std::uint64_t va) {
+    // Whole-image trip-wire. Discovery is driven by sample-controlled pointers
+    // and relocations, so the number of entry points a crafted image can offer
+    // is not bounded by anything in the image itself. Real PEs are orders of
+    // magnitude below the cap, so a well-formed sample never reaches it
+    if (functions_.size() >= constants::kMaxFunctionsPerImage) {
+        return;
+    }
     // A va that is already a function is left alone, so the closure terminates
     if (!functions_.insert(va).second) {
         return;
@@ -185,6 +194,13 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
     std::vector<std::uint64_t>        optodo{va};  // LIFO worklist
     std::unordered_set<std::uint64_t> visited;
     while (!optodo.empty()) {
+        // Per-function trip-wire. One flow's instruction count is bounded only
+        // by how much decodable code the sample supplies, and overlapping
+        // decodes mean that can exceed the section's own size. Stopping the
+        // walk keeps whatever was already decoded, so this fails closed
+        if (flow_insns.size() >= constants::kMaxInsnsPerFunction) {
+            break;
+        }
         const std::uint64_t cur = optodo.back();
         optodo.pop_back();
         if (!visited.insert(cur).second) {
