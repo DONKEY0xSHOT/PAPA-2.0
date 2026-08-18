@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <unordered_set>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -320,6 +321,10 @@ resolve_two_level_indexed_jump_table(std::span<const DecodedInsn> window,
     out.table_va   = off_va;
     out.table_size = 0;  // both tables sit in read-only data, never decoded as code
     std::vector<std::uint64_t> seen;
+    // Membership index beside the ordered list. The list still decides the
+    // result and its order, so this only removes the linear rescan that made
+    // a full-length table quadratic
+    std::unordered_set<std::uint64_t> seen_index;
     for (std::uint64_t v = 0; v < *count; ++v) {
         const auto idx = read_u8(map_va + v);
         if (!idx.has_value()) { break; }
@@ -327,11 +332,9 @@ resolve_two_level_indexed_jump_table(std::span<const DecodedInsn> window,
         if (!entry.has_value()) { break; }
         const std::uint64_t target = *base_va + static_cast<std::uint64_t>(*entry);
         if (target < range_lo || target >= range_hi) { continue; }
-        bool already = false;
-        for (const std::uint64_t t : seen) {
-            if (t == target) { already = true; break; }
-        }
+        const bool already = seen_index.count(target) != 0;
         if (!already) {
+            seen_index.insert(target);
             seen.push_back(target);
             out.targets.push_back(target);
         }
@@ -418,6 +421,10 @@ resolve_switch_jump_table(std::span<const DecodedInsn> window,
     JumpTableTargets out;
     out.table_va = table_va;
     std::vector<std::uint64_t> seen;
+    // Membership index beside the ordered list. The list still decides the
+    // result and its order, so this only removes the linear rescan that made
+    // a full-length table quadratic
+    std::unordered_set<std::uint64_t> seen_index;
     std::uint64_t entries = 0;
     for (; entries < kMaxJumpTableEntries; ++entries) {
         const auto raw = env.read_entry(table_va + entries * kEntryWidth);
@@ -425,11 +432,9 @@ resolve_switch_jump_table(std::span<const DecodedInsn> window,
         std::uint64_t rdest = *raw;
         if (rdest < env.image_base) { rdest += env.image_base; }
         if (!env.is_probably_code(rdest)) { break; }
-        bool already = false;
-        for (const std::uint64_t t : seen) {
-            if (t == rdest) { already = true; break; }
-        }
+        const bool already = seen_index.count(rdest) != 0;
         if (!already) {
+            seen_index.insert(rdest);
             seen.push_back(rdest);
             out.targets.push_back(rdest);
         }
