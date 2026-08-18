@@ -9,10 +9,8 @@
 
 namespace emu = papa::features::extractors::papa_native::emu;
 
-// The register model is a faithful port of envi/registers.py +
-// envi/archs/i386/regs.py. The numeric indices, the meta-register encoding
-// (offset<<24)|(width<<16)|realindex, and the width masking on set are all
-// load-bearing for the emulator's correctness and memory safety
+// The register model is a faithful port of envi/registers.py. The indices, the
+// meta-register encoding and the width masking on set are all load-bearing
 
 TEST_CASE("emu RegisterFile: a general-purpose register round-trips a value") {
     emu::RegisterFile regs;
@@ -21,9 +19,8 @@ TEST_CASE("emu RegisterFile: a general-purpose register round-trips a value") {
 }
 
 TEST_CASE("emu RegisterFile: a 32-bit register masks values to 32 bits") {
-    // registers.py:380 -- vals[ridx] = value & masks[ridx]. A value wider than
-    // the register wraps rather than overflowing. This is the core memory-safety
-    // property: an emulated value can never exceed its declared width
+    // registers.py:380 -- vals[ridx] = value & masks[ridx]. A value wider than the
+    // register wraps rather than overflowing
     emu::RegisterFile regs;
     regs.set_register(emu::kRegEax, 0x1'0000'0001ULL);
     CHECK(regs.get_register(emu::kRegEax) == 0x0000'0001U);
@@ -162,11 +159,8 @@ TEST_CASE("emu RegisterFile: snapshot and restore round-trip register state") {
     CHECK(regs.get_flag(emu::kEflagsZf));
 }
 
-// --- amd64 mode (envi/archs/amd64/regs.py Amd64RegisterContext) ---
-// In 64-bit mode the eight low GP slots become rax..rdi, r8..r15 are added,
-// and eflags moves above them (its own slot). EMU NOTES: writing a 32-bit lane
-// (eax/r8d) zero-extends into the full 64-bit register (the RMETA_LOW32
-// override). 16/8-bit writes preserve the upper bits
+// amd64 mode: the eight low GP slots become rax..rdi, r8..r15 are added, and writing
+// a 32-bit lane zero-extends while 16 and 8-bit writes preserve the upper bits
 
 TEST_CASE("emu RegisterFile amd64: a 64-bit GP register round-trips a full value") {
     emu::RegisterFile regs(/*is_64bit=*/true);

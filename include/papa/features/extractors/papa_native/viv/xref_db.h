@@ -17,10 +17,8 @@ struct CodeXref {
     std::uint16_t branch_flags{0};
 };
 
-/// The global REF_CODE cross-reference store, the read model codeblocks walks
-/// through code_xrefs_from and has_code_xref_to. A faithful stand-in for the
-/// code portion of vivisect's xref database (getXrefsFrom / getXrefsTo over
-/// REF_CODE)
+/// The global REF_CODE cross-reference store, the read model codeblocks walks through
+/// code_xrefs_from and has_code_xref_to
 class XrefDb {
 public:
     /// Record a code edge from from_va to to_va. A repeated (from, to) is not

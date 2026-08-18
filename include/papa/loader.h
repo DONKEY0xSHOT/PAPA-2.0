@@ -53,9 +53,8 @@ struct StaticAnalysisMeta {
     std::vector<LibraryFunction>                        library_functions;
 };
 
-// Top-level report header
-// argv preserves the command-line arguments so users can reproduce a run from
-// the report alone (CAPA does the same)
+// Top-level report header argv preserves the command-line arguments so users can
+// reproduce a run from the report alone (CAPA does the same)
 struct Metadata {
     std::string               timestamp;     // ISO-8601 UTC
     std::string               version;       // papa::version::kVersionString
@@ -66,9 +65,8 @@ struct Metadata {
     StaticAnalysisMeta        analysis;
 };
 
-// Compute md5/sha1/sha256 of the sample buffer in one streaming pass each
-// The three digests are independent so we recompute rather than try to share
-// state across algorithms (this keeps the helper trivially correct)
+// Compute md5, sha1 and sha256 of the sample buffer in one streaming pass each.
+// The three digests are independent, so no state is shared across algorithms
 [[nodiscard]] SampleHashes compute_sample_hashes(std::span<const std::byte> data);
 
 // Build a Metadata from the analysis output and a few caller-supplied values
@@ -83,8 +81,7 @@ collect_metadata(std::span<const std::byte>                                 samp
                  const features::extractors::StaticFeatureExtractor&        extractor);
 
 // Link each matched basic block to its function, mirroring capa's
-// compute_static_layout. Only basic blocks where a basic-block-scope rule
-// matched are recorded, and only functions that contain at least one are kept
+// compute_static_layout
 [[nodiscard]] std::vector<FunctionMatchLayout>
 compute_static_layout(const rules::RuleSet&                                 rules,
                       const features::extractors::StaticFeatureExtractor&   extractor,

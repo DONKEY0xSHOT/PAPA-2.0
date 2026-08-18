@@ -81,9 +81,8 @@ TEST_CASE("flirt analysis: a local name creates its function and names it librar
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x11U, 0x00U, 0x00U};
 
-    // The winner names itself at offset 0 and a local helper at 0x40. capa's
-    // local-names loop makeFunctions the helper, so it becomes its own library
-    // function. This is what carves a helper out of an enclosing function
+    // The winner names itself at offset 0 and a local helper at 0x40. capa's local-
+    // names loop makeFunctions the helper, so it becomes its own library function
     flirt::FlirtModule outer = public_module("outer");
     outer.names.push_back({0x40, "helper", flirt::FlirtNameType::kLocal});
 
@@ -110,9 +109,8 @@ TEST_CASE("flirt analysis: a public name never creates a function") {
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x12U, 0x00U, 0x00U};
 
-    // viv_utils.flirt only calls makeFunction in the local-names loop, so a
-    // public sibling at an address that is not a function is left alone and
-    // carries no name (add_function_flirt_match would raise InvalidFunction)
+    // viv_utils.flirt only calls makeFunction in the local-names loop, so a public
+    // sibling at an address that is not a function is left alone and carries no name
     flirt::FlirtModule outer = public_module("outer");
     outer.names.push_back({0x80, "pub_sibling", flirt::FlirtNameType::kPublic});
 

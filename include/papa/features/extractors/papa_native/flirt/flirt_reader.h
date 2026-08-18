@@ -14,23 +14,13 @@ namespace papa::features::extractors::papa_native::flirt {
 /// counted up to but not including the variable-length library name
 [[nodiscard]] std::size_t header_size_for_version(std::uint8_t version) noexcept;
 
-/// Parse the IDASGN header from the start of `data`.
-///
-/// Validates magic and version range. Reads optional v9+ and v10+
-/// fields conditionally on the version byte. Consumes the variable-
-/// length library_name when library_name_len > 0.
-///
-/// Returns:
-///   kFlirtTruncated         when the buffer is shorter than required
-///   kFlirtBadMagic          when the first 6 bytes are not "IDASGN"
-///   kFlirtUnsupportedVersion when the version is outside [v8, v10]
+/// Parse the IDASGN header from the start of data, validating magic and version and
+/// reading the version-conditional fields
 [[nodiscard]] Expected<FlirtHeader> parse_header(
     std::span<const std::uint8_t> data) noexcept;
 
-/// Parse a complete .sig buffer (header + body) into a FlirtTree.
-/// Decompresses the body when the header compression bit is set.
-/// Returns kFlirtTruncated / kFlirtBadNode / kFlirtTooDeep on malformed
-/// input. Never throws
+/// Parse a complete .sig buffer (header + body) into a FlirtTree. Decompresses the body
+/// when the header compression bit is set
 [[nodiscard]] Expected<FlirtTree> parse_sig_buffer(
     std::span<const std::uint8_t> sig) noexcept;
 

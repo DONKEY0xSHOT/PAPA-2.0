@@ -219,16 +219,13 @@ void emit_header(const ResultDocument& doc, std::ostream& out) {
     out << '\n';
 }
 
-// Group rules by their (possibly empty) namespace
-// std::map sort makes the namespace listing alphabetical, matching CAPA's
-// default output ordering
+// Group rules by their (possibly empty) namespace std::map sort makes the namespace
+// listing alphabetical, matching CAPA's default output ordering
 [[nodiscard]] std::map<std::string, std::vector<const RuleReport*>>
 group_by_namespace(const ResultDocument& doc) {
     std::map<std::string, std::vector<const RuleReport*>> groups;
     for (const auto& [_name, rep] : doc.rules) {
-        // Library rules are building blocks for other rules, not capabilities.
-        // capa matches them and keeps them in --json but never lists them in its
-        // text report, so the text renderer skips them to match that output
+        // Library rules are building blocks for other rules, not capabilities
         if (rep.meta.lib) { continue; }
         const std::string ns =
             rep.meta.namespace_.value_or(std::string(kNoNamespace));
@@ -266,8 +263,6 @@ void emit_verbose(const ResultDocument& doc, std::ostream& out) {
 
 void emit_vverbose(const ResultDocument& doc, std::ostream& out) {
     // vverbose is verbose plus the embedded rule YAML
-    // A future revision may surface a per-match feature tree
-    // v1 keeps the output stable and human-readable without that level of detail
     emit_verbose(doc, out);
     out << "----- rule sources -----\n\n";
     for (const auto& [_name, rep] : doc.rules) {

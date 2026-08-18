@@ -14,8 +14,6 @@ namespace papa::rules {
 namespace {
 
 // Static scope used when neither old "scope:" nor new "scopes.static:" is set
-// CAPA defaults to function scope so unscoped legacy rules keep matching where
-// they used to before the dual-scope schema landed
 constexpr Scope kDefaultStaticScope = Scope::kFunction;
 
 }  // namespace

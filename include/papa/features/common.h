@@ -42,8 +42,6 @@ public:
 };
 
 // Regex scans every String feature in fs via std::regex_search
-// The literal form is "/pattern/" optionally followed by "i" for case-insensitive
-// matching, matching the spelling used in CAPA rule files
 class Regex : public String {
 public:
     explicit Regex(std::string literal, std::string desc = {});
@@ -57,10 +55,8 @@ private:
     std::regex  compiled_;
     std::string pattern_;           // pattern body without surrounding slashes or flags
     bool        case_insensitive_{false};
-    // CAPA rules are linted against Python's re module which supports a few
-    // constructs std::regex does not (named groups, inline flags, possessive
-    // quantifiers). When std::regex rejects the pattern we mark the Regex as
-    // dead so it never matches and the corpus still loads
+    // CAPA rules are linted against Python's re module which supports a few constructs
+    // std::regex does not (named groups, inline flags, possessive quantifiers)
     bool        compiled_ok_{true};
 };
 

@@ -11,10 +11,8 @@
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
-// The operand-access layer bridges Zydis-decoded operands (DecodedOperand) to
-// register/memory state, reproducing envi/archs/i386/disasm.py getOperValue /
-// setOperValue / getOperAddr. It is the foundation every instruction handler
-// builds on. Synthetic DecodedInsns drive the tests so no real PE is needed
+// The operand-access layer bridges Zydis-decoded operands to register and memory
+// state. Synthetic instructions drive the tests, so no real PE is needed
 
 namespace {
 
@@ -171,9 +169,8 @@ TEST_CASE("emu operands: get_oper_addr masks the computed address to 32 bits") {
     CHECK(e.get_oper_addr(make_insn(op), 0) == 0x10ULL);
 }
 
-// --- amd64 (64-bit addressing): rip is 64-bit and addresses are not truncated.
-// In long mode near branches and implicit rsp use rip even without REX, and
-// addresses span the full 64-bit space (envi/archs/amd64 EMU NOTES). ---
+// amd64 addressing: rip is 64-bit and addresses are not truncated, so near branches
+// and implicit rsp use rip and addresses span the full 64-bit space
 
 TEST_CASE("emu operands amd64: the program counter holds a full 64-bit RIP") {
     emu::IntelEmulator e(/*is_64bit=*/true);

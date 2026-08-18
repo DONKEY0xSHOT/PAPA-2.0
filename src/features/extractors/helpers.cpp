@@ -130,10 +130,7 @@ carve_pe_files(std::span<const std::byte> buf) {
         return out;
     }
 
-    // One pass, not one per key. A position can only start an XOR-encoded MZ
-    // under a single key, the one that maps its first byte to 'M', so deriving
-    // that key from the byte enumerates exactly the same (position, key) pairs
-    // the per-key sweep did, at 1/256th of the reads
+    // One pass, not one per key
     for (std::uint64_t pos = 0; pos + kPeBigramSize <= buf.size(); ++pos) {
         const auto key = static_cast<std::uint8_t>(
             static_cast<std::uint8_t>(buf[pos]) ^ kAsciiM);

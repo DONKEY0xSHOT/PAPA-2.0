@@ -128,9 +128,8 @@ TEST_CASE("pefile: extract_file_import_names emits dotted, bare, and AW variants
     REQUIRE(res.has_value());
     auto feats = papa::features::extractors::pefile::extract_file_import_names(*res);
 
-    // We don't know exactly which APIs notepad imports across Windows versions
-    // but every import row produces at least the dotted and bare spellings, so
-    // the count of Import features must exceed the count of distinct imports
+    // Which APIs notepad imports varies by Windows version, but every import row yields
+    // at least the dotted and bare spellings, so the feature count must exceed it
     CHECK(feats.size() >= res->imports().size());
 }
 

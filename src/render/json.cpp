@@ -29,8 +29,6 @@ namespace papa::render::json {
 namespace {
 
 // Emit one Address as a small object
-// CAPA expresses every address as { "type": <kind>, "value": <number> } so we
-// preserve the same shape for byte-level diffability against capa.exe output
 void emit_address(::papa::util::json::Writer& w, const features::Address& a) {
     using namespace ::papa::features;
     w.begin_object();

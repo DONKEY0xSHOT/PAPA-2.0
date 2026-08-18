@@ -17,8 +17,6 @@ PefileFeatureExtractor::PefileFeatureExtractor(const ::papa::pe::PeImage& image)
 features::Address PefileFeatureExtractor::get_base_address() const {
     if (image_ == nullptr) {
         // Construction guarantees a non-null image pointer
-        // Reaching this branch indicates a moved-from extractor used post-move,
-        // which is a programmer error rather than a recoverable failure
         throw ::papa::PapaInvariantError(
             "PefileFeatureExtractor used after move or with null image");
     }

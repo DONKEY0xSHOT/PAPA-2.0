@@ -12,10 +12,8 @@
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
-// The watcher decides whether an emulated candidate looks like a real function:
-// a faithful port of analysis/generic/emucode.py watcher. looks_good requires
-// reaching a ret via varied, non-privileged, non-garbage instructions. Driven
-// through run_function over real 32-bit code
+// The watcher decides whether an emulated candidate looks like a real function: a
+// faithful port of analysis/generic/emucode.py watcher
 
 namespace {
 

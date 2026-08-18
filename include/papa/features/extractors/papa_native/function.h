@@ -19,8 +19,6 @@ using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 extract_loop(const Function& fn);
 
 // Emit Characteristic("calls from") at every direct CALL site in the function
-// CALLs without a resolvable direct target are skipped because their semantics
-// depend on register state that this extractor does not analyse
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_calls_from(const Function& fn);
 
@@ -38,9 +36,8 @@ extract_recursive_call(const Function& fn);
 [[nodiscard]] std::optional<FeatureWithAddress>
 extract_function_name(const Function& fn, std::string_view symbol);
 
-// Aggregate every function-scope feature for one function
-// symbol may be empty when no name is known
-// Callers pass an empty view in that case so the extractor produces no FunctionName
+// Aggregate every function-scope feature for one function symbol may be empty when no
+// name is known
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_function_features(const Function& fn, std::string_view symbol);
 

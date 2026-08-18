@@ -16,8 +16,6 @@ namespace papa::features::extractors::papa_native {
 namespace {
 
 // CAPA spelling for the OS, arch, and format values
-// Kept in named constants here rather than papa::constants so the global module
-// owns its own vocabulary and unrelated changes do not touch the global header
 constexpr const char* kOsWindowsValue = "windows";
 constexpr const char* kFormatPeValue  = "pe";
 constexpr const char* kArchI386Value  = "i386";
@@ -38,9 +36,8 @@ extract_global_features(const ::papa::pe::PeImage& image) {
         std::make_shared<const features::Format>(std::string(kFormatPeValue)),
         features::Address{features::NoAddress{}});
 
-    // Arch depends on the machine field
-    // Unsupported architectures are skipped so rules with arch: any continue
-    // to match while specific rules remain explicit
+    // Arch depends on the machine field. Unsupported architectures are skipped so rules
+    // with arch: any continue to match while specific rules remain explicit
     const auto machine = image.machine();
     const char* arch_value = nullptr;
     if (machine == ::papa::constants::kImageFileMachineI386) {

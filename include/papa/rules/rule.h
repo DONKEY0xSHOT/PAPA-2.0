@@ -25,9 +25,8 @@ struct Scopes {
     std::optional<Scope> dynamic_scope;
 };
 
-// Rule metadata
-// Mirrors capa.rules.RuleMeta key-for-key so the json renderer can map it directly
-// All collection fields preserve the order they appear in the source YAML
+// Rule metadata. Mirrors capa.rules.RuleMeta key-for-key so the json renderer can map
+// it directly. All collection fields preserve the order they appear in the source YAML
 struct RuleMeta {
     std::string                 name;
     Scopes                      scopes;

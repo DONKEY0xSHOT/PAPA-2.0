@@ -33,8 +33,7 @@ private:
     std::uint64_t                 total_bits_{0};
 };
 
-// Streaming SHA-1
-// Reference: RFC 3174 with the standard 64-byte block, 32-bit words
+// Streaming SHA-1. Reference: RFC 3174 with the standard 64-byte block, 32-bit words.
 // Included for CAPA report-format parity only, not for security uses
 class Sha1 {
 public:
@@ -52,8 +51,7 @@ private:
     std::uint64_t                 total_bits_{0};
 };
 
-// Streaming MD5
-// Reference: RFC 1321 with the standard 64-byte block, 32-bit words
+// Streaming MD5. Reference: RFC 1321 with the standard 64-byte block, 32-bit words.
 // Included for CAPA report-format parity only, not for security uses
 class Md5 {
 public:
@@ -76,9 +74,8 @@ private:
 [[nodiscard]] std::array<std::byte, 20> sha1  (std::span<const std::byte> data) noexcept;
 [[nodiscard]] std::array<std::byte, 16> md5   (std::span<const std::byte> data) noexcept;
 
-// Lower-case hex encoding of a digest
-// CAPA emits digests as lowercase hex with no separator, matching what every
-// well-known checksum tool produces by default
+// Lower-case hex encoding of a digest. CAPA emits digests as lowercase hex with no
+// separator, matching what every well-known checksum tool produces by default
 [[nodiscard]] std::string hex_digest(std::span<const std::byte> digest);
 
 }  // namespace papa::util

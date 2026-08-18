@@ -61,20 +61,15 @@ void analyze_function(const LocationDb& locations, const XrefDb& xrefs,
                 block_refs.emplace_back(va, false);
                 break;
             }
-            // Bad-opcode reparse: vivisect reparses each instruction and breaks
-            // the walk on a decode failure, without recording the block or an end
-            // marker, so blocks[start] stays 0 and Skip-D drops it. This fires
-            // only where an overlapping decode (a FLIRT sub-function whose fresh
-            // decode straddles the enclosing function) left the byte map claiming
-            // LOC_OP at an address whose bytes do not decode
+            // Bad-opcode reparse: vivisect reparses each instruction and breaks the walk on a
+            // decode failure without recording the block, so Skip-D drops it
             if (can_parse && !can_parse(va)) {
                 break;
             }
             const std::uint64_t next_va = va + loc->size;
 
             // Split-B: every non-procedural, non-deref code edge out of this
-            // instruction ends the block and starts a new block at each target.
-            // Calls (BR_PROC) and import derefs (BR_DEREF) do not split a block
+            // instruction ends the block and starts a new block at each target
             bool branch = false;
             for (const CodeXref& xref : xrefs.code_xrefs_from(va)) {
                 if ((xref.branch_flags & kBrProc) != 0) {
@@ -87,10 +82,7 @@ void analyze_function(const LocationDb& locations, const XrefDb& xrefs,
                 todo.push_back(xref.to_va);
             }
 
-            // A no-fall instruction ends the block after it, with no fall-through.
-            // vivisect reads IF_NOFALL from the containing location, so query the
-            // location start rather than the walk address (they differ only in an
-            // overlapping-decode march, where the containing op still governs)
+            // A no-fall instruction ends the block after it, with no fall-through
             if (is_no_fall && is_no_fall(loc->va)) {
                 blocks[start] = next_va - start;
                 block_refs.emplace_back(next_va, false);
@@ -113,10 +105,8 @@ void analyze_function(const LocationDb& locations, const XrefDb& xrefs,
         }
     }
 
-    // Registration. Sorting then reversing lets pop-from-end visit begins in
-    // ascending address order. On a fresh analysis there are no prior blocks, so
-    // every nonzero-size begin is simply added (the re-analysis size-change path
-    // is deliberately omitted until the oracle shows it moves counts)
+    // Registration. Sorting then reversing lets pop-from-end visit begins in ascending
+    // address order
     std::sort(block_refs.begin(), block_refs.end());
     std::reverse(block_refs.begin(), block_refs.end());
     while (!block_refs.empty()) {

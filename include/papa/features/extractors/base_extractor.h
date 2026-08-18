@@ -11,13 +11,10 @@
 namespace papa::features::extractors {
 
 // Pair returned by every per-scope extraction routine
-// Mirrors the signature used by the underlying papa_native::* extractors so
-// concrete backends can forward results without copying the FeaturePtrs
 using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
-// One opaque handle per scope
-// addr is the public anchor used for match locations and rule indexing
-// inner is backend-specific and always nullable
+// One opaque handle per scope addr is the public anchor used for match locations and
+// rule indexing inner is backend-specific and always nullable
 struct FunctionHandle {
     features::Address  addr;
     const void*        inner{nullptr};
@@ -34,8 +31,6 @@ struct InsnHandle {
 };
 
 // Abstract base for static (non-running-code) feature extractors
-// Concrete subclasses are expected to be cheap to keep alive: they typically
-// hold one parsed image plus derived indexes
 class StaticFeatureExtractor {
 public:
     virtual ~StaticFeatureExtractor() = default;
@@ -81,9 +76,6 @@ public:
                           const InsnHandle&     ih) const = 0;
 
     // Optional hooks for backends that have symbol or signature data
-    // The default implementations let backends opt in only when they can
-    // provide a real answer
-    // capabilities/* treats nullopt or false as "unknown" and proceeds normally
     [[nodiscard]] virtual bool is_library_function(const features::Address& /*addr*/) const {
         return false;
     }

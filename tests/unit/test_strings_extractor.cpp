@@ -67,10 +67,8 @@ TEST_CASE("strings: extract_unicode_strings decodes UTF-16LE") {
     buf.push_back(std::byte{'l'}); buf.push_back(std::byte{0x00});
     buf.push_back(std::byte{'o'}); buf.push_back(std::byte{0x00});
     auto found = extract_unicode_strings(buf);
-    // The leading 0x01 byte misaligns the run start by one
-    // The extractor walks in 2-byte steps from byte 0, so the run is found at 1
-    // No printable pair forms there, so we instead expect zero or one matches
-    // Re-test with an aligned buffer:
+    // The leading 0x01 byte misaligns the run start by one. The extractor walks in
+    // 2-byte steps from byte 0, so the run is found at 1
     std::vector<std::byte> aligned;
     aligned.push_back(std::byte{'H'}); aligned.push_back(std::byte{0x00});
     aligned.push_back(std::byte{'e'}); aligned.push_back(std::byte{0x00});

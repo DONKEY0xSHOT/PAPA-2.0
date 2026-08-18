@@ -10,12 +10,8 @@
 
 namespace emu = papa::features::extractors::papa_native::emu;
 
-// SandboxMemory is the security-critical core: it models the emulated address
-// space as bounds-checked maps over external bytes, routes every write into a
-// private capped overlay (the backing bytes are never mutated, so an emulated
-// PE can never corrupt papa state), and falls back to a taint fill for
-// unmapped reads (vivisect _safe_mem). Faithful to envi/memory.py +
-// impemu/emulator.py read/write hooks
+// SandboxMemory is the security-critical core, modelling the emulated address space
+// as bounds-checked maps and routing every write into a private capped overlay
 
 namespace {
 

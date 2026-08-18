@@ -79,9 +79,8 @@ struct Pos {
     std::size_t column { 1 };
 };
 
-// One physical line, pre-stripped of trailing CR
-// indent is the column of the first non-space byte
-// payload is the substring from indent to end excluding trailing CR
+// One physical line, pre-stripped of trailing CR indent is the column of the first non-
+// space byte payload is the substring from indent to end excluding trailing CR
 struct Line {
     std::size_t       line_no { 0 };
     std::size_t       indent  { 0 };
@@ -432,8 +431,6 @@ Expected<Node> Parser::parse_inline_scalar(
 
     // For quoted scalars, find the actual closing quote first so trailing inline
     // comments do not look like an unterminated string
-    // The interior of a double-quoted string may contain escaped quotes (\")
-    // which must not count as terminators
     if (trimmed.front() == '"') {
         std::size_t end = std::string_view::npos;
         for (std::size_t i = 1; i < trimmed.size(); ++i) {
@@ -477,14 +474,8 @@ Expected<Node> Parser::parse_inline_scalar(
 Expected<Node> Parser::parse_block_scalar(
     char style, std::size_t indent,
     std::size_t line, std::size_t column) {
-    // The | and > headers may carry a chomp indicator
-    // We accept the six combinations |, |-, |+, >, >-, >+ with this policy:
-    //   |   keep newlines, strip trailing blank lines down to one
-    //   |-  keep newlines, strip all trailing newlines
-    //   |+  keep newlines, keep all trailing newlines
-    //   >   fold to spaces, single trailing newline
-    //   >-  fold to spaces, no trailing newline
-    //   >+  fold to spaces, keep all trailing newlines
+    // The | and > headers may carry a chomp indicator. All six combinations are
+    // accepted, with | keeping newlines and > folding them to spaces
     char chomp = '\0';
     if (cursor_ > 0) {
         std::string_view header = lines_[cursor_ - 1].payload;
@@ -516,10 +507,8 @@ Expected<Node> Parser::parse_block_scalar(
         if (ln.indent < block_indent) {
             break;
         }
-        // Relative indent within the block is ignored, which matches CAPA rule
-        // usage where every line of a block scalar shares the same indent. The
-        // payload has already been advanced past its leading spaces, so it is
-        // the line's content as-is
+        // Relative indent within the block is ignored, which matches CAPA rule usage
+        // where every line of a block scalar shares the same indent
         raw_lines.push_back(ln.payload);
         ++cursor_;
     }
@@ -569,10 +558,7 @@ Expected<Node> Parser::parse_block_scalar(
 }
 
 Expected<Node> Parser::parse_value(std::size_t indent) {
-    // Nesting recurses through here, so one bound covers the whole cycle.
-    // A rules directory is untrusted input, and a stack overflow raises a
-    // structured exception on Windows that the CLI's catch cannot intercept,
-    // so the process would die with no diagnostic at all
+    // Nesting recurses through here, so one bound covers the whole cycle
     if (depth_ >= kMaxNestingDepth) {
         const std::size_t line_no = at_end() ? 0U : peek().line_no;
         return Unexpected{yaml_err(line_no, 1U, "nesting is too deep")};
@@ -584,9 +570,8 @@ Expected<Node> Parser::parse_value(std::size_t indent) {
         return Node{};
     }
     const Line& ln = peek();
-    // YAML allows a block sequence value to share its parent key's column
-    // i.e. a "- " line dedented by one space relative to other value content
-    // CAPA rules use this layout extensively in their feature trees
+    // YAML allows a block sequence value to share its parent key's column i.e. a "- "
+    // line dedented by one space relative to other value content
     if (!ln.payload.empty() && ln.payload.front() == '-' &&
         (ln.payload.size() == 1 || ln.payload[1] == ' ') &&
         ln.indent + 1 >= indent) {
@@ -787,8 +772,6 @@ Expected<Node> Parser::parse_mapping(std::size_t indent) {
         ++cursor_;
         Node value;
         // Treat comment-only inline values the same as an empty value
-        // CAPA rules use "or: # explanation" patterns where the real value is
-        // a block sequence on the following lines
         const bool inline_value_is_comment_only =
             !vraw.empty() && (vraw.front() == '#' ||
                               strip_inline_comment(rtrim(vraw)).empty());

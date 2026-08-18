@@ -8,11 +8,8 @@
 
 namespace emu = papa::features::extractors::papa_native::emu;
 
-// The taint registry allocates sentinel values for unknown emulator state
-// (uninitialized registers, import slots, call return values, stack locals),
-// a faithful port of impemu/emulator.py setVivTaint/getVivTaint. Taint values
-// live in a reserved high band so they read as non-pointers and are never
-// followed as control flow. Allocation is bounded
+// The taint registry allocates sentinel values for unknown emulator state. Taints
+// live in a reserved high band, so they read as non-pointers and are never followed
 
 TEST_CASE("emu taints: allocate produces values in the reserved band") {
     emu::TaintRegistry taints;

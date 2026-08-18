@@ -10,10 +10,8 @@
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
-// Data / arithmetic / logic instruction handlers, ported from
-// envi/archs/i386/emu.py. Flags are checked against vivisect's exact formulas,
-// including its quirks (add derives ZF from the unmasked sum), so emulation is
-// bit-identical and discovery follows the same paths
+// Data, arithmetic and logic handlers ported from envi/archs/i386/emu.py. Flags are
+// checked against vivisect's exact formulas, including its quirks
 
 namespace {
 
@@ -146,9 +144,8 @@ TEST_CASE("emu arith: mov reg, reg copies the value") {
     CHECK(e.regs().get_register(emu::kRegEax) == 0xABCD1234ULL);
 }
 
-// --- amd64 arithmetic: 64-bit shift counts mask to 0x3f (not 0x1f), the
-// sign-extension ops cdqe/cqo, and 64-bit mul/div produce the rdx:rax pair via
-// 128-bit arithmetic (envi/archs/amd64 EMU NOTES + Amd64Emulator i_div/i_idiv)
+// amd64 arithmetic: 64-bit shift counts mask to 0x3f, cdqe and cqo sign-extend, and
+// 64-bit mul and div produce the rdx:rax pair
 
 TEST_CASE("emu arith amd64: shl rax masks the shift count to 0x3f") {
     emu::IntelEmulator e(/*is_64bit=*/true);

@@ -34,9 +34,8 @@ flirt::FlirtPattern make_pattern(std::initializer_list<int> bytes) {
     return pat;
 }
 
-// Builds a function-bytes buffer: a 32-byte pattern region followed by a tail.
-// The pattern region is filled with `fill`, then `prefix` is laid over its
-// start. The returned buffer is exactly kMaxPatternLength + tail.size() long
+// Builds a function-bytes buffer: a 32-byte pattern region followed by a tail. The
+// pattern region is filled with `fill`, then `prefix` is laid over its start
 std::vector<std::uint8_t> make_function_bytes(std::span<const std::uint8_t> prefix,
                                               std::span<const std::uint8_t> tail,
                                               std::uint8_t fill = 0x90U) {
@@ -227,9 +226,8 @@ TEST_CASE("flirt_matcher: match_flirt_modules returns a pattern+CRC+tail-byte ma
     m.tail_length = len;
     m.names.push_back({0, "foo", flirt::FlirtNameType::kPublic});
     m.references.push_back({0x10U, "malloc"});
-    // The tail-byte offset is relative to the end of the pattern+CRC region, so
-    // the matcher reads kMaxPatternLength + crc_len + 2, the way python-flirt's
-    // match_tail_bytes gates the decision
+    // The tail-byte offset is relative to the end of the pattern and CRC region, so the
+    // matcher reads kMaxPatternLength + crc_len + 2
     m.tail_bytes.push_back({0x02U, 0xABU});
     root->leaf_modules.push_back(std::move(m));
     const auto tree = make_tree(std::move(root));
@@ -249,10 +247,8 @@ TEST_CASE("flirt_matcher: match_flirt_modules returns a pattern+CRC+tail-byte ma
 }
 
 TEST_CASE("flirt_matcher: a module whose tail byte mismatches is rejected") {
-    // python-flirt applies tail bytes as a hard filter at buf[byte_sig_size +
-    // crc_len + offset]: a module matching the pattern and CRC is still
-    // eliminated when a recorded tail byte differs. capa rejects a colliding
-    // compiler variant this way, so papa must too
+    // python-flirt applies tail bytes as a hard filter, so a module matching the pattern
+    // and CRC is still eliminated when a recorded tail byte differs
     const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
     constexpr std::array<std::uint8_t, 4> tail{0x11, 0x22, 0x33, 0x44};
     const std::uint16_t crc = flirt::flirt_crc16(tail);

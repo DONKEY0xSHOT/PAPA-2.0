@@ -15,8 +15,6 @@ namespace papa::features::extractors::papa_native {
 namespace {
 
 // True when reg writes destructively to target_reg's enclosing register
-// Partial-width writes ("mov al, ...") leave the upper bits of eax intact and
-// therefore cannot be treated as definitions for slicing purposes
 [[nodiscard]] bool
 is_full_write_to_register(ZydisRegister      written,
                           ZydisRegister      target,
@@ -28,9 +26,8 @@ is_full_write_to_register(ZydisRegister      written,
     const ZydisRegister target_full  = ZydisRegisterGetLargestEnclosing(mode, target);
     if (written_full != target_full) { return false; }
 
-    // Only writes whose width matches or exceeds the target width fully overwrite
-    // the enclosing register (on x64, 32-bit writes also zero-extend the upper 32
-    // bits, which Zydis reports through GetWidth, not the register class itself)
+    // Only writes whose width matches or exceeds the target width fully overwrite the
+    // enclosing register, and on x64 a 32-bit write also zero-extends
     const auto written_width = ZydisRegisterGetWidth(mode, written);
     const auto target_width  = ZydisRegisterGetWidth(mode, target);
     return written_width >= target_width;
@@ -52,8 +49,6 @@ classify_definition(const DecodedInsn& ins,
     if (!is_full_write_to_register(dst.base_reg, target_reg, mode)) { return std::nullopt; }
 
     // CAPA accepts mov, lea, pop, and xor as destructive register writes
-    // Other instructions also write registers but vivisect's slicer ignores them
-    // because their semantics are too implementation-defined for the heuristic
     const bool is_destructive_mnem =
         ins.zyd_mnem == ZYDIS_MNEMONIC_MOV ||
         ins.zyd_mnem == ZYDIS_MNEMONIC_LEA ||
@@ -111,11 +106,8 @@ scan_block_backward(const BasicBlock& bb, std::size_t upto,
     return nullptr;
 }
 
-// Resolve the definition of reg reaching the entry of start by a bounded
-// breadth-first walk over predecessor blocks, returning the nearest reaching
-// definition. This approximates the emulation-based resolution capa performs:
-// the register is loaded from the IAT once and called later past a guard, so
-// the closest backward write is the one an emulator would observe at the call
+// Resolve the definition of reg reaching the entry of start by a bounded breadth-first
+// walk over predecessor blocks, returning the nearest reaching definition
 [[nodiscard]] std::optional<Definition>
 define_at_entry(const Function& fn, const BasicBlock& start,
                 ZydisRegister reg, bool is_64bit) {
@@ -158,8 +150,6 @@ find_definition(const Function&    fn,
     if (fn.basic_blocks.empty())            { return std::nullopt; }
 
     // Locate the basic block containing call_va
-    // CAPA limits the slice to that block to avoid false positives from
-    // cross-block aliasing through register pressure or paths not yet visited
     const BasicBlock* host = nullptr;
     std::size_t call_index = 0;
     for (const auto& bb : fn.basic_blocks) {
@@ -181,9 +171,8 @@ find_definition(const Function&    fn,
         return def;
     }
 
-    // The register is set up in an earlier block, as compilers routinely do for
-    // an import loaded once and called past a guard. Search predecessors for the
-    // nearest reaching definition
+    // The register is set up in an earlier block, as compilers routinely do for an
+    // import loaded once and called past a guard
     return define_at_entry(fn, *host, target_reg, is_64bit);
 }
 

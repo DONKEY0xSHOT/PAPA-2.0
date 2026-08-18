@@ -55,13 +55,7 @@ Expected<std::span<const std::byte>> PeImage::read_at_rva(
     if (!maybe.has_value()) {
         return Unexpected{make_error(ErrorKind::kOutOfBounds, "rva not mapped")};
     }
-    // Only the start is checked against the containing section. A read running
-    // past that section's raw bytes returns whatever follows in the file, which
-    // is not what sits at those addresses once the image is mapped. Clamping it
-    // to readable_bytes_at_rva is the correct behaviour and changes extracted
-    // feature counts, so it needs revalidating against capa rather than against
-    // the current output. Callers that must not over-read already consult
-    // readable_bytes_at_rva first
+    // Only the start is checked against the containing section
     return read_at_file_offset(*maybe, n);
 }
 
@@ -104,9 +98,8 @@ bool PeImage::probe_readable(std::uint64_t rva, std::size_t n) const noexcept {
     }
     const std::uint64_t end = std::uint64_t{s->virtual_address} +
                               std::max(s->virtual_size, s->raw_size);
-    // n is a caller-supplied length and rva comes from sample data, so the sum
-    // is checked for wrap before the comparison. Without this a large enough n
-    // wraps to a small value and the range reads as readable
+    // n is a caller-supplied length and rva comes from sample data, so the sum is
+    // checked for wrap before the comparison
     if (n > std::numeric_limits<std::uint64_t>::max() - rva) {
         return false;
     }

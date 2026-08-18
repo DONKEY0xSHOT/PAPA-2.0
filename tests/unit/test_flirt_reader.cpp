@@ -54,9 +54,8 @@ void clear_compression_bit(std::vector<std::uint8_t>& header) {
         header[kFeaturesOffset] & ~0x10U);
 }
 
-// FLAIR vint16 encoder (the read_max_2_bytes inverse). Values up to 0x7F
-// fit in one byte. Values up to 0x7FFF take two bytes with the high bit of
-// the lead byte set and the upper 7 bits of the value in the lead byte
+// FLAIR vint16 encoder (the read_max_2_bytes inverse). Values up to 0x7F fit in one
+// byte
 void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
     if (v < 0x80U) {
         buf.push_back(static_cast<std::uint8_t>(v));
@@ -66,10 +65,8 @@ void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
     buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
 }
 
-// One node child header: a pattern length, an all-clear variant mask, then
-// the literal bytes in file order. With no wildcards the parser's internal
-// double reversal cancels, so file order is preserved. Versions >= 10 read
-// the length as a vint16, so we emit it that way
+// One node child header: a pattern length, an all-clear variant mask, then the literal
+// bytes in file order
 void append_child_pattern(std::vector<std::uint8_t>& buf,
                           std::span<const std::uint8_t> pattern_bytes) {
     append_vle16(buf, static_cast<std::uint16_t>(pattern_bytes.size()));
@@ -77,9 +74,8 @@ void append_child_pattern(std::vector<std::uint8_t>& buf,
     buf.insert(buf.end(), pattern_bytes.begin(), pattern_bytes.end());
 }
 
-// One node child header with explicit wildcards. Mask bit (length-1-i) marks
-// segment position i as a wildcard. The literal bytes cover the non-wildcard
-// positions in file order. Lengths below 0x10 carry a vint16 mask
+// One node child header with explicit wildcards. Mask bit (length-1-i) marks segment
+// position i as a wildcard
 void append_child_pattern_masked(std::vector<std::uint8_t>& buf,
                                  std::uint16_t length, std::uint16_t mask,
                                  std::span<const std::uint8_t> literals) {
@@ -88,11 +84,8 @@ void append_child_pattern_masked(std::vector<std::uint8_t>& buf,
     buf.insert(buf.end(), literals.begin(), literals.end());
 }
 
-// One module body inside a leaf, excluding the crc_len/crc16 pair which the
-// caller emits so it can group several modules under one CRC. Emits a
-// function size, a single public name with a zero relative offset, then a
-// trailing parsing-flags byte. The name's first character is >= 0x20 so the
-// parser does not consume an optional leading flag byte
+// One module body inside a leaf, excluding the crc_len/crc16 pair which the caller
+// emits so it can group several modules under one CRC
 void append_module_body(std::vector<std::uint8_t>& buf,
                         std::uint32_t function_size,
                         std::string_view name,
@@ -105,9 +98,8 @@ void append_module_body(std::vector<std::uint8_t>& buf,
     append_u8(buf, trailing_flags);
 }
 
-// Emit one name record inside a module: the relative offset, an optional
-// name-flag byte (a value below 0x20, e.g. LOCAL=0x02) when nonzero, the name
-// text, then the trailing parsing-flags byte that terminates the name
+// Emit one name record inside a module: the relative offset, an optional name-flag
+// byte, the name text, then the trailing parsing-flags byte that terminates it
 void append_name_record(std::vector<std::uint8_t>& buf, std::uint16_t relative_offset,
                         std::uint8_t name_flags, std::string_view name,
                         std::uint8_t trailing_flags) {
@@ -473,9 +465,8 @@ TEST_CASE("flirt_reader: pattern longer than cap is a bad node") {
 TEST_CASE("flirt_reader: variant mask marks wildcard positions") {
     std::vector<std::uint8_t> body;
     append_vle16(body, 1);  // root child count
-    // A 3-byte segment with the middle position wildcarded. A wildcard at
-    // local position 1 sets mask bit (length - 1 - 1) = bit 1. The two
-    // literal bytes cover positions 0 and 2 in file order
+    // A 3-byte segment with the middle position wildcarded. A wildcard at local
+    // position 1 sets mask bit (length - 1 - 1) = bit 1
     const std::array<std::uint8_t, 2> literals{0x55, 0xEC};
     append_child_pattern_masked(body, 3, 0x02, literals);
     append_vle16(body, 0);  // leaf

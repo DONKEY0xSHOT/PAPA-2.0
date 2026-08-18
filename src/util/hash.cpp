@@ -68,9 +68,8 @@ constexpr void store_le64(std::byte* p, std::uint64_t v) noexcept {
     }
 }
 
-// Generic length-encoded padding helper used by SHA family + MD5
-// padding_byte is 0x80 for all three algorithms
-// Only the trailing length encoding differs in endianness, which is parameterized
+// Generic length-encoded padding helper used by SHA family + MD5 padding_byte is 0x80
+// for all three algorithms
 template <bool BigEndianLength>
 void pad_and_finalize(std::array<std::byte, 64>& buffer,
                       std::size_t&               buffer_len,
@@ -101,8 +100,7 @@ void pad_and_finalize(std::array<std::byte, 64>& buffer,
 
 }  // namespace
 
-// ============================================================================
-// SHA-256
+// ============================================================================. SHA-256
 // ============================================================================
 
 namespace {
@@ -227,8 +225,7 @@ std::array<std::byte, 32> Sha256::finalize() noexcept {
     return digest;
 }
 
-// ============================================================================
-// SHA-1
+// ============================================================================. SHA-1
 // ============================================================================
 
 namespace {
@@ -327,8 +324,7 @@ std::array<std::byte, 20> Sha1::finalize() noexcept {
     return digest;
 }
 
-// ============================================================================
-// MD5
+// ============================================================================. MD5
 // ============================================================================
 
 namespace {
@@ -447,8 +443,6 @@ std::array<std::byte, 16> Md5::finalize() noexcept {
     return digest;
 }
 
-// ============================================================================
-// One-shot helpers + hex encoder
 // ============================================================================
 
 std::array<std::byte, 32> sha256(std::span<const std::byte> data) noexcept {

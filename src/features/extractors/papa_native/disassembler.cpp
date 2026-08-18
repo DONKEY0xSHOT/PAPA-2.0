@@ -67,12 +67,8 @@ OperandKind Disassembler::classify(
             const bool has_base  = (m.base  != ZYDIS_REGISTER_NONE);
             const bool has_index = (m.index != ZYDIS_REGISTER_NONE);
             if (!has_base && !has_index) {
-                // A SIB byte with neither base nor index is vivisect's
-                // i386SibOper, whose displacement is an offset source. Without a
-                // SIB byte it is a direct absolute, i386ImmMemOper, a number
-                // source. CAPA splits the two this way, so a SIB-encoded
-                // "gs:[0x30]" (the only x64 form of a non-RIP absolute) yields an
-                // offset and never a number
+                // A SIB byte with neither base nor index is vivisect's i386SibOper, whose
+                // displacement is an offset source. Without one it is i386ImmMemOper, a number
                 return has_sib ? OperandKind::kSib : OperandKind::kImmMem;
             }
             if (has_index) {
@@ -123,12 +119,7 @@ namespace {
 }
 
 // Instructions that end a block without falling through, beyond the return and
-// unconditional-branch cases. Ports the IF_NOFALL classes of vivisect's envi
-// iflag_lookup that are not branches or returns: INS_DEBUG (int3), INS_HALT
-// (hlt), INS_INVALIDOP (ud0/ud1/ud2), INS_OFLOW (into), and INS_TRAP (int N),
-// which vivisect marks no-fall on Windows for every vector except the 0x2e NT
-// syscall gate it treats as a returning call. iret (INS_TRET) is already a RET
-// to Zydis, so it is covered by is_return
+// unconditional-branch cases
 [[nodiscard]] bool is_nofall_terminal(const DecodedInsn& d) noexcept {
     switch (d.zyd_mnem) {
         case ZYDIS_MNEMONIC_INT3:
@@ -234,9 +225,7 @@ Expected<DecodedInsn> Disassembler::decode(
         zi.operand_count_visible, constants::kMaxOperandCount);
     d.operand_count = visible;
     const ZydisMachineMode mode = zi.machine_mode;
-    // The SIB flag is instruction-level. At most one memory operand uses ModRM
-    // addressing, so attributing it to every operand is harmless and lets
-    // classify tell a SIB-encoded absolute (kSib) from a direct one (kImmMem)
+    // The SIB flag is instruction-level
     const bool has_sib = (zi.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
     for (std::size_t i = 0; i < visible; ++i) {
         d.operands[i] = translate_operand(zops[i], mode, has_sib);

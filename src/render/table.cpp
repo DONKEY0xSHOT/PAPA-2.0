@@ -10,9 +10,7 @@ namespace papa::render::table {
 
 namespace {
 
-// SQUARE box glyphs as raw UTF-8 bytes so the source stays ASCII-only.
-// These are the same characters rich substitutes for its HEAVY_HEAD default
-// box on Windows, which is what capa.exe emits
+// SQUARE box glyphs as raw UTF-8 bytes so the source stays ASCII-only
 constexpr std::string_view kHorizontal = "\xE2\x94\x80";  // U+2500
 constexpr std::string_view kVertical   = "\xE2\x94\x82";  // U+2502
 constexpr std::string_view kTopLeft    = "\xE2\x94\x8C";  // U+250C
@@ -139,9 +137,8 @@ struct Word {
     return out;
 }
 
-// Build a styled line of exactly width cells from [begin, end) of one wrapped
-// piece: trailing whitespace is dropped, then the line is ellipsis-truncated if
-// it overflows or right-padded with spaces if it is short
+// Build a styled line of exactly width cells from one wrapped piece, dropping
+// trailing whitespace then truncating with an ellipsis or padding with spaces
 [[nodiscard]] std::vector<Run> make_line(const std::string& plain,
                                          const std::vector<Style>& styles,
                                          std::size_t begin, std::size_t end, int width) {
@@ -161,9 +158,7 @@ struct Word {
     return runs;
 }
 
-// Wrap a cell to width columns, returning styled lines each width cells wide.
-// A token longer than width is truncated with an ellipsis, matching rich's
-// default "ellipsis" overflow rather than folding
+// Wrap a cell to width columns, returning styled lines each width cells wide
 [[nodiscard]] std::vector<std::vector<Run>> wrap_cell(const Cell& cell, int width) {
     const std::string plain = cell_plain(cell);
     const std::vector<Style> styles = cell_styles(cell);

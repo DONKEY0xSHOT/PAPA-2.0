@@ -137,11 +137,8 @@ TEST_CASE("CodeBlockStore keeps a shared block in every owning function and reco
 }
 
 TEST_CASE("codeblocks drops a function whose flow reaches an unparseable op (bad-opcode break)") {
-    // The enclosing function's entry parses, but its flow marches into a region
-    // an overlapping decode left claiming LOC_OP at an address whose bytes do not
-    // decode. vivisect breaks the walk there without recording the block, so the
-    // function ends with zero blocks. This is the FLIRT overlap graph-build
-    // failure (cmd_x64 0x1400303ac)
+    // The enclosing function's entry parses, but its flow marches into a region an
+    // overlapping decode left claiming LOC_OP at an address whose bytes do not decode
     pv::LocationDb loc;
     loc.add_location(0x1000, 2, pv::LocType::kOp);  // entry, parses
     loc.add_location(0x1002, 2, pv::LocType::kOp);  // reached, but does not parse

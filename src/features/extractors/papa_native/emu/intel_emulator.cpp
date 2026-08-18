@@ -352,10 +352,8 @@ namespace {
            kind == OperandKind::kSib || kind == OperandKind::kRipRel;
 }
 
-// The accumulator/data register lane for a given operand size (the _emu_*GpReg
-// trick): al/ax/eax(/rax) for base rax, dl/dx/edx(/rdx) for base rdx. In 64-bit
-// mode the 4-byte lane is a zero-extend lane (writing eax clears the upper 32
-// bits of rax). The 8-byte accumulator is the real register itself
+// The accumulator or data register lane for a given operand size, al/ax/eax/rax for
+// base rax and dl/dx/edx/rdx for base rdx
 [[nodiscard]] std::uint32_t gp_lane(std::uint32_t base, std::size_t size,
                                     bool is_64bit) noexcept {
     if (size == 1) {
@@ -371,8 +369,7 @@ namespace {
 }
 
 // High 64 bits of the unsigned 64x64 product, via 32-bit halves (portable, no
-// intrinsics, no undefined >>64). Used for 64-bit mul/imul where the product
-// spans rdx:rax
+// intrinsics, no undefined >>64)
 [[nodiscard]] std::uint64_t umul_hi(std::uint64_t a, std::uint64_t b) noexcept {
     const std::uint64_t a_lo = a & 0xFFFFFFFFULL;
     const std::uint64_t a_hi = a >> 32;
@@ -399,9 +396,8 @@ namespace {
     return hi;
 }
 
-// Unsigned 128/64 long division. Never traps (unlike the hardware DIV or the
-// _udiv128 intrinsic). The quotient is masked to 64 bits to match vivisect,
-// whose Python-bigint quotient is truncated by setRegister
+// Unsigned 128/64 long division. Never traps (unlike the hardware DIV or the _udiv128
+// intrinsic)
 struct Div128 {
     std::uint64_t quot;
     std::uint64_t rem;
@@ -1032,9 +1028,7 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
                 regs_.set_register(gp_lane(kRegEdx, 4, is_64bit_),
                                    static_cast<std::uint64_t>(r));
             } else {
-                // 64-bit idiv: signed rdx:rax / val via 128-bit division. The
-                // quotient takes the sign of dividend^divisor, the remainder the
-                // sign of the dividend (envi Amd64Emulator.i_idiv)
+                // 64-bit idiv: signed rdx:rax / val via 128-bit division
                 std::uint64_t hi = regs_.get_register(kRegRdx);
                 std::uint64_t lo = regs_.get_register(kRegRax);
                 const bool dividend_neg = (hi >> 63) != 0;
@@ -1141,9 +1135,8 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             result = ExecResult::kOutInstruction;
             break;
 
-        // SSE/AVX moves: faithful byte copies through the XMM register file, so
-        // a function whose prologue or body uses SSE (buffer init, crypto)
-        // emulates to its ret instead of bailing on an unmodeled opcode
+        // SSE and AVX moves as faithful byte copies through the XMM file, so a function using
+        // SSE emulates to its ret instead of bailing on an unmodeled opcode
         case ZYDIS_MNEMONIC_MOVUPS:
         case ZYDIS_MNEMONIC_MOVUPD:
         case ZYDIS_MNEMONIC_MOVAPS:
@@ -1161,9 +1154,8 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
             write_simd_oper(insn, 0, read_simd_oper(insn, 1, 4), 4);
             break;
         case ZYDIS_MNEMONIC_MOVSD:
-            // The SSE scalar-double move shares this mnemonic with the MOVS
-            // string op. The SSE form has an XMM operand. The string form is not
-            // modeled (its bail before a ret simply costs recall, not safety)
+            // The SSE scalar-double move shares this mnemonic with the MOVS string op.
+            // The SSE form has an XMM operand
             if (xmm_index(insn.operands[0].base_reg).has_value() ||
                 xmm_index(insn.operands[1].base_reg).has_value()) {
                 write_simd_oper(insn, 0, read_simd_oper(insn, 1, 8), 8);
@@ -1235,9 +1227,8 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_BTS:
         case ZYDIS_MNEMONIC_BTR:
         case ZYDIS_MNEMONIC_BTC: {
-            // Bit test: CF is the addressed bit. bts/btr/btc also set, reset, or
-            // complement it. The index is reduced modulo the operand width (the
-            // register and immediate forms)
+            // Bit test: CF is the addressed bit, and bts, btr and btc also change it. The index
+            // is reduced modulo the operand width
             const std::uint64_t dst = get_oper_value(insn, 0);
             const std::uint64_t bitidx = get_oper_value(insn, 1) % (8ULL * dsize);
             const std::uint64_t mask = 1ULL << bitidx;

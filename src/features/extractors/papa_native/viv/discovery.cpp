@@ -92,10 +92,8 @@ void Discovery::on_opcode(std::uint64_t va, const DecodedInsn& op,
 }
 
 void Discovery::on_function(std::uint64_t va) {
-    // The deferral machinery can report a function more than once, the way
-    // vivisect's codeflow may call _cb_function twice. Analyze each function only
-    // once, matching vivisect's isFunction guard (base.py _cb_function), so its
-    // blocks are not attributed twice
+    // The deferral machinery can report a function more than once, the way vivisect's
+    // codeflow may call _cb_function twice
     if (!analyzed_.insert(va).second) {
         return;
     }
@@ -104,22 +102,16 @@ void Discovery::on_function(std::uint64_t va) {
         locations_, xrefs_,
         [this](std::uint64_t at) { return is_no_fall(at); },
         [this](std::uint64_t at) { return read_(at).has_value(); }, va, blocks_);
-    // The noret fmod runs after codeblocks (its blocks already reflect the
-    // suppression the flow applied). A function whose every leaf ends in a
-    // no-return call does not return, so a later caller loses its fall-through.
-    // Post-order makes this hold in one pass: the callee is analyzed here, before
-    // any caller flows past its call
+    // The noret fmod runs after codeblocks (its blocks already reflect the suppression
+    // the flow applied)
     if (function_is_noreturn(materialize_function(va),
                              [this](const DecodedInsn& op) {
                                  return is_no_return_call(op);
                              })) {
         no_return_functions_.insert(va);
     }
-    // The FLIRT fmod runs last, the way vivisect registers the signature
-    // analyzers after codeblocks and noret. It may create library sub-functions
-    // this signature names at its local offsets, which is what collapses an
-    // enclosing function whose region a helper claims. It re-enters make_function,
-    // which is safe here because this function's flow has already unwound
+    // The FLIRT fmod runs last, the way vivisect registers the signature analyzers
+    // after codeblocks and noret
     if (flirt_fmod_) {
         flirt_fmod_(va);
     }
@@ -192,10 +184,8 @@ Function Discovery::materialize_function(std::uint64_t fva) const {
             }
             va += length;
         }
-        // Successors are the terminator's non-call edges that land on another
-        // block of this function. A suppressed fall-through is not a block start,
-        // so a leaf after a no-return call has no successor, exactly what the leaf
-        // scan needs
+        // Successors are the terminator's non-call edges that land on another block of
+        // this function
         if (!bb.instructions.empty()) {
             const DecodedInsn& term = bb.instructions.back();
             for (const CodeXref& xref : xrefs_.code_xrefs_from(term.va)) {

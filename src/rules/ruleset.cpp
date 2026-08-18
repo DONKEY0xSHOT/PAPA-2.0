@@ -38,8 +38,6 @@ using ::papa::ErrorKind;
 using ::papa::Unexpected;
 
 // Walk a statement tree top-down replacing each Subscope node
-// Newly-spawned synthetic rules are appended to spawned in the order they are
-// discovered, which keeps test output deterministic
 void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
                           const std::string&                  parent_name,
                           std::size_t&                        counter,
@@ -54,9 +52,8 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
         const Scope inner_scope = sub->scope();
         auto        inner       = sub->take_inner();
 
-        // Recurse into the new rule's inner tree before adopting it
-        // Using a fresh counter rooted at the new name keeps the synthetic names
-        // unique per parent and reproducible across runs
+        // Recurse into the new rule's inner tree before adopting it. A fresh counter rooted
+        // at the new name keeps synthetic names unique and reproducible
         std::size_t inner_counter = 0;
         extract_subscopes_in(inner, syn_name, inner_counter, spawned);
 
@@ -183,9 +180,8 @@ Expected<void>
 RuleSet::extract_subscope_rules(std::vector<std::unique_ptr<Rule>>& rules) {
     std::vector<std::unique_ptr<Rule>> spawned;
 
-    // Iterate the original input only
-    // Synthetic rules already had their tree rewritten when they were spawned
-    // so revisiting them is unnecessary
+    // Iterate the original input only. Synthetic rules already had their tree rewritten
+    // when they were spawned so revisiting them is unnecessary
     const std::size_t original = rules.size();
     for (std::size_t i = 0; i < original; ++i) {
         if (rules[i] == nullptr) { continue; }
@@ -226,10 +222,6 @@ Expected<void> RuleSet::index_rules() {
 
 Expected<void> RuleSet::validate_dependencies() {
     // Drop rules whose match: refs cannot be resolved
-    // Cross-rule references frequently target rules that PAPA's parser had to
-    // skip earlier in the load (irregular YAML, COM class lookup, etc.)
-    // The dependent rule cannot fire either way so dropping it keeps the corpus
-    // useful instead of failing the whole load
     std::vector<std::unique_ptr<Rule>> kept;
     kept.reserve(rules_.size());
     for (auto& r : rules_) {
@@ -348,10 +340,8 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
     }
     for (; it != fs::recursive_directory_iterator(); ++it) {
         const auto& entry = *it;
-        // Skip hidden directories (e.g. .github) so CI workflows do not pose
-        // as rule files
-        // recursive_directory_iterator::disable_recursion_pending stops descent
-        // into the directory we just observed
+        // Skip hidden directories so CI workflows cannot pose as rule files, using
+        // disable_recursion_pending to stop descent into the one just observed
         const auto stem = entry.path().filename().string();
         if (!stem.empty() && stem.front() == '.') {
             if (entry.is_directory(ec)) {
@@ -374,11 +364,8 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
 
         auto r = RuleParser::parse(content, entry.path().string());
         if (!r) {
-            // Tolerate per-file parse failures so a single malformed rule does
-            // not block the whole corpus from loading
-            // The first 1045-rule capa corpus survey produced a small handful
-            // of files with constructs the v1 YAML parser rejects (irregular
-            // indents, Python-only regex flavors). We log to stderr and skip
+            // Tolerate per-file parse failures so a single malformed rule does not
+            // block the whole corpus from loading
             std::cerr << "warning: skipping rule " << entry.path().string()
                       << ": " << r.error().detail << '\n';
             continue;

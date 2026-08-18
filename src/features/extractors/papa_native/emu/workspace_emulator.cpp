@@ -18,9 +18,8 @@ constexpr std::array<std::uint32_t, 7> kTaintRegs = {
     kRegEax, kRegEcx, kRegEdx, kRegEbx, kRegEbp, kRegEsi, kRegEdi,
 };
 
-// The amd64 entry-tainted registers (platarch/amd64.py taintregs): the GP
-// registers that can carry an incoming argument (rax..rdi plus r8/r9), but not
-// rsp or the callee-saved r10..r15
+// The amd64 entry-tainted registers, being the GP registers that can carry an
+// incoming argument
 constexpr std::array<std::uint32_t, 9> kTaintRegs64 = {
     kRegRax, kRegRcx, kRegRdx, kRegRbx, kRegRbp, kRegRsi, kRegRdi, kRegR8, kRegR9,
 };
@@ -41,17 +40,15 @@ void WorkspaceEmulator::add_map(std::uint64_t base, std::uint32_t perms,
 }
 
 void WorkspaceEmulator::prepare(std::uint64_t funcva) {
-    // The stack base, slot size and entry-tainted registers all follow the arch
-    // (impemu initStackMemory sign-extends the base and writes psize-wide slots,
-    // with platarch i386/amd64 taintregs)
+    // The stack base, slot size and entry-tainted registers all follow the arch, per
+    // impemu initStackMemory and the platarch taintregs
     const std::size_t psize = is_64bit_ ? 8U : 4U;
     const std::uint64_t stack_base = is_64bit_ ? kStackBase64 : kStackBase;
     const std::uint64_t stack_top = is_64bit_ ? kStackTop64 : kStackTop;
     emu_.memory().init_stack(stack_base);
 
     // Pre-seed 20 stack-local taints at the top of the stack and point the stack
-    // pointer at them (initStackMemory). The first stands for the saved return
-    // address. The stack-pointer slot is index 4 in both arches (esp/rsp)
+    // pointer at them (initStackMemory). The first stands for the saved return address
     const std::uint64_t sp = stack_top - kFuncStackTaints * psize;
     for (std::size_t i = 0; i < kFuncStackTaints; ++i) {
         const std::uint64_t t =
@@ -101,9 +98,8 @@ bool WorkspaceEmulator::check_call(const DecodedInsn& insn, EmulationMonitor* mo
     if (!insn.is_call) {
         return false;
     }
-    // The call target the operand resolved to. execute_opcode ran i_call and set
-    // the program counter to it, the way vivisect reads endeip before func_only
-    // rewinds the counter. For an indirect call this comes from live state
+    // The call target the operand resolved to. execute_opcode ran i_call and set the
+    // program counter to it, as vivisect reads endeip before func_only rewinds
     const std::uint64_t pc = emu_.program_counter();
     // func_only: do not descend into the callee. Execution resumes at the
     // instruction after the call and the unknown return value taints EAX
@@ -138,10 +134,8 @@ std::size_t WorkspaceEmulator::run_function(std::uint64_t funcva,
                                             std::uint32_t maxhit) {
     emustop_ = false;
     std::unordered_map<std::uint64_t, std::uint32_t> hits;
-    // Paths share their snapshot rather than each deep-copying it. Every branch
-    // of one instruction resumes from the identical state, and a popped path
-    // only reads it, so sharing is observationally the same and keeps the queue
-    // from multiplying one overlay by the number of pending paths
+    // Paths share their snapshot rather than each deep-copying it, which is
+    // observationally the same because a popped path only reads it
     std::vector<std::pair<std::uint64_t, std::shared_ptr<const Snapshot>>> todo;
     std::size_t queued_overlay = 0;
     const auto  push_path = [&todo, &queued_overlay](

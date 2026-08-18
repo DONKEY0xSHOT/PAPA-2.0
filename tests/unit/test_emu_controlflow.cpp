@@ -10,10 +10,8 @@
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
-// Control-flow handlers (call/jmp/jcc/ret/leave) and shifts, ported from
-// envi/archs/i386/emu.py. A handler that redirects flow sets the program
-// counter to the target. The conditional jumps use vivisect's exact cond_*
-// algebra. These are what let an emulated function body run to its ret
+// Control-flow handlers and shifts ported from envi/archs/i386/emu.py. These are
+// what let an emulated function body run to its ret
 
 namespace {
 

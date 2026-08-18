@@ -16,10 +16,8 @@ struct Definition {
     std::optional<std::uint64_t> value;        // resolved constant when known
 };
 
-/// The most recent destructive write to target_reg before call_va, found by
-/// scanning back through its basic block. The value is carried only when the
-/// write is a constant or a fixed-address load. Partial-width registers alias
-/// through their largest enclosing register, so eax and al resolve as rax
+/// The most recent destructive write to target_reg before call_va, found by scanning
+/// back through its basic block
 [[nodiscard]] std::optional<Definition>
 find_definition(const Function&     fn,
                 std::uint64_t       call_va,

@@ -8,21 +8,15 @@ namespace papa::features::extractors::papa_native::flirt {
 
 namespace {
 
-// Bytes read per function for matching. Only the 32-byte pattern and the CRC
-// tail window (at most 0xFF bytes past it) are inspected, so a small window
-// suffices and keeps the cold library-classification pass cheap
+// Bytes read per function for matching
 constexpr std::size_t kMatchWindow     = 0x200;
 
 // Recursion bound on reference chains. Real signature graphs are shallow. The
 // cap keeps a crafted, cyclic input from exhausting the stack
 constexpr std::size_t kMaxClassifyDepth = 64;
 
-// The name a module assigns at the function entry: the name at offset 0,
-// regardless of public or local kind. This is a faithful port of
-// viv_utils.flirt.get_match_name, which returns the first offset-0 name without
-// filtering by kind, so a statically linked helper that carries only a local
-// name (such as _check_managed_app) is still named. A module with no offset-0
-// name confers no identity
+// The name a module assigns at the function entry: the name at offset 0, regardless of
+// public or local kind
 [[nodiscard]] std::optional<std::string> match_name(const FlirtModule& module) {
     for (const FlirtName& n : module.names) {
         if (n.offset == 0) {
@@ -87,10 +81,8 @@ FlirtClassifier::classify_at(std::uint64_t va, std::size_t depth) const {
         }
     }
 
-    // A match also names the functions at its other offsets, so a sibling whose
-    // own bytes no signature matches is still identified. The memo records them
-    // here, and the driver's on_match hook applies viv_utils.flirt's name loops
-    // (creating a local sibling's function, marking each named address library)
+    // A match also names the functions at its other offsets, so a sibling whose own
+    // bytes no signature matches is still identified
     if (winner != nullptr) {
         for (const FlirtName& named : winner->names) {
             if (named.offset != 0) {
@@ -126,11 +118,8 @@ bool FlirtClassifier::references_satisfied(const FlirtModule& module,
             return false;
         }
 
-        // capa validates a named reference only against a local function that is
-        // itself a matched library function of that name, never an import, so a
-        // signature whose only reference is an imported API does not match. It
-        // recurses first, then reads the workspace library state, which may carry
-        // a name an earlier signature file assigned
+        // capa validates a named reference only against a local function that is itself a
+        // matched library function of that name, never an import
         std::optional<std::string> target_name =
             classify_at(xref->target, depth + 1);
         if (library_lookup_) {

@@ -61,9 +61,8 @@ struct FeatureEqKey {
     bool operator()(const FeaturePtr& a, const FeaturePtr& b) const noexcept;
 };
 
-/// Map from a structurally-identified feature to the set of locations where
-/// it occurred, with auxiliary indices that let scanning evaluators (Substring,
-/// Regex, Bytes) iterate just the relevant tag without traversing the whole map
+/// Map from a structurally-identified feature to the locations where it occurred,
+/// with indices that let scanning evaluators iterate just the relevant tag
 class FeatureSet
     : public std::unordered_map<FeaturePtr,
                                 std::unordered_set<Address>,
@@ -80,8 +79,6 @@ public:
     void merge_in(const FeatureSet& other);
 
     /// Snapshot of all String features ever inserted into this set
-    /// Maintained as add() runs so substring and regex evaluators can iterate
-    /// just the strings instead of every feature in the map
     [[nodiscard]] const std::vector<FeaturePtr>& strings() const noexcept {
         return strings_;
     }
@@ -96,9 +93,8 @@ private:
     std::vector<FeaturePtr> bytes_;
 };
 
-// Abstract base for every concrete feature type
-// Subclasses must implement hash, equals, and to_string
-// They may override evaluate to add scanning or wildcard semantics
+// Abstract base for every concrete feature type. Subclasses must implement hash,
+// equals, and to_string
 class Feature {
 public:
     virtual ~Feature() = default;
@@ -107,17 +103,12 @@ public:
     [[nodiscard]] std::string_view   type_name()   const noexcept { return type_name_; }
     [[nodiscard]] const std::string& description() const noexcept { return description_; }
 
-    // Membership check plus subclass-specific semantic matching
-    // Default implementation looks self up in the FeatureSet by structural equality
-    // Subclasses override when they must scan the set (substring, regex, bytes, wildcards)
+    // Membership check plus subclass-specific semantic matching. Default implementation
+    // looks self up in the FeatureSet by structural equality
     [[nodiscard]] virtual engine::Result evaluate(const FeatureSet& fs,
                                                   bool short_circuit) const;
 
     // Boolean form of evaluate for the probe pass
-    // Every override must answer exactly what evaluate reports in Result::success,
-    // but without building a Result or copying the matched location set. The probe
-    // runs for every leaf of every rule at every scope, so those allocations
-    // dominated matching
     [[nodiscard]] virtual bool matches(const FeatureSet& fs) const;
 
     // Structural hash

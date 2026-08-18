@@ -21,13 +21,8 @@ FlirtSignatureSet FlirtSignatureSet::make_embedded() {
     FlirtSignatureSet set;
     if (count == 0U) { return set; }
 
-    // Each signature file decodes independently, and the shipped packs are
-    // 4.5, 7.2 and 2.7 MB, so decoding them concurrently costs about as long as
-    // the largest rather than their sum. This is a flat cost on every run and
-    // dominates analysis of a small binary.
-    // The trees are adopted afterwards in registry order, which the per-tree
-    // FLIRT priming depends on, so the result does not depend on which parse
-    // finished first
+    // The packs decode independently, so decoding them concurrently costs about as long
+    // as the largest. They are adopted afterwards in registry order
     std::vector<std::optional<FlirtTree>> parsed(count);
     std::vector<std::exception_ptr>       errors(count);
 

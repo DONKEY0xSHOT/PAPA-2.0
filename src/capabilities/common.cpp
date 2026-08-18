@@ -21,33 +21,21 @@ namespace papa::capabilities {
 
 namespace {
 
-// Exact namespace prefix CAPA uses to gate static-only limitation rules
-// Anything strictly below this prefix counts (e.g., the leaf
-// "internal/limitation/static/dotnet")
-// The prefix itself is also a valid rule path that should match exactly
+// Exact namespace prefix CAPA uses to gate static-only limitation rules. Anything at
+// or below this prefix counts
 constexpr std::string_view kStaticLimitationPrefix = "internal/limitation/static";
 
 [[nodiscard]] bool
 namespace_starts_with(std::string_view ns, std::string_view prefix) noexcept {
     if (ns.size() < prefix.size()) { return false; }
     if (ns.substr(0, prefix.size()) != prefix) { return false; }
-    // A bare prefix match is fine
-    // If there are more segments they must start with '/' so we do not match
-    // an unrelated namespace like "internal/limitation/static_other"
+    // A bare prefix match is fine. Extra segments must start with a slash so an unrelated
+    // namespace like internal/limitation/static_other does not match
     return ns.size() == prefix.size() || ns[prefix.size()] == '/';
 }
 
-// Every rule name or namespace a statement tree references through match:.
-//
-// Unlike the feature index, this walks every branch. A reference under an or,
-// an optional, or especially a not can still decide whether the rule matches:
-// a negated reference gains a match when the referenced rule is absent, so
-// leaving one out of the gate would make papa bail on a clean sample rather
-// than merely miss a limitation.
-//
-// Only FeatureStatement and Range carry a feature directly. A new statement
-// kind that also holds one must be handled here, or its references would be
-// dropped silently and the gate would stop being equivalent to the full pass
+// Every rule name or namespace a statement tree references through match:. Unlike the
+// feature index this walks every branch, since a negated reference matters too
 void collect_match_refs(const ::papa::engine::Statement* s,
                         std::vector<std::string>&        out) {
     if (s == nullptr) { return; }
@@ -79,9 +67,7 @@ std::vector<const ::papa::rules::Rule*>
 limitation_gate_rules(const ::papa::rules::RuleSet& rules) {
     const auto file_rules = rules.rules_by_scope(::papa::rules::Scope::kFile);
 
-    // Seed with the limitation rules themselves. has_static_limitation only
-    // ever inspects file-scope matches, so a rule at another scope cannot
-    // decide the question on its own
+    // Seed with the limitation rules themselves
     std::vector<const ::papa::rules::Rule*> work;
     for (const auto* r : file_rules) {
         const auto& ns = r->namespace_();
@@ -90,9 +76,7 @@ limitation_gate_rules(const ::papa::rules::RuleSet& rules) {
         }
     }
 
-    // Walk match: references to their closure. A reference names either a rule
-    // or a namespace, and a namespace is satisfied by any rule beneath it,
-    // because a match injects the whole namespace hierarchy of its rule
+    // Walk match: references to their closure
     std::unordered_set<const ::papa::rules::Rule*> closure;
     std::vector<std::string>                       refs;
     while (!work.empty()) {

@@ -11,8 +11,6 @@
 namespace papa::features::extractors {
 
 // Lightweight extractor that only emits global and file-scope features
-// All per-function/BB/instruction methods return empty vectors so orchestrators
-// can run the same loop against either backend without conditionals
 class PefileFeatureExtractor : public StaticFeatureExtractor {
 public:
     // The PeImage must outlive the extractor (no copy is made)

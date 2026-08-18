@@ -15,9 +15,8 @@ namespace pn = papa::features::extractors::papa_native;
 
 namespace {
 
-// Decode a contiguous byte buffer into a straight-line instruction window at
-// ascending VAs. The buffer must outlive the returned window because each
-// DecodedInsn keeps a raw_bytes span into it
+// Decode a contiguous byte buffer into a straight-line window at ascending VAs. The
+// buffer must outlive the window, because each instruction keeps a span into it
 std::vector<pn::DecodedInsn> decode_window(std::span<const std::byte> buf,
                                            std::uint64_t base_va,
                                            const pn::Disassembler& dis) {
@@ -42,9 +41,8 @@ std::vector<std::byte> to_bytes(std::initializer_list<std::uint8_t> bytes) {
     return out;
 }
 
-// The real MSVC x64 switch dispatch from capa.exe at 0x14000ac85..0x14000acab:
-//   cmp ecx, 0x1f / ja 0x14000c38b / movsxd rax, ecx / lea rdx, [rip-0xac98]
-//   lea r11, [rip+0x2ab71] / mov ecx, [rdx+rax*4+0xc3a4] / add rcx, rdx / jmp rcx
+// The real MSVC x64 switch dispatch from capa.exe at 0x14000ac85, a cmp and ja
+// guard followed by an offset-table load and an indirect jump
 const std::initializer_list<std::uint8_t> kIdiomBytes = {
     0x83, 0xf9, 0x1f,
     0x0f, 0x87, 0xfd, 0x16, 0x00, 0x00,
@@ -178,13 +176,8 @@ TEST_CASE("jump_tables: returns nullopt when the window is not a jump table") {
 }
 
 TEST_CASE("jump_tables: emulator-driven resolver uses the path-sensitive base") {
-    // The real cmd.exe dispatch block at 0x14000f154 (function 0x14000ef40):
-    //   cmp eax,0x7c / ja +0x44 / movzx eax,byte [r12+rax+0xf738] /
-    //   mov ecx,[r12+rax*4+0xf720] / add rcx,r12 / jmp rcx
-    // r12 holds the image base at the dispatch (a lea sets it far above, at
-    // 0x14000f099, past an intervening pop r12), so only emulation recovers the
-    // base a static lea scan cannot. The offset table at 0x14000f720 holds the
-    // real image-base-relative RVAs, ending at a non-code dword
+    // The real cmd.exe dispatch at 0x14000f154. r12 holds the image base, set by a lea
+    // far above past an intervening pop, so only emulation recovers it
     const pn::Disassembler dis(true);
     const auto disp_buf = to_bytes({
         0x83, 0xf8, 0x7c,
@@ -259,9 +252,8 @@ TEST_CASE("jump_tables: resolves the MSVC x64 two-level indexed switch") {
     const pn::Disassembler dis(true);
     // lea r12, [rip+152460]  at 0x14000ef9d, so r12 = 0x140034370
     const auto lea_buf = to_bytes({0x4c, 0x8d, 0x25, 0x8c, 0x53, 0x02, 0x00});
-    // The dispatch at 0x14000f154 (real cmd_x64 bytes):
-    //   cmp eax,124 / ja +.. / movzx eax,byte [r12+rax+0xf738] /
-    //   mov ecx,[r12+rax*4+0xf720] / add rcx,r12 / jmp rcx
+    // The same cmd_x64 dispatch at 0x14000f154, a byte index map followed by the
+    // offset-table load and the indirect jump
     const auto disp_buf = to_bytes({
         0x83, 0xf8, 0x7c,
         0x77, 0x44,

@@ -29,10 +29,8 @@ namespace {
 
 namespace base = ::papa::features::extractors;
 
-// Recover the absolute VA from a public Address used by orchestrators
-// Returns nullopt for non-VA addresses
-// Orchestrators must never present FileOffsetAddress or NoAddress to
-// per-scope extractors that look up real instructions or basic blocks
+// Recover the absolute VA from a public Address used by orchestrators. Returns nullopt
+// for non-VA addresses
 [[nodiscard]] std::optional<std::uint64_t>
 absolute_va(const features::Address& addr) noexcept {
     if (const auto* a = std::get_if<features::AbsoluteVirtualAddress>(&addr)) {
@@ -42,8 +40,6 @@ absolute_va(const features::Address& addr) noexcept {
 }
 
 // Lift a const Function* out of an opaque FunctionHandle.inner
-// Throws PapaInvariantError when the handle did not originate from this backend
-// because using a foreign handle indicates an orchestrator bug we want loud
 [[nodiscard]] const Function&
 function_from_handle(const base::FunctionHandle& fh) {
     if (fh.inner == nullptr) {
@@ -193,7 +189,6 @@ PapaNativeStaticExtractor::extract_insn_features(
 
     // Per-scope extractors are aggregated here in a fixed order so output is
     // deterministic across runs
-    // The engine itself does not depend on order, so this only affects rendering
     if (auto m = ::papa::features::extractors::papa_native::insn::extract_mnemonic(ins);
         m.has_value()) { out.push_back(std::move(*m)); }
     if (auto c = ::papa::features::extractors::papa_native::insn::extract_call_plus_5(ins);
@@ -238,10 +233,8 @@ PapaNativeStaticExtractor::extract_insn_features(
         for (auto& fa : apis) { out.push_back(std::move(fa)); }
     }
     {
-        // capa also emits an api feature for a direct call to a statically-linked
-        // library function FLIRT identified (e.g. _beginthreadex), which is not
-        // an import. The lookup uses the same FLIRT classification as
-        // is_library_function
+        // capa also emits an api feature for a direct call to a statically linked library
+        // function FLIRT identified, such as _beginthreadex, which is not an import
         auto flirt_apis = ::papa::features::extractors::papa_native::insn::extract_flirt_call_api(
             ins, [this](std::uint64_t va) { return flirt_name_at(va); });
         for (auto& fa : flirt_apis) { out.push_back(std::move(fa)); }
@@ -267,9 +260,8 @@ bool PapaNativeStaticExtractor::is_library_function(
     // Structural thunks are library code regardless of any signature
     if (LibrarySignatureSet::is_thunk(*fn)) { return true; }
 
-    // FLIRT identified the library functions during analysis, the way capa's
-    // signature analyzers run as workspace modules while functions are made, so
-    // this is a lookup into that result rather than a second matching pass
+    // FLIRT identified the library functions during analysis, so this is a lookup into
+    // that result rather than a second matching pass
     return backend_.flirt_library_names().count(*va) != 0;
 }
 

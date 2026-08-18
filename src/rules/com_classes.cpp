@@ -9,13 +9,8 @@ namespace papa::rules {
 
 namespace {
 
-// Each row encodes the 16-byte little-endian GUID layout:
-//   bytes[0..4]  reversed Data1 (DWORD)
-//   bytes[4..6]  reversed Data2 (WORD)
-//   bytes[6..8]  reversed Data3 (WORD)
-//   bytes[8..16] Data4 in source order
-// Names must remain sorted alphabetically because lookup_com runs a binary search
-// New entries should be inserted in their lexicographic position
+// Each row encodes the 16-byte little-endian GUID layout. Names must stay sorted
+// alphabetically, because lookup_com runs a binary search over them
 constexpr std::array<ComEntry, 9> kClasses = {{
     { "BackgroundCopyManager",
       "{4991d34b-80a1-4291-83b6-3328366b9097}",

@@ -12,11 +12,8 @@ namespace {
     return (1ULL << width_bits) - 1ULL;
 }
 
-// A meta-register index whose top half is RMETA_LOW32 is a 32-bit lane at
-// offset 0 (width 32 in bits 16..23, offset 0 in bits 24..31). In amd64 mode,
-// writing such a lane (eax, r8d, ...) zero-extends into the full parent
-// register, so it is redirected to a write of the whole real register
-// (envi/archs/amd64/regs.py Amd64RegisterContext.setRegister)
+// A meta-register index whose top half is RMETA_LOW32 is a 32-bit lane at offset 0.
+// In amd64 mode writing it zero-extends, so it redirects to the whole register
 constexpr std::uint32_t kRMetaLow32 = 0x00200000U;
 
 }  // namespace

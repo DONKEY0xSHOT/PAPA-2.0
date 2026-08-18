@@ -7,9 +7,8 @@
 
 namespace papa::render::json {
 
-// Stream the document to out
-// pretty=true emits 2-space indented JSON
-// pretty=false emits compact output suitable for piping to another tool
+// Stream the document to out pretty=true emits 2-space indented JSON pretty=false emits
+// compact output suitable for piping to another tool
 void render(const ResultDocument& doc, std::ostream& out, bool pretty);
 
 // Convenience that returns the rendered string

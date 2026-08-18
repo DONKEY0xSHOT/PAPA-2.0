@@ -45,10 +45,8 @@ public:
     /// True when function_bytes match any loaded tree
     [[nodiscard]] bool classify(std::span<const std::uint8_t> function_bytes) const noexcept;
 
-    /// Every leaf module across all loaded trees that matches function_bytes by
-    /// pattern and tail CRC. The pointers are owned by this set and stay valid
-    /// for its lifetime. Feeds the reference-validating classifier, which uses a
-    /// module's tail bytes and references only to choose the name
+    /// Every leaf module across all loaded trees that matches function_bytes by pattern
+    /// and tail CRC
     [[nodiscard]] std::vector<const FlirtModule*>
     match(std::span<const std::uint8_t> function_bytes) const;
 

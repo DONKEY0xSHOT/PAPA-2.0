@@ -13,9 +13,8 @@
 
 namespace papa::features::extractors::papa_native::flirt {
 
-/// One node-level FLAIR pattern. The bitset marks wildcard positions
-/// (linker-rewritable bytes). Positions clear in the bitset must match
-/// the corresponding byte exactly
+/// One node-level FLAIR pattern. The bitset marks wildcard positions (linker-rewritable
+/// bytes). Positions clear in the bitset must match the corresponding byte exactly
 struct FlirtPattern {
     std::array<std::uint8_t, kMaxPatternLength>  bytes   {};
     std::bitset<kMaxPatternLength>               wildcard{};
@@ -45,17 +44,15 @@ struct FlirtTailByte {
     std::uint8_t   value  {0};
 };
 
-/// An assertion that the candidate references a named function at a
-/// function-relative offset. A name of "." denotes a data reference. These are
-/// what disambiguate FLIRT collisions and are validated against the binary
+/// An assertion that the candidate references a named function at a function-relative
+/// offset. A name of "." denotes a data reference
 struct FlirtReference {
     std::uint32_t  offset {0};
     std::string    name;
 };
 
-/// A leaf-module record. The matcher needs the tail CRC plus the tail bytes.
-/// The library classifier additionally needs the names and references. All are
-/// retained so papa's FLIRT matches capa's reference-gated decision
+/// A leaf-module record. The matcher needs the tail CRC plus the tail bytes. The
+/// library classifier additionally needs the names and references
 struct FlirtModule {
     std::uint16_t                tail_crc16    {0};
     std::uint16_t                tail_length   {0};
@@ -65,10 +62,8 @@ struct FlirtModule {
     std::vector<FlirtReference>  references;
 };
 
-/// Internal node in the pattern tree. Leaves are nodes with no children
-/// and a non-empty leaf_modules list. Internal nodes have children and
-/// an empty leaf_modules list. Both lists may be empty for the synthetic
-/// root
+/// Internal node in the pattern tree. Leaves are nodes with no children and a non-empty
+/// leaf_modules list. Internal nodes have children and an empty leaf_modules list
 struct FlirtNode {
     FlirtPattern                              pattern;
     std::vector<std::unique_ptr<FlirtNode>>   children;

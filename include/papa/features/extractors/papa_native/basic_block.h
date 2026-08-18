@@ -16,9 +16,8 @@ using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 [[nodiscard]] std::optional<FeatureWithAddress>
 extract_tight_loop(const BasicBlock& bb);
 
-// Detect "stack string" pattern: consecutive immediate stores to a stack
-// register whose bytes form a printable ASCII run of length >= kMinStackStringLen
-// is_64bit determines which registers count as the stack pointer or frame pointer
+// Detect the stack string pattern, consecutive immediate stores to a stack register
+// whose bytes form a printable ASCII run of at least kMinStackStringLen
 [[nodiscard]] std::optional<FeatureWithAddress>
 extract_stack_string(const BasicBlock& bb, bool is_64bit);
 

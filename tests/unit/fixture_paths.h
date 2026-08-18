@@ -6,15 +6,8 @@
 #include <string>
 #include <string_view>
 
-/// Helpers used by unit tests to locate optional sample-PE fixtures
-/// (notepad.exe, chrome.exe, capa.exe, "CFF Explorer.exe") at runtime.
-///
-/// The fixtures live outside the repository because they are real Windows
-/// binaries the project does not redistribute. Their location is resolved
-/// from the PAPA_TEST_FIXTURES environment variable. When the variable is
-/// unset or the requested file is absent, fixture-dependent test cases
-/// emit a MESSAGE and return without failing so the suite stays runnable
-/// on machines that do not have the fixtures available
+/// Helpers used by unit tests to locate optional sample-PE fixtures at runtime,
+/// resolved from PAPA_TEST_FIXTURES. Missing fixtures skip rather than fail
 namespace papa_tests::detail {
 
 /// Portable env-var read. MSVC rejects std::getenv under /W4 /WX

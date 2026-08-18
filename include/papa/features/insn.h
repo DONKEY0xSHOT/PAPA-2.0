@@ -11,8 +11,6 @@
 namespace papa::features {
 
 // API call or reference
-// Default evaluate (structural membership) is sufficient because the extractor
-// emits every spelling variant CAPA rules use, including bare and dll-qualified
 class Api : public Feature {
 public:
     explicit Api(std::string value, std::string desc = {});
@@ -42,9 +40,8 @@ private:
     std::string value_;
 };
 
-// Managed-language property access kind
-// kNone is reserved for implementations that cannot distinguish read from
-// write and therefore must match both
+// Managed-language property access kind kNone is reserved for implementations that
+// cannot distinguish read from write and therefore must match both
 class Property : public Feature {
 public:
     enum class Access : std::uint8_t { kNone, kRead, kWrite };
@@ -66,8 +63,6 @@ private:
 [[nodiscard]] std::string_view to_string(Property::Access a) noexcept;
 
 // operand[i].number is a Number feature scoped to a specific operand index
-// Equality includes the operand index because the same literal value at
-// different operand positions represents different feature occurrences
 class OperandNumber : public Feature {
 public:
     using Value = std::variant<std::uint64_t, std::int64_t, double>;

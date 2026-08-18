@@ -43,9 +43,8 @@ struct Cell {
     }
 };
 
-// A box table whose layout and glyphs match the rich library capa renders with.
-// A cell's text may embed newline characters to force hard line breaks inside one
-// logical row. Every row carries exactly one cell per column
+// A box table whose layout and glyphs match the rich library capa renders with. A
+// cell may embed newlines to force hard breaks inside one logical row
 struct Table {
     std::vector<Column>             columns;
     std::vector<std::vector<Cell>>  rows;
@@ -53,11 +52,8 @@ struct Table {
     int                             min_width{0};
 };
 
-// Render the table to a string. Layout (column widths, wrapping) is computed on
-// the plain text, so it is identical whether or not styling is emitted. When
-// color is true, cyan runs are wrapped in ANSI escapes, matching capa's
-// interactive output. When false the output is plain and byte-identical to capa's
-// redirected output. available_width is the usable console width
+// Render the table to a string. Layout (column widths, wrapping) is computed on the
+// plain text, so it is identical whether or not styling is emitted
 [[nodiscard]] std::string render(const Table& table, int available_width, bool color);
 
 // Layout primitives ported verbatim from rich, exposed for direct testing.

@@ -151,10 +151,8 @@ struct DataDirectory {
         if ((entry & ordinal_flag) != 0) {
             item.ordinal    = static_cast<std::uint32_t>(entry & 0xFFFFu);
             item.by_ordinal = true;
-            // Resolve the DLLs commonly linked by ordinal (ws2_32, oleaut32) to
-            // their symbol names the way vivisect's ordlookup does, so api and
-            // import features use the name (getsockname) rather than the ordinal.
-            // A resolved import is then a named one
+            // Resolve the DLLs commonly linked by ordinal to their symbol names the way
+            // vivisect's ordlookup does, so features use the name rather than the ordinal
             if (const auto name = lookup_ordinal_name(normalized_dll, item.ordinal);
                 name.has_value()) {
                 item.name       = std::string{*name};
@@ -245,10 +243,8 @@ struct DataDirectory {
         return Unexpected{make_error(ErrorKind::kBadPe, "truncated export directory")};
     }
 
-    // NumberOfFunctions and NumberOfNames are attacker-controlled 32-bit header
-    // fields, so neither may size an allocation or bound a loop on its own. Clamp
-    // each to the entries the image can actually supply, which leaves every valid
-    // PE untouched and stops a crafted count from asking for gigabytes
+    // NumberOfFunctions and NumberOfNames are attacker-controlled 32-bit header fields,
+    // so neither may size an allocation or bound a loop on its own
     const std::uint32_t func_count = static_cast<std::uint32_t>(std::min<std::size_t>(
         {edir.NumberOfFunctions,
          image.readable_bytes_at_rva(edir.AddressOfFunctions) / sizeof(std::uint32_t),
@@ -282,9 +278,7 @@ struct DataDirectory {
     }
 
     out.reserve(func_count);
-    // Widened before the addition. Both halves are header fields, so a crafted
-    // rva near the top of the range would wrap and produce an end below the
-    // start, which turns the forwarder test below into a coin flip
+    // Widened before the addition
     const std::uint64_t export_dir_end = std::uint64_t{dd.rva} + dd.size;
 
     for (std::uint32_t i = 0; i < func_count; ++i) {
@@ -363,11 +357,8 @@ struct DataDirectory {
     return callbacks;
 }
 
-// Parse the base-relocation directory into (rva, type) entries, faithful to
-// vivisect PE.parseRelocations. Every entry is retained including the type-0
-// ABSOLUTE block padding so the pointers pass sees the same set vivisect does.
-// A corrupt directory is tolerated: the walk stops and the partial list stands,
-// matching vivisect's log-and-return behavior rather than failing the parse
+// Parse the base-relocation directory into (rva, type) entries, faithful to vivisect
+// PE.parseRelocations. Every entry is retained including the type-0
 [[nodiscard]] std::vector<ParsedRelocation> parse_relocations(
     const PeImage& image, const std::vector<ImageDataDirectory>& dirs) {
     std::vector<ParsedRelocation> out;
@@ -500,9 +491,7 @@ Expected<PeImage> PeParser::parse(std::vector<std::byte> buffer) {
 
     const std::uint32_t sec_off =
         dir_off + num_dirs * static_cast<std::uint32_t>(sizeof(ImageDataDirectory));
-    // NumberOfSections is a raw header field, so clamp before it sizes an
-    // allocation. The Windows loader itself refuses far fewer than this, and a
-    // truncated table is caught per header below
+    // NumberOfSections is a raw header field, so clamp before it sizes an allocation
     const std::uint16_t num_sections = static_cast<std::uint16_t>(
         std::min<std::size_t>(fh.NumberOfSections, constants::kMaxSectionsPerImage));
     img.sections_.reserve(num_sections);

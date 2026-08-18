@@ -12,10 +12,8 @@ using Xmm = std::array<std::uint8_t, 16>;
 // The amd64/i386 register file carries 16 XMM registers (xmm0..xmm15)
 inline constexpr std::uint32_t kXmmCount = 16;
 
-// i386 general-purpose register indices in envi/archs/i386/regs.py order.
-// These numeric values are load-bearing: the meta-register encoding and the
-// emulator's general-purpose size trick (_emu_*GpReg) both assume eax..edi
-// occupy indices 0..7. eip and eflags follow as their own real registers
+// i386 general-purpose register indices in envi/archs/i386/regs.py order. The
+// values are load-bearing, since the meta-register encoding assumes eax..edi are 0..7
 inline constexpr std::uint32_t kRegEax = 0;
 inline constexpr std::uint32_t kRegEcx = 1;
 inline constexpr std::uint32_t kRegEdx = 2;
@@ -28,12 +26,8 @@ inline constexpr std::uint32_t kRegEip = 8;
 inline constexpr std::uint32_t kRegEflags = 9;
 inline constexpr std::uint32_t kRegCount = 10;
 
-// amd64 layout (envi/archs/amd64/regs.py Amd64RegisterContext). envi numbers
-// rax..rdi the same as eax..edi (0..7), so the eight low GP slots are shared.
-// amd64 adds r8..r15 in slots 8..15, then rip and its own eflags slot. NOTE
-// kRegR8/kRegR9 (8/9) deliberately reuse the slots i386 gives eip/eflags: the
-// two arches never share a RegisterFile, and the arch-aware accessors (program
-// counter, flags) select the right slot for the active arch
+// amd64 layout, sharing the eight low GP slots with i386 and adding r8..r15. Note
+// that kRegR8 and kRegR9 reuse the slots i386 gives eip and eflags
 inline constexpr std::uint32_t kRegRax = kRegEax;  // 0
 inline constexpr std::uint32_t kRegRcx = kRegEcx;  // 1
 inline constexpr std::uint32_t kRegRdx = kRegEdx;  // 2
@@ -57,8 +51,7 @@ inline constexpr std::uint32_t kRegEflags64 = 17;
 inline constexpr std::uint32_t kRegSlots = 18;
 
 // Meta-register encoding (registers.py addMetaRegister): a subregister lane is
-// (shift_offset << 24) | (width_bits << 16) | real_index. Reading masks and
-// shifts out of the parent. Writing splices back, preserving the other bits
+// (shift_offset << 24) | (width_bits << 16) | real_index
 inline constexpr std::uint32_t make_meta_reg(std::uint32_t offset,
                                              std::uint32_t width_bits,
                                              std::uint32_t real_index) noexcept {
@@ -98,13 +91,8 @@ inline constexpr std::uint32_t kEflagsIf = 1U << 9;
 inline constexpr std::uint32_t kEflagsDf = 1U << 10;
 inline constexpr std::uint32_t kEflagsOf = 1U << 11;
 
-// A faithful port of envi's RegisterContext (envi/registers.py), reduced to the
-// registers the discovery emulator needs, plus a taint bit per register for
-// tracking uninitialized values. Every write masks to the real register's width
-// so an emulated value can never exceed it. The mode is fixed at construction:
-// i386 (default) gives 32-bit real registers (eax..edi, eip, eflags), while amd64
-// gives 64-bit real registers (rax..r15, rip) with the RMETA_LOW32 zero-extend
-// rule and eflags in its own slot. Indices may be real or meta-register lanes
+// A faithful port of envi's RegisterContext, reduced to the registers the discovery
+// emulator needs, plus a taint bit per register. Every write masks to the width
 class RegisterFile {
 public:
     // Construct for i386 (32-bit reals) or amd64 (64-bit reals + zero-extend)

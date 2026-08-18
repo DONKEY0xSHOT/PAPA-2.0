@@ -13,17 +13,14 @@
 
 namespace papa::features::extractors::papa_native::flirt {
 
-/// A code or data reference emitted by an instruction, as the classifier needs
-/// it. is_code distinguishes a call/jump target from a data pointer, mirroring
-/// vivisect's REF_CODE / REF_DATA
+/// A code or data reference emitted by an instruction. is_code distinguishes a call
+/// or jump target from a data pointer, mirroring vivisect's REF_CODE and REF_DATA
 struct FlirtXref {
     std::uint64_t target {0};
     bool          is_code{true};
 };
 
-/// The minimal view of the analyzed program the reference-validating classifier
-/// needs. Implemented by the backend so FLIRT stays decoupled from the CFG, PE,
-/// and disassembler types. Every method is a pure query
+/// The minimal view of the analyzed program the reference-validating classifier needs
 class FunctionContext {
 public:
     FunctionContext()                                  = default;
@@ -53,38 +50,25 @@ public:
     [[nodiscard]] virtual bool is_function_entry(std::uint64_t va) const = 0;
 };
 
-/// Matches function bytes to the candidate leaf modules under all loaded
-/// signatures. FlirtSignatureSet supplies the production implementation. Tests
-/// supply a stub. The returned pointers must outlive every classify call
+/// Matches function bytes to the candidate leaf modules under all loaded signatures.
+/// FlirtSignatureSet supplies the production implementation. Tests supply a stub
 using ModuleMatchFn =
     std::function<std::vector<const FlirtModule*>(std::span<const std::uint8_t>)>;
 
-/// Decides whether the function at a virtual address is a FLIRT library
-/// function, returning its assigned name when so. This is a faithful port of
-/// viv_utils.flirt.match_function_flirt_signatures: a pattern and tail CRC
-/// candidate is accepted only when each of its referenced functions resolves to
-/// a library function of the named identity, and candidates whose names disagree
-/// reject the match as ambiguous. The assigned name is the module's offset-0
-/// symbol of any kind, public or local. Results are memoized, so one instance
-/// should serve a whole image
+/// Decides whether the function at a virtual address is a FLIRT library function,
+/// returning its assigned name when so. Results are memoized
 class FlirtClassifier {
 public:
     /// Virtual address to resolved library name (or absent when not a library
-    /// function). Owned by the caller so memoization persists across the many
-    /// per-function classify calls an image makes
+    /// function)
     using Cache = std::unordered_map<std::uint64_t, std::optional<std::string>>;
 
-    /// Called when a candidate is accepted for va, with the module that won. The
-    /// driver applies viv_utils.flirt's name loops from it: a local name creates
-    /// its function when undefined, and both local and public names mark their
-    /// address a library function. Left empty when only the name is wanted
+    /// Called when a candidate is accepted for va, with the module that won
     using OnMatch =
         std::function<void(std::uint64_t va, const FlirtModule& winner)>;
 
-    /// The library name the workspace already holds for an address, from any
-    /// signature that ran before. viv_utils.flirt satisfies a reference by
-    /// reading this after recursing, so a name an earlier signature file assigned
-    /// still counts. Without it the classifier falls back to its own result
+    /// The library name the workspace already holds for an address, from any signature
+    /// that ran before
     using LibraryLookup =
         std::function<std::optional<std::string>(std::uint64_t va)>;
 

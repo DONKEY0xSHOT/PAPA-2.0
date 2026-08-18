@@ -39,10 +39,8 @@ struct Function {
     bool                       likely_library{false};
 };
 
-// What one analysis run recovers: the functions, plus the library functions
-// FLIRT identified along the way with the name it assigned each. Both come from
-// the same pass, because FLIRT runs as an analysis module while functions are
-// being made, so its naming reflects the state it actually saw
+// What one analysis run recovers: the functions, plus the library functions FLIRT
+// identified along the way with the name it assigned each
 struct RecoveredImage {
     std::vector<Function>                          functions;
     std::unordered_map<std::uint64_t, std::string> library_names;
@@ -54,30 +52,20 @@ using InsnReader = std::function<Expected<DecodedInsn>(std::uint64_t va)>;
 
 namespace cfg {
 
-/// Whole-image function recovery, a faithful port of vivisect's analysis: the
-/// ordered discovery passes (entrypoints and .pdata, relocations, emucode, plus
-/// calling and funcentries on i386) drive a code-flow engine over a shared
-/// location database, with the codeblocks, no-return, and FLIRT modules running
-/// inline as each function is made. Block attribution is order-dependent and
-/// shared the way vivisect's is. Returns the functions together with the library
-/// functions FLIRT named during the same pass
+/// Whole-image function recovery, a faithful port of vivisect's analysis. Returns the
+/// functions together with the library functions FLIRT named during the same pass
 [[nodiscard]] Expected<RecoveredImage>
     recover(const pe::PeImage& image, const Disassembler& disasm);
 
-/// Scan undefined code for boundary-anchored function prologues and return
-/// candidate function-entry VAs. `covered` is a byte map parallel to `code`,
-/// non-zero where a byte already belongs to a recovered function. Mirrors
-/// vivisect's funcentries pass, which prologue-scans only the gaps earlier
-/// analysis left undefined
+/// Scan undefined code for boundary-anchored function prologues and return candidate
+/// function-entry VAs
 [[nodiscard]] std::vector<std::uint64_t>
     find_function_prologues(std::span<const std::uint8_t> code,
                             std::uint64_t                 base_va,
                             std::span<const std::uint8_t> covered);
 
 /// Classify one .pdata RUNTIME_FUNCTION by its UNWIND_INFO VerFlags byte the way
-/// vivisect's parsers/pe.py exception walk does: a v2 or unreadable record bails
-/// the whole walk, a UNW_FLAG_CHAININFO record is a function block rather than an
-/// entry and is skipped, and any other record's begin is a function entry
+/// vivisect's parsers/pe.py exception walk does
 [[nodiscard]] PdataEntryKind
     classify_pdata_unwind(std::optional<std::uint8_t> verflags) noexcept;
 

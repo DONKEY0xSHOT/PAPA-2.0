@@ -8,11 +8,8 @@
 
 namespace papa::features::extractors::papa_native::flirt {
 
-/// Inflate a zlib-formatted DEFLATE stream into a byte vector.
-///
-/// Caps the decompressed output at kMaxDecompressedSize to defeat
-/// decompression bombs. Returns kFlirtBadCompressedStream on any
-/// malformed input, truncation, or oversize output. Never throws
+/// Inflate a zlib-formatted DEFLATE stream into a byte vector. Caps the decompressed
+/// output at kMaxDecompressedSize to defeat decompression bombs
 [[nodiscard]] Expected<std::vector<std::uint8_t>> decompress_inflate(
     std::span<const std::uint8_t> compressed) noexcept;
 

@@ -7,10 +7,8 @@
 
 namespace papa::features {
 
-// Zero-arity tag feature
-// Extractors inject one per basic block so rules can quantify over basic
-// blocks without caring about any specific attribute of the block
-// Two BasicBlock instances are always equal because they carry no payload
+// Zero-arity tag feature. Extractors inject one per basic block so rules can quantify
+// over basic blocks without caring about any specific attribute of the block
 class BasicBlock : public Feature {
 public:
     explicit BasicBlock(std::string desc = {});
