@@ -33,29 +33,20 @@ struct CodeCapabilities {
     std::size_t           feature_count{0};
 };
 
-// One recovered function's entry address and the number of features extracted
-// from it. Mirrors capa's feature_counts.functions entries so the report JSON
-// stays schema-compatible and downstream tooling can see which functions the
-// extractor actually analyzed
+// One recovered function's entry address and its extracted feature count. Mirrors
+// capa's feature_counts.functions entries so the report JSON stays compatible
 struct FunctionFeatureCount {
     features::Address  address;
     std::size_t        count{0};
 };
 
-// Final image-level aggregate
-// per_function_feature_counts is populated as the orchestrator walks each
-// function so collect_metadata never has to re-extract just to count
+// Final image-level aggregate. per_function_feature_counts is filled as the
+// orchestrator walks each function, so collect_metadata never re-extracts to count
 struct StaticCapabilities {
     engine::MatchResults                    all_matches;
     std::size_t                             feature_count{0};
     std::vector<features::Address>          library_functions;
     std::vector<FunctionFeatureCount>       per_function_feature_counts;
-    // Split of this stage for the --timing report, so the parallel per-function
-    // work can be told apart from the serial file-scope tail
-    double                                  parallel_seconds{0.0};
-    double                                  reduce_seconds{0.0};
-    double                                  file_scope_seconds{0.0};
-    unsigned                                workers{1};
 };
 
 [[nodiscard]] InstructionCapabilities
@@ -79,13 +70,8 @@ find_code_capabilities(
     const ::papa::features::extractors::StaticFeatureExtractor& extractor,
     const ::papa::features::extractors::FunctionHandle&        fh);
 
-// Top-level entry: walk every function and roll matches up to file scope
-// Per-function analysis is independent, so it runs across threads. threads=0
-// picks one worker per hardware thread and threads=1 forces the serial path.
-// The reduction always runs afterwards in recovered-function order, so the
-// result does not depend on the worker count
-// cached_file_features skips a second whole-file carve when the caller already
-// extracted them for the limitation pre-pass
+// Top-level entry: walk every function and roll matches up to file scope. Per-function
+// analysis is independent, so it runs across threads
 [[nodiscard]] Expected<StaticCapabilities>
 find_static_capabilities(
     const ::papa::rules::RuleSet&                              rules,

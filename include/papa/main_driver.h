@@ -25,7 +25,6 @@ struct Args {
     bool                      quiet{false};
     bool                      show_help{false};
     bool                      show_version{false};
-    bool                      timing{false};   // phase breakdown on stderr
 };
 
 // Exit codes
@@ -45,15 +44,13 @@ struct ParseResult {
     int          exit_code{kExitOk};
 };
 
-// Parse argv and produce a ParseResult
-// argv0 is excluded
-// Callers should pass (argv+1, argc-1) from main
+// Parse argv and produce a ParseResult argv0 is excluded. Callers should pass (argv+1,
+// argc-1) from main
 [[nodiscard]] ParseResult
 parse_args(int argc, const char* const* argv);
 
-// Run the full analysis pipeline given parsed args
-// Returns one of the kExit* codes and never throws across this boundary
-// Recoverable errors print to stderr while normal output goes to stdout
+// Run the full analysis pipeline given parsed args. Returns one of the kExit* codes and
+// never throws across this boundary
 [[nodiscard]] int run(const Args& args);
 
 }  // namespace papa::cli
