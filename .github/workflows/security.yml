@@ -1,0 +1,110 @@
+name: security
+
+# papa parses live malware, so every byte of a sample is hostile input. The main
+# CI proves the project builds and its tests pass on the toolchain the parity
+# corpus was validated with. This workflow is the separate question of whether a
+# memory-safety defect could pass unnoticed, and it exists because three things
+# the internal docs claimed were protecting the project were not actually
+# running: sanitizers defaulted off and CI never enabled them, the clang warning
+# set was configured but never exercised because CI is MSVC-only, and
+# .clang-tidy was never invoked.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 2"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizers-linux:
+    name: ASan + UBSan (Linux, clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang and ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+
+      # Debug, because the sanitizer flags in cmake/Sanitizers.cmake are gated
+      # on the Debug configuration. This leg is also the only place the clang
+      # warning set runs at all: -Wconversion, -Wshadow, -Wold-style-cast and
+      # -Wcast-align catch whole classes of defect MSVC /W4 does not report
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPAPA_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-asan --parallel
+
+      # halt_on_error keeps the first report from being buried under later ones,
+      # and detect_leaks is left on so a parser that abandons an allocation on a
+      # malformed input is reported rather than silently tolerated
+      - name: Unit tests under ASan and UBSan
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build-asan/tests/unit/papa_unit_tests
+
+  sanitizers-windows:
+    name: ASan (Windows, MSVC)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # MSVC has /fsanitize=address but no UBSan, so this leg catches the
+      # memory errors on the toolchain papa actually ships from, while the
+      # Linux leg above carries undefined-behaviour coverage. The static CRT is
+      # off here because MSVC ASan needs the dynamic runtime
+      - name: Configure
+        run: >
+          cmake -S . -B build-asan -G "Visual Studio 17 2022" -A x64
+          -DPAPA_ENABLE_SANITIZERS=ON
+          -DPAPA_STATIC_RUNTIME=OFF
+
+      - name: Build (Debug)
+        run: cmake --build build-asan --config Debug --parallel
+
+      - name: Unit tests under ASan
+        run: ./build-asan/tests/unit/Debug/papa_unit_tests.exe
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy and ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang clang-tidy ninja-build
+
+      # A configure is enough to produce compile_commands.json, which is all
+      # clang-tidy needs. The checks themselves live in .clang-tidy
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      # Only papa's own sources. third_party is vendored and is not ours to fix
+      - name: Run clang-tidy
+        run: |
+          files=$(git ls-files 'src/**/*.cpp' 'tools/**/*.cpp')
+          echo "$files" | tr ' ' '\n'
+          clang-tidy -p build-tidy --warnings-as-errors='*' $files
