@@ -17,6 +17,9 @@ from pathlib import Path
 SOURCE_DIRS = ("src", "include", "tools", "tests")
 SOURCE_SUFFIXES = (".cpp", ".h")
 
+# Build and CI files, checked for comment length the same way the sources are
+BUILD_PATTERNS = ("*.yml", "*.yaml", "*.cmake", "CMakeLists.txt", "*.py")
+
 # Abbreviations that legitimately end a sentence with a period
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "..")
 
@@ -43,6 +46,41 @@ def source_files(root: Path) -> list[Path]:
     return sorted(p for p in out if "third_party" not in p.parts)
 
 
+def build_files(root: Path) -> list[Path]:
+    """The build and CI files, which carry hash comments rather than slashes."""
+    out: list[Path] = []
+    for pattern in BUILD_PATTERNS:
+        out.extend(root.rglob(pattern))
+    return sorted(
+        p for p in out
+        if "third_party" not in p.parts
+        and ".git" not in p.parts
+        and not any(part.startswith("build") for part in p.parts)
+    )
+
+
+def comment_run_problems(path: Path, root: Path, lines: list[str],
+                         marker: str) -> list[str]:
+    """Flag any run of consecutive comment lines longer than the limit."""
+    problems: list[str] = []
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].lstrip()
+        if stripped.startswith(marker) and not stripped.startswith("#!"):
+            end = index
+            while end < len(lines) and lines[end].lstrip().startswith(marker):
+                end += 1
+            if end - index > MAX_COMMENT_LINES:
+                problems.append(
+                    f"{path.relative_to(root)}:{index + 1}: comment run is "
+                    f"{end - index} lines, the limit is {MAX_COMMENT_LINES}"
+                )
+            index = end
+        else:
+            index += 1
+    return problems
+
+
 def check_file(path: Path, root: Path) -> list[str]:
     problems: list[str] = []
     try:
@@ -54,29 +92,14 @@ def check_file(path: Path, root: Path) -> list[str]:
 
     # A comment run is at most two lines. Anything longer is rationale or
     # history, which belongs in the docs rather than beside the code
-    index = 0
-    while index < len(lines):
-        if lines[index].lstrip().startswith("//"):
-            end = index
-            while end < len(lines) and lines[end].lstrip().startswith("//"):
-                end += 1
-            if end - index > MAX_COMMENT_LINES:
-                where = f"{path.relative_to(root)}:{index + 1}"
-                problems.append(
-                    f"{where}: comment run is {end - index} lines, "
-                    f"the limit is {MAX_COMMENT_LINES}"
-                )
-            index = end
-        else:
-            index += 1
+    problems.extend(comment_run_problems(path, root, lines, "//"))
 
     for index, line in enumerate(lines):
         where = f"{path.relative_to(root)}:{index + 1}"
         stripped = line.strip()
 
-        # Non-ASCII anywhere in a source file. This catches emojis, em and en
-        # dashes, and stray box-drawing glyphs, all of which are out, and it
-        # keeps the tree readable under any locale
+        # Non-ASCII anywhere in a source file, which catches emojis, dashes and stray
+        # glyphs, and keeps the tree readable under any locale
         for char in line:
             if ord(char) > 127:
                 problems.append(
@@ -95,11 +118,8 @@ def check_file(path: Path, root: Path) -> list[str]:
         if ";" in stripped:
             problems.append(f"{where}: semicolon in a comment, split it into two lines")
 
-        # A backslash at the end of a // comment splices the next line into the
-        # comment, so whatever follows silently disappears. Harmless when the
-        # next line is another comment and a deleted statement when it is not.
-        # GCC reports this as -Wcomment, but the Windows build does not, so it
-        # is checked here rather than left to one platform
+        # A backslash ending a // comment splices the next line into it, so whatever
+        # follows silently disappears. MSVC does not warn, so it is checked here
         if stripped.endswith("\\"):
             problems.append(
                 f"{where}: comment ends with a backslash, which swallows the next line"
@@ -129,13 +149,25 @@ def main() -> int:
     for path in files:
         problems.extend(check_file(path, root))
 
+    # The build and CI files get the comment-length rule too, since a wall of
+    # commentary is as hard to read in a workflow as it is beside the code
+    build = build_files(root)
+    for path in build:
+        try:
+            lines = io.open(path, encoding="utf-8").read().splitlines()
+        except UnicodeDecodeError:
+            problems.append(f"{path.relative_to(root)}: not valid UTF-8")
+            continue
+        problems.extend(comment_run_problems(path, root, lines, "#"))
+
+    checked = len(files) + len(build)
     if problems:
         for problem in problems:
             print(problem)
-        print(f"\n{len(problems)} coding-standard violation(s) in {len(files)} files")
+        print(f"\n{len(problems)} coding-standard violation(s) in {checked} files")
         return 1
 
-    print(f"coding standards OK ({len(files)} files checked)")
+    print(f"coding standards OK ({checked} files checked)")
     return 0
 
 
