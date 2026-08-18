@@ -149,8 +149,76 @@ TEST_CASE("helpers: carve_pe_files reports nothing on noise") {
         buf[i] = std::byte{static_cast<std::uint8_t>(i)};
     }
     auto found = carve_pe_files(buf);
-    // The deterministic ramp can occasionally collide but the check that
-    // matters is that no obvious carving false positive at offset 0
-    // The lfanew + PE relationship would have to align by accident
+    // The deterministic ramp can occasionally collide but the check that matters is
+    // that no obvious carving false positive at offset 0
     CHECK(std::find(found.begin(), found.end(), 0U) == found.end());
+}
+
+namespace {
+
+// Build a buffer with an XOR-encoded MZ/PE header planted at pos
+std::vector<std::byte> plant_pe(std::size_t size, std::size_t pos,
+                                std::uint8_t key, std::uint32_t lfanew) {
+    std::vector<std::byte> buf(size, std::byte{0});
+    // Writes past the end are dropped on purpose, so a case can plant an
+    // e_lfanew that points outside the buffer without corrupting the test
+    auto put = [&](std::size_t off, std::uint8_t v) {
+        if (off >= buf.size()) { return; }
+        buf[off] = std::byte{static_cast<std::uint8_t>(v ^ key)};
+    };
+    put(pos + 0, 0x4D);  // M
+    put(pos + 1, 0x5A);  // Z
+    for (std::size_t i = 0; i < 4; ++i) {
+        put(pos + 0x3C + i, static_cast<std::uint8_t>((lfanew >> (8U * i)) & 0xFFU));
+    }
+    const std::uint32_t sig = 0x00004550U;  // PE\0\0
+    for (std::size_t i = 0; i < 4; ++i) {
+        put(pos + lfanew + i, static_cast<std::uint8_t>((sig >> (8U * i)) & 0xFFU));
+    }
+    return buf;
+}
+
+}  // namespace
+
+TEST_CASE("helpers: carve_pe_files finds a plain and an XOR-encoded PE") {
+    // key 0 is the unencoded case, and every other key exercises the derived-key
+    // path that replaced the old sweep over all 256 keys
+    for (const std::uint8_t key : {std::uint8_t{0x00}, std::uint8_t{0x01},
+                                   std::uint8_t{0x4D}, std::uint8_t{0xFF}}) {
+        CAPTURE(key);
+        const auto buf = plant_pe(0x400, 0x100, key, 0x80);
+        const auto hits = carve_pe_files(buf);
+        REQUIRE(hits.size() == 1);
+        CHECK(hits[0] == 0x100);
+    }
+}
+
+TEST_CASE("helpers: carve_pe_files reports every embedded PE in ascending order") {
+    auto buf = plant_pe(0x1000, 0x000, 0x00, 0x80);
+    const auto second = plant_pe(0x1000, 0x400, 0xAB, 0x80);
+    for (std::size_t i = 0x400; i < 0x600; ++i) { buf[i] = second[i]; }
+    const auto third = plant_pe(0x1000, 0x800, 0x7F, 0x100);
+    for (std::size_t i = 0x800; i < 0xA00; ++i) { buf[i] = third[i]; }
+
+    const auto hits = carve_pe_files(buf);
+    REQUIRE(hits.size() == 3);
+    CHECK(hits[0] == 0x000);
+    CHECK(hits[1] == 0x400);
+    CHECK(hits[2] == 0x800);
+    CHECK(std::is_sorted(hits.begin(), hits.end()));
+}
+
+TEST_CASE("helpers: carve_pe_files rejects near-misses") {
+    // MZ present but the PE signature does not match under the same key
+    auto buf = plant_pe(0x400, 0x100, 0x33, 0x80);
+    buf[0x100 + 0x80] = std::byte{0x00};
+    CHECK(carve_pe_files(buf).empty());
+
+    // e_lfanew points past the end of the buffer
+    const auto past_end = plant_pe(0x200, 0x000, 0x00, 0x10000);
+    CHECK(carve_pe_files(past_end).empty());
+
+    // A buffer too short to hold a DOS header carries nothing
+    const std::vector<std::byte> tiny(8, std::byte{0x4D});
+    CHECK(carve_pe_files(tiny).empty());
 }

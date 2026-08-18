@@ -18,6 +18,7 @@
 #include <string_view>
 #include <vector>
 #include "fixture_paths.h"
+#include "pe_builder.h"
 
 namespace {
 
@@ -222,9 +223,7 @@ TEST_CASE("parses Everything.exe and resolves ws2_32 ordinal imports to names") 
     REQUIRE(res.has_value());
     const auto& img = *res;
 
-    // Everything imports ws2_32 by ordinal. vivisect's ordlookup names #6
-    // getsockname, so papa must resolve it (and clear by_ordinal) for the
-    // get-local-IPv4 rule's `api: getsockname` to match
+    // Everything imports ws2_32 by ordinal
     const auto imps = img.imports();
     const bool has_getsockname = std::any_of(imps.begin(), imps.end(),
         [](const papa::pe::ParsedImport& p) {
@@ -248,9 +247,8 @@ TEST_CASE("parses Everything.exe base relocations including the .text island poi
     const auto relocs = img.relocations();
     REQUIRE_FALSE(relocs.empty());
 
-    // Faithful to vivisect PE.getRelocations: every base-relocation entry is
-    // retained, including the type-0 ABSOLUTE block padding. Everything.exe
-    // carries 25697 HIGHLOW fixups plus 159 ABSOLUTE padding entries
+    // Faithful to vivisect PE.getRelocations: every base-relocation entry is retained,
+    // including the type-0 ABSOLUTE block padding
     std::size_t highlow = 0;
     std::size_t absolute = 0;
     for (const auto& r : relocs) {
@@ -260,10 +258,8 @@ TEST_CASE("parses Everything.exe base relocations including the .text island poi
     CHECK(highlow == 25697);
     CHECK(absolute == 159);
 
-    // The three socket-island entry pointers are stored at reloc SITES inside
-    // .text (RVAs 0x925f0 / 0x9539c / 0x95b14). A data-only pointer scan skips
-    // .text, which is why the island is unrecovered. Each site is a HIGHLOW
-    // fixup whose stored dword is an island function entry
+    // The three socket-island entry pointers are stored at reloc sites inside .text.
+    // Each site is a HIGHLOW fixup whose stored dword is an island function entry
     struct SiteExpectation {
         std::uint32_t rva;
         std::uint32_t value;
@@ -322,10 +318,8 @@ TEST_CASE("a crafted export count cannot drive a huge allocation") {
     REQUIRE(base.has_value());
     const std::size_t honest_exports = base->exports().size();
 
-    // Locate the export directory by walking the headers, then overwrite
-    // NumberOfFunctions and NumberOfNames with 0xFFFFFFFF. Unclamped, those
-    // counts would size a per-export vector (tens of gigabytes) and spin a
-    // four-billion-iteration loop
+    // Locate the export directory by walking the headers, then overwrite.
+    // NumberOfFunctions and NumberOfNames with 0xFFFFFFFF
     const auto src = base->raw_buffer();
     const auto read_u32_at = [&src](std::size_t off) -> std::uint32_t {
         std::uint32_t v = 0;
@@ -363,4 +357,42 @@ TEST_CASE("a crafted export count cannot drive a huge allocation") {
     CHECK(crafted->exports().size() <=
           crafted->raw_buffer().size() / sizeof(std::uint32_t));
     CHECK(crafted->exports().size() >= honest_exports);
+}
+
+TEST_CASE("a crafted section count cannot drive a huge allocation") {
+    // NumberOfSections is a raw 16-bit header field
+    papa_tests::PeBuilder b;
+    b.code = std::vector<std::uint8_t>{0xC3};
+    std::vector<std::byte> buf = b.build();
+
+    std::uint32_t e_lfanew = 0;
+    std::memcpy(&e_lfanew, buf.data() + 0x3CU, sizeof(e_lfanew));
+    // IMAGE_FILE_HEADER follows the 4-byte signature, NumberOfSections at +2
+    const std::size_t n_sections_off = std::size_t{e_lfanew} + 4U + 2U;
+    REQUIRE(n_sections_off + 2U <= buf.size());
+    buf[n_sections_off]      = std::byte{0xFFU};
+    buf[n_sections_off + 1U] = std::byte{0xFFU};
+
+    // Either the truncated table is rejected or the clamp holds the list to something
+    // the image could plausibly supply
+    const auto crafted = papa::pe::PeParser::parse(std::move(buf));
+    if (crafted.has_value()) {
+        CHECK(crafted->sections().size() <= papa::constants::kMaxSectionsPerImage);
+    }
+}
+
+TEST_CASE("a real image maps far below the discovery emulator byte budget") {
+    // The budget only exists to stop a crafted section table asking for far more than
+    // the sample occupies, so a well-formed image has to sit well under it
+    papa_tests::PeBuilder b;
+    b.code = std::vector<std::uint8_t>{0x48, 0x31, 0xC0, 0xC3};
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+
+    std::size_t declared = 0;
+    for (const auto& s : img->sections()) {
+        declared += s.raw_size;
+    }
+    CHECK(declared < papa::constants::kMaxEmuImageBytes);
+    CHECK(declared <= img->raw_buffer().size());
 }

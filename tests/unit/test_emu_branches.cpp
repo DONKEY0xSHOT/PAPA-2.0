@@ -12,9 +12,7 @@ namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
 // get_branches enumerates an instruction's control-flow successors, resolving
-// indirect targets from live emulator state. A faithful port of
-// envi/archs/i386/disasm.py getBranches(emu=self), including the SIB scale-4
-// pointer-table walk that recovers switch cases. Branch flags mirror envi BR_*
+// indirect targets from live emulator state. Branch flags mirror envi BR_*
 
 namespace {
 
@@ -161,4 +159,44 @@ TEST_CASE("emu branches: a SIB scale-4 jump table walks the pointer array") {
     CHECK(has_target(bs, 0x401000));
     CHECK(has_target(bs, 0x401010));
     CHECK(has_target(bs, 0x401020));
+}
+
+TEST_CASE("emu branches: a jump table walk off the end of its map is bounded") {
+    // The crafted-image case
+    emu::IntelEmulator e;
+    static constexpr std::array<std::uint8_t, 0x40> code{};
+    e.memory().add_map(0x401000, emu::kMemRead | emu::kMemExec, code);
+
+    // The section an attacker positions over the taint constant
+    static constexpr std::array<std::uint8_t, 0x1000> bait{};
+    e.memory().add_map(0x61616000, emu::kMemRead, bait);
+    REQUIRE(e.memory().is_valid_pointer(0x61616161));
+
+    // A two-entry table. Reads past it land unmapped and never stop being valid
+    static constexpr std::array<std::uint8_t, 8> table = {
+        0x00, 0x10, 0x40, 0x00,  // 0x00401000
+        0x10, 0x10, 0x40, 0x00,  // 0x00401010
+    };
+    e.memory().add_map(0x405000, emu::kMemRead, table);
+
+    pn::DecodedInsn insn;
+    insn.va = 0x1000;
+    insn.length = 7;
+    insn.zyd_mnem = ZYDIS_MNEMONIC_JMP;
+    insn.is_jump = true;
+    insn.is_fallthrough = false;
+    pn::DecodedOperand op;
+    op.kind = pn::OperandKind::kSib;
+    op.base_reg = ZYDIS_REGISTER_NONE;
+    op.index_reg = ZYDIS_REGISTER_EAX;
+    op.scale = 4;
+    op.disp = 0x405000;
+    op.width_bytes = 4;
+    insn.operands[0] = op;
+    insn.operand_count = 1;
+
+    const std::vector<emu::Branch> bs = e.get_branches(insn);
+    CHECK(bs.size() == emu::kMaxJumpTableEntries);
+    CHECK(has_target(bs, 0x401000));
+    CHECK(has_target(bs, 0x61616161));
 }
