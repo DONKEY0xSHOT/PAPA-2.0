@@ -25,7 +25,7 @@ the same machine (`--json`, output redirected), on a 4-core i5-7500.
 
 | Sample          |    Size | CAPA     | PAPA    | Speedup  |
 |-----------------|--------:|---------:|--------:|--------: |
-| calc            |   27 KB |   11.5 s |   1.1 s |    ~11x  |
+| calc            |   27 KB |   11.5 s |   1.1 s |    ~10x  |
 | notepad         |  196 KB |   49.4 s |   1.9 s |    ~26x  |
 | 7z              |  549 KB |  215.6 s |   3.2 s |    ~67x  |
 | msedge          |  4.92 MB| 1283.5 s |  21.4 s |    ~60x  |
