@@ -63,7 +63,10 @@ signed_(std::uint64_t value, std::size_t size) noexcept {
 [[nodiscard]] inline constexpr std::uint64_t
 sign_extend(std::uint64_t value, std::size_t cursize, std::size_t newsize) noexcept {
     std::uint64_t x = unsigned_(value, cursize);
-    if (cursize != newsize && (x & sign_bit(cursize)) != 0) {
+    // Only widening extends. cursize > newsize would underflow the unsigned
+    // delta below and shift by a wild amount, so narrowing returns the value
+    // masked to its current width instead
+    if (cursize < newsize && (x & sign_bit(cursize)) != 0) {
         const std::size_t delta = newsize - cursize;
         const std::uint64_t highbits = u_max(delta);
         x |= highbits << (8U * cursize);

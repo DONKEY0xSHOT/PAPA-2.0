@@ -33,6 +33,17 @@ struct Branch {
     std::uint32_t flags{0};
 };
 
+// Longest pointer table get_branches will walk before giving up.
+//
+// vivisect walks a switch table until the first entry that is not a valid
+// pointer, which on a crafted image never terminates: a read past the end of a
+// map returns a constant taint fill rather than failing, so an ImageBase chosen
+// to place that constant inside some mapped region makes every further entry
+// valid. The step ceiling bounds executed instructions, not the work inside
+// one, so this needs its own bound. Real compiler switch tables are orders of
+// magnitude below the cap
+inline constexpr std::size_t kMaxJumpTableEntries = 4096;
+
 // Outcome of executing one instruction. Mirrors the conditions vivisect raises
 // as exceptions (BreakpointHit, BadOpcode, DivideByZero, UnsupportedInstruction)
 // but reported as a value, per papa's no-exceptions-for-control-flow standard

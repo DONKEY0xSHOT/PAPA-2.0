@@ -1,5 +1,6 @@
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
 
+#include "papa/constants.h"
 #include "papa/features/extractors/papa_native/emu/memory.h"
 #include "papa/features/extractors/papa_native/emu/watcher.h"
 #include "papa/features/extractors/papa_native/emu/workspace_emulator.h"
@@ -50,14 +51,23 @@ std::uint32_t section_perms(std::uint32_t characteristics) noexcept {
 
 ImageMaps build_image_maps(const pe::PeImage& image) {
     ImageMaps maps;
+    std::size_t budget = constants::kMaxEmuImageBytes;
     for (const pe::ParsedSection& s : image.sections()) {
         if (s.raw_size == 0) {
             continue;
+        }
+        // Every section may legally name the same bytes, so the copies are
+        // bounded by a whole-image budget rather than by the file size. Running
+        // out drops the remaining maps, which costs recall and never
+        // correctness, since an unmapped read already falls back to a taint fill
+        if (s.raw_size > budget) {
+            break;
         }
         auto raw = image.read_at_rva(s.virtual_address, s.raw_size);
         if (!raw) {
             continue;
         }
+        budget -= raw->size();
         std::vector<std::uint8_t> buf;
         buf.reserve(raw->size());
         for (const std::byte b : *raw) {

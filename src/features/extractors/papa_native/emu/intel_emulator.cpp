@@ -466,10 +466,14 @@ std::vector<Branch> IntelEmulator::get_branches(const DecodedInsn& insn) const {
             }
             base &= addr_mask();
             std::uint64_t dest = mem_.read_value(base, op0.width_bytes);
-            while (mem_.is_valid_pointer(dest)) {
+            // Bounded by kMaxJumpTableEntries, since a crafted image can make
+            // every entry read as a valid pointer forever
+            std::size_t walked = 0;
+            while (mem_.is_valid_pointer(dest) && walked < kMaxJumpTableEntries) {
                 ret.push_back(Branch{dest, kBrCond});
                 base += op0.width_bytes;
                 dest = mem_.read_value(base, op0.width_bytes);
+                ++walked;
             }
         } else {
             addb = true;
