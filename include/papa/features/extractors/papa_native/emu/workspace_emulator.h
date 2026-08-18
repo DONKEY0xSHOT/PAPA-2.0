@@ -1,9 +1,11 @@
 #pragma once
 
+#include "papa/constants.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/emu/intel_emulator.h"
 #include "papa/features/extractors/papa_native/emu/taints.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -93,6 +95,9 @@ private:
     const Disassembler& disasm_;
     IntelEmulator       emu_;
     TaintRegistry       taints_;
+    // DecodedInsn keeps its bytes as a non-owning span, so the buffer must
+    // outlive the decode. Exactly one instruction is live at a time
+    mutable std::array<std::uint8_t, constants::kMaxInsnBytes> decode_buf_{};
     bool                emustop_{false};
     bool                is_64bit_{false};
 };
