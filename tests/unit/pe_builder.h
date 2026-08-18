@@ -285,7 +285,8 @@ inline std::vector<std::byte> PeBuilder::build() const {
         reloc.put(std::uint32_t{kTextRva});
         reloc.put(block_size);
         for (const std::uint32_t off : reloc_code_offsets) {
-            reloc.put(static_cast<std::uint16_t>((type << 12) | (off & 0x0FFFU)));
+            reloc.put(static_cast<std::uint16_t>((std::uint32_t{type} << 12) |
+                                                 (off & 0x0FFFU)));
         }
         while (reloc.bytes.size() < block_size) {
             reloc.put(std::uint16_t{0});
