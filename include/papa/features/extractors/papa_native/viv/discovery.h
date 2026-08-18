@@ -17,13 +17,7 @@
 
 namespace papa::features::extractors::papa_native::viv {
 
-/// The VivWorkspace-analog driver. It owns the shared location, cross-reference,
-/// and block state, and runs vivisect's function analysis: a CodeFlowContext
-/// discovers a function's code, defining a location and recording code
-/// cross-references for each instruction as it goes, and the codeblocks fmod runs
-/// inline the moment a function's flow completes. Building each function's blocks
-/// against the state visible at that instant is what reproduces vivisect's
-/// order-dependent, shared-block attribution
+/// The VivWorkspace-analog driver
 class Discovery {
 public:
     /// Reads the pointer-sized value stored at an address, or nullopt when it is
@@ -41,19 +35,14 @@ public:
     /// Analyze va as a function entry: flow its code, then build its blocks
     void make_function(std::uint64_t va);
 
-    /// True when va is a function whose analysis has completed, matching
-    /// vivisect's isFunction (funcmeta set at _cb_function). A function still
-    /// being flowed is not yet one
+    /// True when va is a function whose analysis has completed, matching vivisect's
+    /// isFunction (funcmeta set at _cb_function)
     [[nodiscard]] bool is_function(std::uint64_t va) const {
         return analyzed_.count(va) != 0;
     }
 
-    /// Install the FLIRT analysis fmod, run at the end of each function's
-    /// analysis (after codeblocks and noret, the order vivisect registers the
-    /// FLIRT analyzers). It may call make_function to create the library
-    /// sub-functions a signature names, which is what lets an enclosing function
-    /// collapse the way vivisect's FLIRT-driven analysis does. Empty by default,
-    /// so the shipped path does no FLIRT-driven creation
+    /// Install the FLIRT analysis fmod, run at the end of each function's analysis
+    /// (after codeblocks and noret, the order vivisect registers the. FLIRT analyzers)
     void set_flirt_fmod(std::function<void(std::uint64_t va)> fmod) {
         flirt_fmod_ = std::move(fmod);
     }
@@ -63,8 +52,7 @@ public:
     [[nodiscard]] std::optional<LocType> analyze_pointer(std::uint64_t va) const;
 
     /// Define a pointer location at site and, when follow is set, make its stored
-    /// target a function if that target is undefined code. Ports vivisect
-    /// makePointer, the relocations pass primitive
+    /// target a function if that target is undefined code
     void make_pointer(std::uint64_t site, bool follow);
 
     [[nodiscard]] const CodeBlockStore& blocks() const noexcept { return blocks_; }
@@ -75,9 +63,8 @@ public:
         return function_entries_;
     }
 
-    /// Materialize every recovered function as a full Function: its basic blocks
-    /// with instructions, intra-function successors and predecessors, and its
-    /// callees. This is the recovered CFG the feature extractor consumes
+    /// Materialize every recovered function as a full Function: its basic blocks with
+    /// instructions, intra-function successors and predecessors, and its callees
     [[nodiscard]] std::vector<Function> materialize_functions() const;
 
 private:
@@ -93,13 +80,11 @@ private:
                    std::span<const CfBranch> branches);
     // Run the codeblocks and noret fmods for the completed function va
     void on_function(std::uint64_t va);
-    // True when a call does not return: a call to a no-return import (the API
-    // oracle) or to a function already proven no-return. Ports the combined
-    // oracle vivisect's noret pass builds over the import seeds
+    // True when a call does not return: a call to a no-return import (the API oracle)
+    // or to a function already proven no-return
     [[nodiscard]] bool is_no_return_call(const DecodedInsn& op) const;
-    // Assemble a Function (blocks with instructions and intra-function
-    // successors) from the recovered block state, so the shared function_is_noreturn
-    // leaf scan can run over it
+    // Assemble a Function from the recovered block state, so the shared
+    // function_is_noreturn leaf scan can run over it
     [[nodiscard]] Function materialize_function(std::uint64_t fva) const;
 
     InsnReader                        read_;

@@ -17,11 +17,8 @@ namespace papa::features::extractors::papa_native::flirt {
 using detail::ByteCursor;
 
 std::size_t header_size_for_version(std::uint8_t version) noexcept {
-    // 6 magic + 1 version + 1 arch + 4 file_types + 2 os + 2 app
-    // + 2 features + 2 old_n_funcs + 2 crc16 + 12 ctype + 1 ln_len
-    // + 2 ctypes_crc16 = 37 (v8)
-    // v9 adds 4 n_functions = 41
-    // v10 adds 2 pattern_size + 2 unknown = 45
+    // Header size by version: 37 bytes for v8, 41 for v9 which adds n_functions, and 45
+    // for v10 which adds pattern_size
     if (version >= 10) { return 45U; }
     if (version >= 9)  { return 41U; }
     if (version >= 8)  { return 37U; }
@@ -122,9 +119,8 @@ constexpr std::uint8_t kMoreModules            = 0x10;
 // name characters, is an optional per-name flag byte rather than text
 constexpr std::uint8_t kNameTextFloor          = 0x20;
 
-// Per-name flag-byte bits (the optional control byte that precedes a name).
-// LOCAL marks a local rather than public symbol. NEGATIVE_OFFSET makes the
-// delta subtract from the running offset instead of adding
+// Per-name flag-byte bits (the optional control byte that precedes a name). LOCAL marks
+// a local rather than public symbol
 constexpr std::uint8_t kNameLocal              = 0x02;
 constexpr std::uint8_t kNameNegativeOffset     = 0x10;
 
@@ -143,11 +139,8 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return cur.read_vle32(out);
 }
 
-// Reads the variant mask whose set bits mark wildcard positions. The read
-// width follows the segment length: a 2-byte vint below 0x10, otherwise a
-// 4-byte vint. Segments longer than kMaxPatternLength (0x20) are rejected by
-// parse_node before this runs, so FLAIR's wider 8-byte tier for lengths above
-// 0x20 is intentionally not implemented
+// Reads the variant mask whose set bits mark wildcard positions. The read width
+// follows the segment length, a 2-byte vint below 0x10 and otherwise a 4-byte vint
 [[nodiscard]] bool read_variant_mask(ByteCursor& cur, std::uint16_t length,
                                      std::uint64_t& out) noexcept {
     if (length == 0U) {
@@ -170,12 +163,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return true;
 }
 
-// Parses the public/local name records of one module into `out`. Each record
-// is a relative offset, an optional per-name flag byte (a value below the text
-// floor), then the name text up to the trailing parsing-flags byte. Offsets are
-// delta-encoded: each name's absolute, function-relative offset accumulates the
-// running base, subtracting when NEGATIVE_OFFSET is set. Returns the trailing
-// parsing-flags byte that follows the final name
+// Parses the public/local name records of one module into `out`
 [[nodiscard]] Expected<std::uint8_t> parse_module_names(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtName>& out) noexcept {
     std::uint8_t flags = 0;
@@ -233,10 +221,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return flags;
 }
 
-// Parses the tail-byte records that may follow a module's names into `out`.
-// Each is an offset relative to the end of the pattern and CRC region (the
-// matcher adds that base, per python-flirt) plus one byte value. The count is
-// implicit (one) before v8
+// Parses the tail-byte records that may follow a module's names into `out`
 [[nodiscard]] Expected<bool> parse_tail_bytes(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtTailByte>& out) noexcept {
     std::uint32_t count = 1;
@@ -259,9 +244,8 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return true;
 }
 
-// Parses referenced-function records into `out`. Each is an absolute,
-// function-relative offset plus a size byte and that many name characters. A
-// zero size byte means the real size is a following vint16
+// Parses referenced-function records into `out`. Each is an absolute, function-relative
+// offset plus a size byte and that many name characters
 [[nodiscard]] Expected<bool> parse_referenced_functions(
     ByteCursor& cur, std::uint8_t version, std::vector<FlirtReference>& out) noexcept {
     std::uint32_t count = 1;
@@ -304,10 +288,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return true;
 }
 
-// Parses the module records of a leaf node into `out`. The tail CRC16, tail
-// length, function size, names, tail bytes, and referenced functions are all
-// retained so the matcher and the library classifier can apply capa's full,
-// reference-gated decision
+// Parses the module records of a leaf node into `out`
 [[nodiscard]] Expected<bool> parse_leaf_modules(
     ByteCursor& cur, std::uint8_t version,
     std::vector<FlirtModule>& out) noexcept {
@@ -371,9 +352,8 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
     return true;
 }
 
-// Recursively parses a tree node. A child count of zero turns the current
-// node into a leaf carrying module records. Otherwise each child contributes
-// a pattern segment appended to the inherited prefix, then recurses
+// Recursively parses a tree node. A child count of zero turns the current node into a
+// leaf carrying module records
 [[nodiscard]] Expected<bool> parse_node(
     ByteCursor& cur, std::uint8_t version, FlirtNode& node,
     const FlirtPattern& prefix, std::size_t depth) noexcept {
@@ -417,9 +397,8 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
             return Unexpected{make_error(ErrorKind::kFlirtTruncated, "variant mask")};
         }
 
-        // The variant mask marks wildcard positions. Mask bit (length-1-p)
-        // governs segment position p, matching the FLAIR layout. Literal bytes
-        // cover the non-wildcard positions in file order
+        // The variant mask marks wildcard positions. Mask bit (length-1-p) governs
+        // segment position p, matching the FLAIR layout
         std::size_t literal_count = 0;
         for (std::uint16_t bit = 0; bit < length; ++bit) {
             if ((mask & (std::uint64_t{1} << bit)) == 0U) {

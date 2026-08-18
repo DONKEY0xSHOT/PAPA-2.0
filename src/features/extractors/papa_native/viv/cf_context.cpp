@@ -1,5 +1,7 @@
 #include "papa/features/extractors/papa_native/viv/cf_context.h"
 
+#include "papa/constants.h"
+
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
@@ -9,12 +11,8 @@ namespace papa::features::extractors::papa_native::viv {
 
 namespace {
 
-// The control-flow edges of one instruction, in vivisect's envi getBranches
-// order (i386 disasm.py:594-661): the fall-through first when the instruction
-// can fall through, then the branch target last. A conditional branch also
-// tags its fall-through BR_COND. The order matters because the worklist consumes
-// branches from the end, so a call's target is descended before its
-// fall-through is ever queued
+// The control-flow edges of one instruction in vivisect's envi getBranches order,
+// being the fall-through first and the branch target last
 [[nodiscard]] std::vector<CfBranch> get_branches(const DecodedInsn& op) {
     std::vector<CfBranch> ret;
     if (op.is_return) {
@@ -38,9 +36,8 @@ namespace {
     return ret;
 }
 
-// True when op is the kind of indirect jump a switch dispatch uses: an
-// unconditional jump with no static target through a register or a scaled-index
-// memory operand
+// True when op is the kind of indirect jump a switch dispatch uses: an unconditional
+// jump with no static target through a register or a scaled-index memory operand
 [[nodiscard]] bool is_jump_table_candidate(const DecodedInsn& op) {
     return op.is_jump && !op.is_conditional && !op.branch_target.has_value() &&
            op.operand_count > 0 &&
@@ -118,6 +115,10 @@ void CodeFlowContext::report_function(std::uint64_t va) {
 }
 
 void CodeFlowContext::add_entry_point(std::uint64_t va) {
+    // Whole-image trip-wire
+    if (functions_.size() >= constants::kMaxFunctionsPerImage) {
+        return;
+    }
     // A va that is already a function is left alone, so the closure terminates
     if (!functions_.insert(va).second) {
         return;
@@ -139,9 +140,8 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
     cf_blocks_.push_back(startva);
     std::vector<std::uint64_t> recursion_targets;  // deferred this flow, cf_eps
 
-    // Instructions decoded on this flow, for rebuilding the straight-line window
-    // a jump-table resolver reads, plus the byte spans of any resolved offset
-    // tables so their data is never decoded as code
+    // Instructions decoded on this flow, for rebuilding the straight-line window a
+    // jump-table resolver reads, plus the byte spans of resolved offset tables
     std::unordered_map<std::uint64_t, DecodedInsn>      flow_insns;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> jt_data;
     const auto in_jt_data = [&jt_data](std::uint64_t addr) noexcept {
@@ -154,11 +154,8 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
     };
     const auto window_ending_at =
         [&flow_insns](const DecodedInsn& terminal) -> std::vector<DecodedInsn> {
-        // The function's decoded instructions up to the terminal, in ascending
-        // address order. The dispatch block's straight-line lead-up is the tail
-        // (where a jump-table resolver's backward scans find the index and load),
-        // and the earlier body is included so the resolver can also reach a base
-        // register set far back at the prologue. Capped for DoS
+        // The function's decoded instructions up to the terminal, in ascending address
+        // order
         constexpr std::size_t            kMaxWindow = 4096;
         std::vector<const DecodedInsn*> before;
         for (const auto& entry : flow_insns) {
@@ -185,14 +182,17 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
     std::vector<std::uint64_t>        optodo{va};  // LIFO worklist
     std::unordered_set<std::uint64_t> visited;
     while (!optodo.empty()) {
+        // Per-function trip-wire
+        if (flow_insns.size() >= constants::kMaxInsnsPerFunction) {
+            break;
+        }
         const std::uint64_t cur = optodo.back();
         optodo.pop_back();
         if (!visited.insert(cur).second) {
             continue;
         }
-        // Decode-once: an address another flow already claimed is not re-decoded
-        // and follows no branches, the way _cb_opcode returns no branches for an
-        // already-LOC_OP address
+        // Decode-once: an address another flow already claimed is not re-decoded and follows
+        // no branches, the way _cb_opcode behaves for an already-LOC_OP address
         if (is_defined_ && is_defined_(cur)) {
             continue;
         }
@@ -213,10 +213,7 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
             const CfBranch br = branches.back();
             branches.pop_back();
             if (!br.target.has_value()) {
-                // An indirect branch. When it resolves as a jump table, its
-                // cases are explored intra-procedurally (as BR_COND edges),
-                // matching envi codeflow's BR_TABLE expansion, and the offset
-                // table's own bytes are excluded from decoding
+                // An indirect branch
                 if (resolve_jt_ && is_jump_table_candidate(op)) {
                     const auto jt = resolve_jt_(window_ending_at(op));
                     if (jt.has_value()) {
@@ -246,29 +243,23 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
             if ((br.flags & kBrProc) != 0) {
                 const std::uint64_t nextva = cur + op.length;
                 if (bva != nextva) {  // avoid a call to the next instruction
-                    // Descend into the callee to completion (its flow and its
-                    // fmods) before this caller's fall-through is ever queued,
-                    // the post-order DFS. A call to a function already on the
-                    // active path is a recursion, deferred to the unwind drain.
-                    // Past the descent cap the branch is abandoned, bounding the
-                    // native recursion over a crafted deep chain (CLAUDE.md 7.7)
+                    // Descend into the callee to completion before this caller's fall-through is queued.
+                    // Past the descent cap the branch is abandoned
                     if (on_active_path(bva)) {
                         push_unique(recursion_targets, bva);
                     } else if (cf_blocks_.size() < kMaxDescentDepth) {
                         add_entry_point(bva);
                     }
-                    // A no-return call suppresses this caller's fall-through, so
-                    // the phantom block after the call is never decoded, once the
-                    // callee has been analyzed above (envi addNoFlow)
+                    // A no-return call suppresses this caller's fall-through, so the phantom block after
+                    // the call is never decoded
                     if (is_no_return_call_ && is_no_return_call_(op)) {
                         noflow_.insert({cur, nextva});
                     }
                 }
                 continue;  // ascend to a procedure, do not flow across it
             }
-            // A jump whose target is a function still being flowed is a
-            // tail-branch into an ancestor. Hold this function's report until
-            // that ancestor finishes, rather than flowing across it
+            // A jump whose target is a function still being flowed is a tail-branch
+            // into an ancestor
             if (on_active_path(bva) && op.is_jump && startva != bva) {
                 waits_on_[startva].insert(bva);
                 awaited_by_[bva].insert(startva);
@@ -281,9 +272,7 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
     }
     cf_blocks_.pop_back();
 
-    // Drain this flow's deferred recursion targets. One still on the active path
-    // stays blocked at the instance level, one now off the path and not yet a
-    // function is entered here
+    // Drain this flow's deferred recursion targets
     for (const std::uint64_t fva : recursion_targets) {
         if (on_active_path(fva)) {
             push_unique(blocked_recursion_, fva);
@@ -292,10 +281,8 @@ void CodeFlowContext::add_code_flow(std::uint64_t va) {
         }
     }
 
-    // Drain the instance-level blocked set: enter any function no longer on the
-    // active path and not yet reported, keep the rest for a later unwind. Any
-    // entry a nested flow adds during this pass is discarded by the reassignment,
-    // matching vivisect's rebind of _cf_blocked to a fresh fallback
+    // Drain the instance-level blocked set: enter any function no longer on the active
+    // path and not yet reported, keep the rest for a later unwind
     const std::vector<std::uint64_t> blocked_snapshot = blocked_recursion_;
     std::vector<std::uint64_t>       still_blocked;
     for (const std::uint64_t fva : blocked_snapshot) {

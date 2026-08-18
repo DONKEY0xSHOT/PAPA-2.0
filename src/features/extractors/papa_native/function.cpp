@@ -37,8 +37,6 @@ make_characteristic(const char* name, std::uint64_t va) {
 }
 
 // State for one Tarjan-SCC iteration over a function's BB graph
-// The algorithm runs on indices into fn.basic_blocks because that gives
-// constant-time successor lookups via bb_index map
 struct TarjanState {
     std::vector<int>          index_of;            // -1 means unvisited
     std::vector<int>          lowlink;
@@ -48,10 +46,8 @@ struct TarjanState {
     bool                      found_cycle{false};
 };
 
-// Recursive Tarjan strongconnect
-// Depth is bounded by the number of basic blocks in fn, which is itself capped
-// by kMaxFunctionsPerImage during CFG recovery. Synthetic functions used in
-// unit tests are tiny, so the recursion depth here is not a concern in practice
+// Recursive Tarjan strongconnect. Depth is bounded by the number of basic blocks in fn,
+// which is itself capped by kMaxFunctionsPerImage during CFG recovery
 void strongconnect(std::size_t                                                v,
                    const std::vector<std::vector<std::size_t>>&               succ,
                    TarjanState&                                                state) {

@@ -45,9 +45,8 @@ namespace papa::util {
 // all printable ASCII (high-byte zero plus printable low-byte)
 [[nodiscard]] bool is_utf16le_printable(std::span<const std::byte> bytes) noexcept;
 
-// Decode a UTF-16LE buffer to UTF-8 stopping at the first NUL code unit
-// Returns std::nullopt when bytes has odd length or contains an unpaired surrogate
-// Non-printable code points are accepted because the caller chooses when to filter
+// Decode a UTF-16LE buffer to UTF-8 stopping at the first NUL code unit. Returns
+// std::nullopt when bytes has odd length or contains an unpaired surrogate
 [[nodiscard]] std::optional<std::string>
 decode_utf16le_nul_trim(std::span<const std::byte> bytes);
 

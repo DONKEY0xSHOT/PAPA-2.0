@@ -3,15 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-// Faithful port of envi/bits.py: the bit-twiddling helpers the emulator uses for
-// arithmetic and flag computation. Header-only constexpr so the opcode handlers
-// can fold them.
-//
-// vivisect runs on Python arbitrary-precision ints, while the carry and overflow
-// predicates here take a signed 64-bit intermediate. That is exact for operands
-// up to 4 bytes, so it covers all 32-bit arithmetic. An 8-byte operand can
-// saturate it, but those flags do not steer control flow, and imul/mul compute
-// their wide-product overflow directly against the 64-bit result
+// Faithful port of envi/bits.py, the bit-twiddling helpers the emulator uses for
+// arithmetic and flag computation. Header-only constexpr so handlers can fold them
 
 namespace papa::features::extractors::papa_native::emu::bits {
 
@@ -63,7 +56,8 @@ signed_(std::uint64_t value, std::size_t size) noexcept {
 [[nodiscard]] inline constexpr std::uint64_t
 sign_extend(std::uint64_t value, std::size_t cursize, std::size_t newsize) noexcept {
     std::uint64_t x = unsigned_(value, cursize);
-    if (cursize != newsize && (x & sign_bit(cursize)) != 0) {
+    // Only widening extends
+    if (cursize < newsize && (x & sign_bit(cursize)) != 0) {
         const std::size_t delta = newsize - cursize;
         const std::uint64_t highbits = u_max(delta);
         x |= highbits << (8U * cursize);

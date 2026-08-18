@@ -51,9 +51,8 @@ void clear_compression_bit(std::vector<std::uint8_t>& header) {
         header[kFeaturesOffset] & ~0x10U);
 }
 
-// FLAIR vint16 encoder. Values below 0x80 fit in one byte. Larger values take
-// two bytes with the lead byte's high bit set and the upper 7 value bits in
-// the lead byte
+// FLAIR vint16 encoder. Values below 0x80 fit in one byte. Larger values take two bytes
+// with the lead byte's high bit set and the upper 7 value bits in the lead byte
 void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
     if (v < 0x80U) {
         buf.push_back(static_cast<std::uint8_t>(v));
@@ -72,10 +71,8 @@ void append_child_pattern(std::vector<std::uint8_t>& buf,
     buf.insert(buf.end(), pattern_bytes.begin(), pattern_bytes.end());
 }
 
-// One module body inside a leaf, excluding the crc_len/crc16 pair. Emits a
-// function size, one public name at relative offset zero, then a trailing
-// parsing-flags byte. The name's first character is >= 0x20 so the parser
-// does not consume an optional leading flag byte
+// One module body inside a leaf, excluding the crc_len/crc16 pair. Emits a function
+// size, one public name at relative offset zero, then a trailing parsing-flags byte
 void append_module_body(std::vector<std::uint8_t>& buf,
                         std::uint32_t function_size,
                         std::string_view name,
@@ -117,9 +114,8 @@ constexpr std::array<std::uint8_t, 3> kPattern = {0x55, 0x8B, 0xEC};
 // The tail bytes whose CRC16 the leaf module records
 constexpr std::array<std::uint8_t, 5> kTail = {0xDE, 0xAD, 0xBE, 0xEF, 0x42};
 
-// Builds a valid uncompressed .sig: v10 header (compression cleared) plus a
-// body with one root child carrying kPattern and a single leaf module whose
-// tail CRC16 covers kTail
+// Builds a valid uncompressed .sig, a v10 header plus a body with one root child
+// carrying kPattern and a single leaf module whose tail CRC16 covers kTail
 std::vector<std::uint8_t> build_valid_sig() {
     std::vector<std::uint8_t> body;
     append_vle16(body, 1);                  // root child count
@@ -136,8 +132,7 @@ std::vector<std::uint8_t> build_valid_sig() {
 }
 
 // Builds function bytes the matcher expects: a kMaxPatternLength pattern region
-// (kPattern laid over a 0x90 fill) followed by `tail`. The matcher computes the
-// tail CRC over the subspan starting at kMaxPatternLength
+// (kPattern laid over a 0x90 fill) followed by `tail`
 std::vector<std::uint8_t> make_function_bytes(std::span<const std::uint8_t> tail) {
     std::vector<std::uint8_t> buf(flirt::kMaxPatternLength + tail.size(), 0x90U);
     for (std::size_t i = 0; i < kPattern.size(); ++i) {

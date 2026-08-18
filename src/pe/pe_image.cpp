@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace papa::pe {
 
@@ -27,6 +28,7 @@ std::optional<std::uint64_t> PeImage::rva_to_file_offset(std::uint64_t rva) cons
         return std::uint64_t{s->raw_offset} + delta;
     }
 
+    // Headers
     // Section headers start at file offset 0 and span SizeOfHeaders
     if (rva < buffer_.size()) {
         // Only trust this fallback for small RVAs typical of PE headers
@@ -53,6 +55,7 @@ Expected<std::span<const std::byte>> PeImage::read_at_rva(
     if (!maybe.has_value()) {
         return Unexpected{make_error(ErrorKind::kOutOfBounds, "rva not mapped")};
     }
+    // Only the start is checked against the containing section
     return read_at_file_offset(*maybe, n);
 }
 
@@ -95,6 +98,11 @@ bool PeImage::probe_readable(std::uint64_t rva, std::size_t n) const noexcept {
     }
     const std::uint64_t end = std::uint64_t{s->virtual_address} +
                               std::max(s->virtual_size, s->raw_size);
+    // n is a caller-supplied length and rva comes from sample data, so the sum is
+    // checked for wrap before the comparison
+    if (n > std::numeric_limits<std::uint64_t>::max() - rva) {
+        return false;
+    }
     return rva + n <= end;
 }
 

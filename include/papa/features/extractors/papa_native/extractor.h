@@ -16,10 +16,6 @@
 namespace papa::features::extractors::papa_native {
 
 // Concrete extractor wrapping a built PapaNativeBackend
-// Owns the backend by value because every ImportTable, function, and BB pointer
-// referenced via opaque handles must remain valid for the lifetime of the
-// extractor
-// Moving the backend out from under live handles would dangle them
 class PapaNativeStaticExtractor : public ::papa::features::extractors::StaticFeatureExtractor {
 public:
     explicit PapaNativeStaticExtractor(PapaNativeBackend backend);
@@ -77,9 +73,8 @@ public:
 
     [[nodiscard]] const PapaNativeBackend& backend() const noexcept { return backend_; }
 
-    // The library name FLIRT assigned to the function at va, or nullopt when it
-    // is not a named library function. Used to name calls to statically-linked
-    // library routines (e.g. _beginthreadex) and the report's library functions
+    // The library name FLIRT assigned to the function at va, or nullopt when it is not
+    // a named library function
     [[nodiscard]] std::optional<std::string> flirt_name_at(std::uint64_t va) const;
 
 private:

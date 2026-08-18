@@ -8,11 +8,7 @@
 
 namespace bits = papa::features::extractors::papa_native::emu::bits;
 
-// Faithful port of envi/bits.py. The flag arithmetic must be bit-identical to
-// vivisect, including its boundary quirks (is_signed_overflow flags INT_MIN),
-// because the emulator's conditional-branch decisions depend on these flags and
-// "no implementation-level diff" is the directive. Vectors are hand-computed
-// from the Python formulas
+// Faithful port of envi/bits.py
 
 TEST_CASE("emu bits: u_max is 2^(8*size)-1 with u_max(0)=0") {
     CHECK(bits::u_max(0) == 0x0ULL);

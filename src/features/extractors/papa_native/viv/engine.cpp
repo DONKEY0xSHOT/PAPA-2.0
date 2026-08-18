@@ -53,12 +53,7 @@ std::optional<std::uint64_t> read_le_va(const pe::PeImage& image,
     return v;
 }
 
-// Resolve a switch dispatch straight from the image. On x64 the faithful,
-// emulator-driven resolver runs first (vivisect switchcase.getSwitchBase inside
-// its amd64 emulation pass): the base register is read from the live emulator so
-// a path-sensitive base a static scan cannot follow resolves. The x86
-// memory-indirect form and the static indexed forms remain as the x86 path and
-// as the fallback when emulation cannot reach the dispatch
+// Resolve a switch dispatch straight from the image
 std::optional<JumpTableTargets>
 resolve_jump_table(const pe::PeImage& image, const Disassembler& disasm,
                    const emu::ImageMaps& maps,
@@ -95,11 +90,8 @@ resolve_jump_table(const pe::PeImage& image, const Disassembler& disasm,
     const DecodedInsn&              jmp = window.back();
     std::optional<JumpTableTargets> jt;
 
-    // The faithful x64 path: emulate the enclosing function to the dispatch and
-    // read the base register there (getOperValue on the live emulator), then walk
-    // the image-base-relative offset table. The function entry is the window's
-    // lowest instruction, so an emulation that cannot reach the dispatch from it
-    // simply yields no base and the static fallback runs, never worse than before
+    // The faithful x64 path: emulate the enclosing function to the dispatch, read the
+    // base register there, then walk the image-base-relative offset table
     if (image.is_64bit() && !window.empty()) {
         SwitchEnv env;
         env.image_base = image.image_base();
@@ -191,9 +183,8 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
     const emu::ImageMaps maps    = emu::build_image_maps(image);
     const InsnReader     reader  = cfg::make_image_reader(image, disasm);
 
-    // The API no-return oracle: a call whose resolved import is an exit/abort
-    // family function does not return. Built like the shipped backend so the noret
-    // fmod prunes the phantom fall-through after such a call
+    // The API no-return oracle: a call whose resolved import is an exit/abort family
+    // function does not return
     const ImportTable    imports = build_import_table(image);
     const NoReturnOracle api_no_return =
         [&image, &disasm, &imports](const DecodedInsn& ins) -> bool {
@@ -219,12 +210,8 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
         },
         ptr_size, api_no_return);
 
-    // FLIRT runs as an analysis module, installed before any function is made so
-    // it fires as each one is analyzed, the way vivisect registers the signature
-    // analyzers before vw.analyze. This is the only FLIRT pass: it both creates
-    // the sub-functions a signature names at its local offsets (collapsing the
-    // enclosing function whose region they overlap) and records the library names
-    // the report reads
+    // FLIRT runs as an analysis module, installed before any function is made so it
+    // fires as each one is analyzed. This is the only FLIRT pass
     const LibrarySignatureSet   library_sigs = LibrarySignatureSet::make_default();
     const DiscoveryFlirtContext flirt_context(image, reader, disc);
     std::vector<flirt::ModuleMatchFn> matchers;
@@ -276,10 +263,8 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
         return c;
     });
 
-    // The calling and funcentries passes are i386-only, matching vivisect: it
-    // registers i386.calling for x86 but amd64.emulation for amd64, and the
-    // i386-style call discovery over-discovers on amd64. On amd64 the pointer,
-    // lea, and .pdata passes already reach the function set
+    // The calling and funcentries passes are i386-only, matching vivisect. On amd64
+    // the pointer, lea and .pdata passes already reach the function set
     if (!image.is_64bit()) {
         // Calling: emulate each function and make a function of every indirect
         // call target it resolves

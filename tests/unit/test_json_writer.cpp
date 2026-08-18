@@ -98,10 +98,6 @@ TEST_CASE("json_writer: control bytes and quotes are escaped") {
         w.value_string("a\"b\\c\nd\te\x01");
     });
     // Build the expected JSON form via explicit char concatenation
-    // The string contains literal backslashes followed by escape characters,
-    // not the escape sequences themselves
-    // Building it with std::string ops
-    // sidesteps the multiple-level escaping headaches of nested string literals
     std::string expected;
     expected.push_back('"');
     expected.append("a");

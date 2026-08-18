@@ -82,12 +82,8 @@ struct PdataRanges {
         if (!read_le<std::uint32_t>(*bytes, 0, begin_rva))  { break; }
         if (!read_le<std::uint32_t>(*bytes, 4, end_rva))    { break; }
         if (!read_le<std::uint32_t>(*bytes, 8, unwind_rva)) { break; }
-        // Read the UNWIND_INFO VerFlags byte and classify the entry the way
-        // vivisect parsers/pe.py does. An invalid unwind pointer or a v2
-        // (ver != 1) record bails the whole walk: begins past it are not seeded
-        // here and are recovered through the pointer / emucode passes instead. A
-        // UNW_FLAG_CHAININFO record is a cold-path function block, not an entry,
-        // so it is skipped. Any other begin is a function entry
+        // Read the UNWIND_INFO VerFlags byte and classify the entry the way vivisect
+        // parsers/pe.py does
         std::optional<std::uint8_t> verflags;
         const std::uint64_t uiva = image.image_base() + unwind_rva;
         if (va_in_image(image, uiva)) {
@@ -132,19 +128,14 @@ void fill_callers(std::vector<Function>& funcs) {
     }
 }
 
-// A function start in code without a .pdata table sits just past a boundary, a
-// return or alignment padding. These are the bytes vivisect treats as the end of
-// the prior function or filler between functions
+// A function start in code without a .pdata table sits just past a boundary, a return
+// or alignment padding
 [[nodiscard]] bool is_boundary_byte(std::uint8_t b) noexcept {
     return b == 0xC3U || b == 0xCCU || b == 0x90U;  // ret, int3 pad, nop pad
 }
 
-// True when the bytes begin with one of vivisect's i386 function-entry
-// signatures (vivisect/analysis/i386/__init__.py `sigs`). This is the exact set
-// vivisect's funcentries pass matches. It deliberately omits bare `sub esp, imm`
-// prologues: vivisect discovers those functions by emulation and call analysis,
-// not by signature, so prologue-seeding them would over-recover functions that
-// vivisect's static-plus-emulation passes leave undefined
+// True when the bytes begin with one of vivisect's i386 function-entry signatures,
+// the exact set its funcentries pass matches
 [[nodiscard]] bool is_x86_function_prologue(std::span<const std::uint8_t> b) noexcept {
     if (b.size() < 3U) {
         return false;
@@ -244,9 +235,7 @@ std::vector<std::uint64_t> cfg::find_function_prologues(
     if (code.size() < 4U) {
         return out;
     }
-    // Start at 1 so the boundary byte (code[i-1]) exists. A candidate is the
-    // first byte past a boundary that is not already covered by a recovered
-    // function and that begins a known prologue
+    // Start at 1 so the boundary byte (code[i-1]) exists
     for (std::size_t i = 1U; i + 3U < code.size(); ++i) {
         if (i < covered.size() && covered[i] != 0U) {
             continue;
@@ -263,10 +252,8 @@ std::vector<std::uint64_t> cfg::find_function_prologues(
 
 Expected<RecoveredImage> cfg::recover(const pe::PeImage&  image,
                                            const Disassembler& disasm) {
-    // The discovery engine runs the ordered passes, the interleaved codeblocks
-    // attribution, no-return analysis, and FLIRT internally, building its own
-    // import no-return oracle as vivisect does. Only the caller edges are added
-    // here, since they are a whole-image view per-function analysis cannot form
+    // The discovery engine runs the ordered passes and per-function analysis internally.
+    // Only the caller edges are added here, being a whole-image view
     RecoveredImage out = viv::discover_functions(image, disasm);
     fill_callers(out.functions);
     return out;

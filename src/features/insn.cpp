@@ -106,9 +106,8 @@ std::string Property::to_string() const {
     std::string out;
     out.reserve(value_.size() + 16);
     out.append("property/");
-    // Fully qualify to reach the free function overload
-    // The unqualified name resolves to this very member and would be a
-    // no-argument ambiguity at the call site
+    // Fully qualify to reach the free function overload. The unqualified name resolves
+    // to this very member and would be a no-argument ambiguity at the call site
     out.append(::papa::features::to_string(access_));
     out.append("(");
     out.append(value_);

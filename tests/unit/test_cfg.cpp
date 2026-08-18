@@ -97,9 +97,7 @@ TEST_CASE("recover on notepad.exe seeds at least the entry point and several exp
     REQUIRE(rec.has_value());
     const std::vector<Function>& funcs = rec->functions;
 
-    // A soft floor. Notepad has many hundreds of functions reachable from the
-    // entry and .pdata alone, but the bound stays conservative so the test
-    // survives analysis changes
+    // A soft floor
     CHECK(funcs.size() >= 50);
 
     // The entry point must appear as a recovered function

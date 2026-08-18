@@ -20,6 +20,9 @@ set(PAPA_CLANG_WARNINGS
     -Wold-style-cast
     -Wcast-align
     -Wunused
+    # Off because every aggregate here has default member initializers or is
+    # value-initialized, so naming only the leading members is still well defined
+    -Wno-missing-field-initializers
     -Woverloaded-virtual
     -Wconversion
     -Wsign-conversion
@@ -35,7 +38,8 @@ set(PAPA_GCC_WARNINGS
     -Wduplicated-cond
     -Wduplicated-branches
     -Wlogical-op
-    -Wuseless-cast
+    # -Wuseless-cast is deliberately absent, because it contradicts -Wconversion:
+    # a width cast needed on a 32-bit target is a no-op cast on LP64
 )
 
 function(papa_set_compiler_warnings TARGET)

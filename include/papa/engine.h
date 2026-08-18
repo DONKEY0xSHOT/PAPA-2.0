@@ -51,10 +51,8 @@ public:
     [[nodiscard]] virtual Result           evaluate(const features::FeatureSet& fs,
                                                     bool short_circuit) const = 0;
 
-    /// Boolean-only fast path used by RuleSet::match for the cheap probe pass.
-    /// Skips the Result tree entirely, eliminating per-evaluation allocations.
-    /// The default delegates to evaluate(fs, true) so subclasses that have not
-    /// overridden it remain correct
+    /// Boolean-only fast path used by RuleSet::match for the cheap probe pass. Skips
+    /// the Result tree entirely, eliminating per-evaluation allocations
     [[nodiscard]] virtual bool evaluate_quick(const features::FeatureSet& fs) const {
         return evaluate(fs, /*short_circuit=*/true).success;
     }
@@ -65,9 +63,8 @@ public:
         return children_;
     }
 
-    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into
+    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into.
     // MatchedRule leaves at corpus build time
-    // Callers must preserve every subclass child-count invariant when assigning
     [[nodiscard]] std::span<std::unique_ptr<Statement>> children_for_rewrite() noexcept {
         return children_;
     }

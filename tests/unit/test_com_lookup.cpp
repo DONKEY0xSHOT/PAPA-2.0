@@ -52,10 +52,8 @@ TEST_CASE("com_lookup: unknown name returns nullptr") {
 }
 
 TEST_CASE("com_lookup: SystemDeviceEnum and WbemLocator resolve correctly") {
-    // These two CLSIDs unblock CAPA rules in the host-interaction/hardware
-    // and host-interaction/wmi namespaces
-    // The GUID encodings are spot-checked because byte-swapping the first
-    // three GUID fields is easy to get wrong
+    // These two CLSIDs unblock CAPA rules in the host-interaction/hardware and host-
+    // interaction/wmi namespaces
     const ComEntry* sde = lookup_com(ComKind::kClass, "SystemDeviceEnum");
     REQUIRE(sde != nullptr);
     CHECK(sde->guid_string == "{62be5d10-60eb-11d0-bd3b-00a0c911ce86}");

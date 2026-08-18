@@ -92,9 +92,8 @@ extract_file_export_names(const ::papa::pe::PeImage& image) {
                              va_addr(exp.va));
         }
         if (exp.forwarder.has_value()) {
-            // Forwarded exports surface twice: once as Characteristic so file rules
-            // can detect the pattern, and once as a synthetic Import so symbol-lookup
-            // rules continue to match the destination
+            // Forwarded exports surface twice, once as Characteristic so file rules can detect
+            // the pattern and once as a synthetic Import so symbol lookups still match
             out.emplace_back(std::make_shared<const features::Characteristic>(
                                  std::string(kForwardedExportChar)),
                              va_addr(exp.va));

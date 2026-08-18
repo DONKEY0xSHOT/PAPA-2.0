@@ -30,9 +30,6 @@ namespace {
 using ::papa::features::linearize;
 
 // Collect the names of rules referenced via match: inside a successful result
-// Mirrors capa.render.default.find_subrule_matches: it walks successful nodes
-// and records every matched-rule feature so those rules can be hidden from the
-// top-level capability listing
 void collect_matched_rules(const engine::Result&  result,
                            std::set<std::string>& out) {
     if (!result.success) { return; }
@@ -53,9 +50,7 @@ void collect_matched_rules(const engine::Result&  result,
     return !(m.namespace_.has_value() && m.namespace_->starts_with("internal/"));
 }
 
-// Sort match locations so PAPA's report is deterministic across runs. capa emits
-// them in Python set-iteration order, which is not reproducible, so the set of
-// locations matches where the analysis matches but the order may differ
+// Sort match locations so PAPA's report is deterministic across runs
 void sort_addresses(std::vector<features::Address>& addrs) {
     std::sort(addrs.begin(), addrs.end(),
               [](const features::Address& a, const features::Address& b) {

@@ -1,5 +1,6 @@
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
 
+#include "papa/constants.h"
 #include "papa/features/extractors/papa_native/emu/memory.h"
 #include "papa/features/extractors/papa_native/emu/watcher.h"
 #include "papa/features/extractors/papa_native/emu/workspace_emulator.h"
@@ -50,14 +51,21 @@ std::uint32_t section_perms(std::uint32_t characteristics) noexcept {
 
 ImageMaps build_image_maps(const pe::PeImage& image) {
     ImageMaps maps;
+    std::size_t budget = constants::kMaxEmuImageBytes;
     for (const pe::ParsedSection& s : image.sections()) {
         if (s.raw_size == 0) {
             continue;
+        }
+        // Every section may legally name the same bytes, so the copies are bounded by a
+        // whole-image budget rather than by the file size
+        if (s.raw_size > budget) {
+            break;
         }
         auto raw = image.read_at_rva(s.virtual_address, s.raw_size);
         if (!raw) {
             continue;
         }
+        budget -= raw->size();
         std::vector<std::uint8_t> buf;
         buf.reserve(raw->size());
         for (const std::byte b : *raw) {
@@ -90,11 +98,7 @@ std::vector<std::uint64_t> find_pointer_candidates(const pe::PeImage& image) {
 
     std::vector<std::uint64_t> targets;
 
-    // Reloc-driven, section-agnostic (vivisect analysis/generic/relocations.py):
-    // the loader fixes up every absolute pointer, so each HIGHLOW/DIR64 base
-    // relocation marks a stored pointer to follow. The site can live anywhere,
-    // including .text, which is where callback/vtable/island-entry pointers sit
-    // and where the data-only scan never looks. Read the pointer at each site
+    // Reloc-driven and section-agnostic. Read the pointer at each HIGHLOW or DIR64 site
     // and keep the values that target executable code
     const std::size_t ptr_size = image.is_64bit() ? 8U : 4U;
     for (const pe::ParsedRelocation& r : image.relocations()) {
@@ -116,10 +120,8 @@ std::vector<std::uint64_t> find_pointer_candidates(const pe::PeImage& image) {
         }
     }
 
-    // findPointers free-hanging scan (vivisect generic findPointers): aligned
-    // slots in initialized data whose value points into code. The reloc scan is
-    // authoritative for relocated binaries, but this also catches pointers in
-    // images without a populated relocation table
+    // findPointers free-hanging scan (vivisect generic findPointers): aligned slots in
+    // initialized data whose value points into code
     for (const pe::ParsedSection& s : image.sections()) {
         if ((s.characteristics & kScnMemRead) == 0 ||
             (s.characteristics & kScnMemExecute) != 0) {
@@ -184,9 +186,7 @@ void AnalysisMonitor::apicall(WorkspaceEmulator& emu, const DecodedInsn& op,
     if (pc == op.va + op.length) {
         return;  // call-next / "call 0" construct
     }
-    // Only concrete executable targets are functions. A taint sentinel sits in
-    // the reserved high band and is not in any mapped section, so the exec probe
-    // also rejects unresolved indirect calls
+    // Only concrete executable targets are functions
     if (!emu.emu().memory().probe(pc, 1, kMemExec)) {
         return;
     }

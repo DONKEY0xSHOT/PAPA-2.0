@@ -12,9 +12,8 @@
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
 
-// The WorkspaceEmulator runFunction driver, exercised over real 32-bit machine
-// code placed in the sandboxed memory. Covers straight-line execution, branch
-// exploration, no-recurse calls, and the DoS caps (maxhit, step cap)
+// The WorkspaceEmulator runFunction driver, exercised over real 32-bit machine code
+// placed in the sandboxed memory
 
 namespace {
 
@@ -205,9 +204,8 @@ TEST_CASE("emu workspace: a long run is bounded by the step cap") {
     CHECK(steps < sled.size());
 }
 
-// amd64: the workspace emulator must build the 64-bit register model, seed
-// the 64-bit stack band, taint the amd64 entry registers (rax..r9), and run
-// 64-bit code (platarch/amd64.py taintregs, impemu sign-extended stack base)
+// amd64: the workspace emulator must build the 64-bit register model, seed the
+// 64-bit stack band, taint rax..r9, and run 64-bit code
 
 TEST_CASE("emu workspace amd64: prepare taints entry registers and seeds the 64-bit stack") {
     const pn::Disassembler disasm(/*is_64bit=*/true);

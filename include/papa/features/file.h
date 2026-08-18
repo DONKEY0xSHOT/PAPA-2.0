@@ -7,13 +7,11 @@
 
 namespace papa::features {
 
-// File-scope features
-// Default evaluate (structural membership) is correct for all of them because
-// the extractor emits the exact spelling a rule references
+// File-scope features. Default evaluate (structural membership) is correct for all of
+// them because the extractor emits the exact spelling a rule references
 
-// Imported symbol name
-// By CAPA convention this is "<dll>.<symbol>" with dll lowercased and extension
-// stripped, or "<dll>.#<ordinal>" for by-ordinal imports
+// Imported symbol name. By CAPA convention this is "<dll>.<symbol>" with dll lowercased
+// and extension stripped, or "<dll>.#<ordinal>" for by-ordinal imports
 class Import : public Feature {
 public:
     explicit Import(std::string value, std::string desc = {});

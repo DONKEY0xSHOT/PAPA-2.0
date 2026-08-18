@@ -11,11 +11,8 @@
 
 namespace papa::features::extractors::papa_native::emu {
 
-// The discovery monitor that decides whether an emulated candidate looks like a
-// real function. A faithful port of analysis/generic/emucode.py watcher: it
-// stops emulation at the first ret (or a privileged/garbage instruction) and
-// then looks_good() iff a ret was reached via varied, non-bad-code instructions
-// with no single mnemonic dominating. Drives the emulation behavioral filter
+// The discovery monitor that decides whether an emulated candidate looks like a real
+// function, a faithful port of the analysis/generic/emucode.py watcher
 class Watcher : public EmulationMonitor {
 public:
     void prehook(WorkspaceEmulator& emu, const DecodedInsn& insn,

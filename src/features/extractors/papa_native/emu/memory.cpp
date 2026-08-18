@@ -15,7 +15,9 @@ void SandboxMemory::add_map(std::uint64_t base, std::uint32_t perms,
 }
 
 void SandboxMemory::init_stack(std::uint64_t base) {
-    maps_.push_back(Map{base, kStackSize, kMemRead | kMemWrite, {}, true});
+    // Inserted at the front so find_map reaches it before any image section
+    maps_.insert(maps_.begin(),
+                 Map{base, kStackSize, kMemRead | kMemWrite, {}, true});
 }
 
 const SandboxMemory::Map* SandboxMemory::find_map(std::uint64_t va) const noexcept {
@@ -100,7 +102,9 @@ SandboxMemory::read_code(std::uint64_t va, std::size_t max_len) const {
 std::uint64_t SandboxMemory::read_value(std::uint64_t va, std::size_t size) const {
     const std::vector<std::uint8_t> bytes = read_bytes(va, size);
     std::uint64_t value = 0;
-    for (std::size_t i = 0; i < bytes.size(); ++i) {
+    // Bounded to the width of the result
+    const std::size_t limit = std::min<std::size_t>(bytes.size(), sizeof(value));
+    for (std::size_t i = 0; i < limit; ++i) {
         value |= static_cast<std::uint64_t>(bytes[i]) << (8U * i);
     }
     return value;

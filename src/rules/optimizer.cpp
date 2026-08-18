@@ -11,9 +11,8 @@ namespace papa::rules {
 
 namespace {
 
-// Relative evaluation cost of a leaf feature, mirroring capa's get_node_cost.
-// os/arch/format are the most selective and cheapest, scanning features
-// (substring/regex/bytes) the most expensive, everything else a hash lookup
+// Relative evaluation cost of a leaf feature, mirroring capa's get_node_cost, with
+// os and arch cheapest and the scanning features most expensive
 [[nodiscard]] int feature_cost(const features::Feature& f) noexcept {
     switch (f.tag()) {
         case features::FeatureTag::kOs:

@@ -60,9 +60,8 @@ TEST_CASE("global_: notepad.exe yields os=windows, format=pe, arch=amd64") {
     const auto* arch = find_by_tag(feats, FeatureTag::kArch);
     REQUIRE(arch != nullptr);
     const std::string& av = static_cast<const Arch*>(arch->first.get())->value();
-    // notepad on a modern Windows install is amd64
-    // Tolerate i386 in case the
-    // fixture is from a 32-bit machine
+    // notepad on a modern Windows install is amd64. Tolerate i386 in case the fixture
+    // is from a 32-bit machine
     CHECK((av == "amd64" || av == "i386"));
 }
 

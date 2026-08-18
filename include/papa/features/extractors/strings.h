@@ -16,25 +16,22 @@ struct ExtractedString {
     std::uint64_t offset{0};
 };
 
-// Walk buf gathering runs of printable ASCII bytes
-// A "run" is bounded by any non-printable byte and must have length >= min_len
-// Runs starting inside a fill region per is_in_repeat_fill_region are skipped
+// Walk buf gathering runs of printable ASCII bytes. A "run" is bounded by any non-
+// printable byte and must have length >= min_len
 [[nodiscard]] std::vector<ExtractedString>
 extract_ascii_strings(std::span<const std::byte> buf,
                       std::size_t                min_len =
                           ::papa::constants::kMinStringLength);
 
-// UTF-16LE counterpart that requires (printable_low, 0x00) pairs
-// The reported offset points to the first byte of the run
-// The value is the decoded UTF-8 form
+// UTF-16LE counterpart that requires (printable_low, 0x00) pairs. The reported offset
+// points to the first byte of the run. The value is the decoded UTF-8 form
 [[nodiscard]] std::vector<ExtractedString>
 extract_unicode_strings(std::span<const std::byte> buf,
                         std::size_t                min_len =
                             ::papa::constants::kMinStringLength);
 
-// True when the kFillCheckSliceSize-sized window centered on offset is filled
-// with a single byte from kRepeatFillBytes
-// Used by both extractors to discard padding regions before emitting strings
+// True when the kFillCheckSliceSize-sized window centered on offset is filled with a
+// single byte from kRepeatFillBytes
 [[nodiscard]] bool
 is_in_repeat_fill_region(std::span<const std::byte> buf, std::uint64_t offset) noexcept;
 

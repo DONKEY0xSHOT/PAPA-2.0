@@ -73,6 +73,9 @@ extract_ascii_strings(std::span<const std::byte> buf, std::size_t min_len) {
 
         if (in_run) {
             const std::size_t run_len = i - run_start;
+            if (out.size() >= constants::kMaxStringsPerPass) {
+                return out;
+            }
             if (run_len >= min_len &&
                 !is_in_repeat_fill_region(buf, run_start)) {
                 ExtractedString s;
@@ -115,6 +118,7 @@ extract_unicode_strings(std::span<const std::byte> buf, std::size_t min_len) {
 
     auto flush = [&](std::size_t end_byte) {
         if (run_units >= min_len &&
+            out.size() < constants::kMaxStringsPerPass &&
             !is_in_repeat_fill_region(buf, run_start)) {
             ExtractedString s;
             s.value.reserve(run_units);

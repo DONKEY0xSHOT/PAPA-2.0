@@ -19,9 +19,10 @@ inline constexpr std::size_t   kMaxEmuSteps = 4096;     // total executed insns
 inline constexpr std::size_t   kMaxTodoQueue = 4096;    // queued branch paths
 inline constexpr std::uint32_t kDefaultMaxHit = 1;      // visits per address
 
-// A hook called around each emulated instruction (impemu EmulationMonitor). The
-// discovery watcher derives from this to observe the instruction stream and
-// stop emulation when it has seen enough
+// Total overlay entries the work queue may hold across every pending path
+inline constexpr std::size_t   kMaxQueuedOverlayEntries = 1U << 22;
+
+// A hook called around each emulated instruction (impemu EmulationMonitor)
 class EmulationMonitor {
 public:
     virtual ~EmulationMonitor() = default;
@@ -34,26 +35,18 @@ public:
     virtual void posthook(WorkspaceEmulator& /*emu*/, const DecodedInsn& /*insn*/,
                           std::uint64_t /*eip*/) {}
 
-    // Called when an instruction faulted during execution (e.g. divide by
-    // zero), the way vivisect routes such failures to logAnomaly. The watcher
-    // uses this to mark a candidate as bad code
+    // Called when an instruction faulted during execution (e.g. divide by zero), the
+    // way vivisect routes such failures to logAnomaly
     virtual void log_anomaly(WorkspaceEmulator& /*emu*/, std::uint64_t /*eip*/) {}
 
-    // Called when a call is intercepted, with the resolved call target pc (impemu
-    // AnalysisMonitor.apicall). The discovery monitor uses this to seed runtime-
-    // resolved indirect call targets as new functions. For an indirect call the
-    // target is read from the emulated register or memory state
+    // Called when a call is intercepted, with the resolved call target pc (impemu.
+    // AnalysisMonitor.apicall)
     virtual void apicall(WorkspaceEmulator& /*emu*/, const DecodedInsn& /*op*/,
                          std::uint64_t /*pc*/) {}
 };
 
-// A faithful port of vivisect's WorkspaceEmulator runFunction driver: it
-// emulates inside one function over a bounded work-queue of (address, snapshot)
-// paths, exploring both sides of conditional branches and resolving indirect
-// flow from live state, without recursing into callees (their return value is
-// tainted). It owns an IntelEmulator (register + sandboxed memory) and decodes
-// instructions from that memory. Used by the discovery passes to validate and
-// reach functions static descent misses
+// A faithful port of vivisect's WorkspaceEmulator runFunction driver, emulating
+// inside one function over a bounded work-queue without recursing into callees
 class WorkspaceEmulator {
 public:
     explicit WorkspaceEmulator(const Disassembler& disasm) noexcept;
@@ -89,9 +82,8 @@ private:
     void set_snap(const Snapshot& snap);
     [[nodiscard]] std::optional<DecodedInsn> decode_at(std::uint64_t va) const;
 
-    // Intercept a call: do not recurse, taint the return value, continue after
-    // the call (impemu checkCall, func_only). Notifies the monitor's apicall hook
-    // with the resolved target. Returns true if it was a call
+    // Intercept a call: do not recurse, taint the return value, continue after the call
+    // (impemu checkCall, func_only)
     bool check_call(const DecodedInsn& insn, EmulationMonitor* monitor);
 
     // Collect the branch targets to queue for a non-call instruction

@@ -10,13 +10,8 @@ namespace papa::rules {
 
 namespace {
 
-// A feature can be indexed only when its match semantics are structural
-// presence in the set. The scanning and wildcard evaluators can succeed against
-// a value the set does not contain (a substring of a longer string, a byte
-// prefix, an os or arch wildcard), so their absence proves nothing.
-// MatchedRule is excluded for a different reason: matching injects those
-// features as it goes, so a rule needing one may become matchable partway
-// through a cycle, after the candidate list was already chosen
+// A feature can be indexed only when its match semantics are structural presence in the
+// set
 [[nodiscard]] bool indexable(features::FeatureTag tag) noexcept {
     switch (tag) {
         case features::FeatureTag::kSubstring:
@@ -31,10 +26,8 @@ namespace {
     }
 }
 
-// Collect the leaves whose absence guarantees the statement cannot succeed.
-// Only and-statements propagate a requirement. An or gives no guarantee because
-// another branch may carry the match, a not inverts the test, and an optional
-// or an "N or more" can succeed without any particular child
+// Collect the leaves whose absence guarantees the statement cannot succeed. Only and-
+// statements propagate a requirement
 void collect_required(const engine::Statement*          st,
                       std::vector<features::FeaturePtr>& out) {
     if (st == nullptr) { return; }

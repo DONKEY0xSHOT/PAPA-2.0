@@ -54,10 +54,8 @@ using papa::features::extractors::papa_native::insn::is_security_cookie;
 
 namespace {
 
-// Build a synthetic DecodedInsn for unit testing
-// Real tests of the disassembler live in test_disassembler.cpp
-// Here we want
-// to drive the extractor logic without paying decoder setup costs
+// Build a synthetic DecodedInsn for unit testing. Real tests of the disassembler live
+// in test_disassembler.cpp
 [[nodiscard]] DecodedInsn make_insn(std::uint64_t va, std::string_view mnem) {
     DecodedInsn ins;
     ins.va = va;
@@ -206,8 +204,7 @@ TEST_CASE("insn: extract_peb_access requires both the prefix and the offset") {
 
 namespace {
 
-// Cached image fixture
-// Tests share a single parse to keep total runtime low
+// Cached image fixture. Tests share a single parse to keep total runtime low
 // notepad.exe is the lowest-cost real-PE fixture we ship for unit tests
 [[nodiscard]] const papa::pe::PeImage* notepad_image() {
     static std::optional<papa::pe::PeImage> cached;
@@ -312,10 +309,8 @@ TEST_CASE("insn: extract_number masks a high-bit imm-only value to 32 bits on x8
         return;
     }
     REQUIRE_FALSE(img->is_64bit());
-    // push 0x80000002 (HKEY_LOCAL_MACHINE). Zydis sign-extends the imm32 to 64
-    // bits, so the operand arrives as 0xffffffff80000002. On a 32-bit image the
-    // number must be the 32-bit value 0x80000002, the way capa emits it, so the
-    // persist-via-Run and inspect-section rules see the constants they expect
+    // push 0x80000002. Zydis sign-extends the imm32, but on a 32-bit image the number
+    // must be the 32-bit value the way capa emits it
     DecodedInsn ins = make_insn(0x401000, "push");
     ins.zyd_mnem = ZYDIS_MNEMONIC_PUSH;
     ins.operand_count = 1;
@@ -330,10 +325,8 @@ TEST_CASE("insn: extract_number masks a high-bit imm-only value to 32 bits on x8
 }
 
 TEST_CASE("insn: extract_number suppresses the number only for 'add esp, k'") {
-    // capa's extract_op_number_features skips the immediate solely of
-    // `add esp, imm` (the cdecl cleanup after a call), keyed on
-    // opers[0].reg == REG_ESP. It does NOT skip `sub esp`, `add rsp`, or
-    // `sub rsp` (viv/insn.py), so neither do we
+    // capa's extract_op_number_features skips the immediate solely of `add esp, imm`
+    // (the cdecl cleanup after a call), keyed on opers[0].reg == REG_ESP
     const auto* x86 = everything_image();   // 32-bit
     const auto* x64 = notepad_image();       // 64-bit
     if (x86 == nullptr || x64 == nullptr) {
@@ -477,10 +470,8 @@ TEST_CASE("insn: extract_offset keeps a SIB-encoded stack-base offset") {
         MESSAGE("notepad.exe fixture missing, skipping");
         return;
     }
-    // capa excludes the stack/frame base only for a plain [reg+disp] without a
-    // SIB byte. [rsp+disp] forces a SIB byte (i386SibOper), so capa keeps its
-    // offset and papa must too. The classification key is sib_encoded, not the
-    // operand kind, since papa keys kind on the index register
+    // capa excludes the stack/frame base only for a plain [reg+disp] without a. SIB
+    // byte
     DecodedInsn ins = make_insn(0x401000, "mov");
     ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
     ins.operand_count = 2;
@@ -501,11 +492,8 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
         MESSAGE("notepad.exe fixture missing, skipping");
         return;
     }
-    // 65 48 8B 04 25 30 00 00 00 : mov rax, gs:[0x30]
-    // This shape made papa over-emit number(0x30) and falsely match
-    // get-process-heap-force-flags. capa treats the SIB displacement as an
-    // offset only, so extract_number must stay silent and extract_offset must
-    // surface Offset(0x30)
+    // mov rax, gs:[0x30]. capa treats the SIB displacement as an offset only, so
+    // extract_number must stay silent and extract_offset must surface Offset(0x30)
     papa::features::extractors::papa_native::Disassembler dis(true);
     const std::array<std::byte, 9> bytes{
         std::byte{0x65}, std::byte{0x48}, std::byte{0x8B}, std::byte{0x04},
@@ -519,9 +507,8 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
     REQUIRE(offs.size() == 2);
     CHECK(offs[0].first->tag() == FeatureTag::kOffset);
     CHECK(offs[1].first->tag() == FeatureTag::kOperandOffset);
-    // The 0x30 is an absolute address (vivisect's i386SibOper.imm) with disp 0,
-    // so capa surfaces offset(0), not offset(0x30). This is what lets the
-    // runtime-linking rules count gs:[0x60] as one of their offset(0) steps
+    // The 0x30 is an absolute address with disp 0, so capa surfaces offset(0). This is
+    // what lets the runtime-linking rules count gs:[0x60] as an offset(0) step
     CHECK(offs[0].first->to_string() == "offset(0)");
 }
 
@@ -531,12 +518,8 @@ TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number"
         MESSAGE("notepad.exe fixture missing, skipping");
         return;
     }
-    // 49 8D 8C 24 B8 00 00 00 : lea rcx, [r12 + 0xB8]
-    // r12 forces a SIB byte, so vivisect decodes the operand as i386SibOper and
-    // capa emits no number from it: only the non-SIB i386RegMemOper lea surfaces
-    // the displacement as a number (insn.py extract_op_offset_features). papa
-    // over-emitted number(0xB8), falsely matching get-number-of-processors on
-    // msedge at 0x14009a8d0
+    // lea rcx, [r12 + 0xB8]. r12 forces a SIB byte, so capa emits no number from it and
+    // only the non-SIB lea surfaces the displacement as a number
     papa::features::extractors::papa_native::Disassembler dis(true);
     const std::array<std::byte, 8> bytes{
         std::byte{0x49}, std::byte{0x8D}, std::byte{0x8C}, std::byte{0x24},
@@ -623,8 +606,6 @@ TEST_CASE("insn: extract_string returns empty when target is unreadable") {
 namespace {
 
 // Build a one-block function used as nzxor security-cookie test scaffold
-// The block carries a configurable instruction list and the prologue/epilogue
-// extents are derived from the first/last instruction
 [[nodiscard]] Function make_function_with_block(std::vector<DecodedInsn> insns) {
     Function fn;
     fn.va = insns.empty() ? 0U : insns.front().va;
@@ -809,9 +790,8 @@ TEST_CASE("insn: extract_cross_section_flow flags an indirect call through a non
         return *ins;
     };
 
-    // 0x14003da3b: call qword ptr [rip+0x265d9f] reads a function pointer from a
-    // .rdata slot (not the IAT) in a different section than the .text call site.
-    // capa emits "cross section flow" here, so papa must too
+    // 0x14003da3b: call qword ptr [rip+0x265d9f] reads a function pointer from a .rdata
+    // slot (not the IAT) in a different section than the .text call site
     CHECK(extract_cross_section_flow(decode_at(0x14003da3bULL), *img, table).has_value());
 
     // 0x14003d856: a call to the VirtualAllocEx IAT slot. capa skips import

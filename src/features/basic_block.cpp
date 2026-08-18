@@ -12,9 +12,8 @@ BasicBlock::BasicBlock(std::string desc)
     : Feature(FeatureTag::kBasicBlock, "basic block", std::move(desc)) {}
 
 std::size_t BasicBlock::hash() const noexcept {
-    // Tag-only payload
-    // Multiply the tag by the golden-ratio constant so the resulting seed mixes
-    // well when combined with neighboring hashes in a FeatureSet
+    // Tag-only payload. Multiply the tag by the golden-ratio constant so the resulting
+    // seed mixes well when combined with neighboring hashes in a FeatureSet
     return static_cast<std::size_t>(tag_) *
            static_cast<std::size_t>(util::hashing::kGoldenRatio64);
 }

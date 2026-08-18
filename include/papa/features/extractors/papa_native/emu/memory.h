@@ -32,12 +32,8 @@ inline constexpr std::uint64_t kStackTop64 = kStackBase64 + kStackSize;
 // Default cap on the write overlay (DoS backstop, bytes)
 inline constexpr std::size_t kDefaultOverlayCap = 1U << 20;
 
-// A bounds-checked model of the emulated address space. Backing maps (PE
-// sections, the stack) are read-only views over external bytes. Every write
-// lands in a private, capped overlay so an emulated PE can never mutate the
-// backing store or grow papa's memory without bound. Reads compose the overlay
-// over the backing, and an unmapped read returns a taint fill rather than
-// failing. This is the emulator's security boundary
+// A bounds-checked model of the emulated address space. Backing maps (PE sections, the
+// stack) are read-only views over external bytes
 class SandboxMemory {
 public:
     // Overlay snapshot for the runFunction work-queue (only mutable state)
@@ -51,9 +47,8 @@ public:
     void add_map(std::uint64_t base, std::uint32_t perms,
                  std::span<const std::uint8_t> bytes);
 
-    // Install the standard emulator stack (RW, 0xfe fill, no backing copy) at
-    // the given base (the i386 base by default, the sign-extended amd64 base
-    // for 64-bit)
+    // Install the standard emulator stack (RW, 0xfe fill, no backing copy) at the given
+    // base (the i386 base by default, the sign-extended amd64 base for 64-bit)
     void init_stack(std::uint64_t base = kStackBase);
 
     // envi probeMemory: the whole [va, va+size) range lies in one map whose
@@ -68,10 +63,8 @@ public:
     [[nodiscard]] std::vector<std::uint8_t>
         read_bytes(std::uint64_t va, std::size_t size) const;
 
-    // Read up to `max_len` bytes for instruction fetch: the readable bytes from
-    // `va` clipped to the end of the containing map (no taint fill, no
-    // cross-map), or empty if `va` is unmapped or unreadable. Mirrors how
-    // vivisect parseOpcode fetches from the mapped image bytes
+    // Read up to max_len bytes for instruction fetch, clipped to the end of the
+    // containing map, or empty when va is unmapped or unreadable
     [[nodiscard]] std::vector<std::uint8_t>
         read_code(std::uint64_t va, std::size_t max_len) const;
 

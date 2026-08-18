@@ -20,9 +20,8 @@
 
 namespace papa::rules {
 
-// A built corpus
-// Holds owning Rule pointers plus per-name, per-namespace, and per-scope indexes
-// Topological order per scope satisfies all same-scope match references
+// A built corpus. Holds owning Rule pointers plus per-name, per-namespace, and per-
+// scope indexes. Topological order per scope satisfies all same-scope match references
 class RuleSet {
 public:
     // Build from a directory of YAML files

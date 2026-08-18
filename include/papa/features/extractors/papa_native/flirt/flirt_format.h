@@ -52,9 +52,8 @@ enum class FlirtFeature : std::uint16_t {
     kCompressed     = 0x0010,
 };
 
-/// Parsed prefix of a .sig file. Mirrors the v8/v9/v10 header layout
-/// per the FLAIR SDK. Later fields are populated only when the version
-/// is high enough
+/// Parsed prefix of a .sig file. Mirrors the v8/v9/v10 header layout per the FLAIR SDK.
+/// Later fields are populated only when the version is high enough
 struct FlirtHeader {
     std::uint8_t   version        {0};       // 8, 9, or 10
     FlirtArch      arch           {FlirtArch::kAny};

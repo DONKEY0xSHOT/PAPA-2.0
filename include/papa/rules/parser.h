@@ -20,13 +20,9 @@ class Statement;
 namespace papa::rules {
 
 // Numeric literal parsed from "number:" or "operand[i].number:"
-// The active alternative depends on syntax: 0x prefix or unsigned digits give
-// std::uint64_t, leading minus gives std::int64_t, decimal point gives double
 using NumberValue = std::variant<std::uint64_t, std::int64_t, double>;
 
 // Result of parsing a "bytes:" literal
-// Each pattern entry is either a concrete byte or std::nullopt for "??" wildcards
-// has_wildcards lets the matcher pick the fast prefix path when no wildcards exist
 struct BytesLiteral {
     std::vector<std::optional<std::byte>> pattern;
     bool                                  has_wildcards{false};

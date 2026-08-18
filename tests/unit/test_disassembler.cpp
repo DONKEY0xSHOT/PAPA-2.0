@@ -168,10 +168,8 @@ TEST_CASE("decode classifies kSib on [rbx+rcx*4+0x10]") {
 
 TEST_CASE("decode classifies kSib on an x64 SIB-encoded absolute address") {
     Disassembler d(true);
-    // 8B 04 25 30 00 00 00 : mov eax, [0x30]
-    // On x64 a non-RIP absolute address must be SIB-encoded (mod=00, rm=100,
-    // base=101). vivisect models this as i386SibOper, whose displacement is an
-    // offset source, not a Number source, so the kind must be kSib not kImmMem
+    // 8B 04 25 30 00 00 00 : mov eax, [0x30]. On x64 a non-RIP absolute address must be
+    // SIB-encoded (mod=00, rm=100, base=101)
     const auto bytes = make_bytes(0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
@@ -184,10 +182,7 @@ TEST_CASE("decode classifies kSib on an x64 SIB-encoded absolute address") {
 
 TEST_CASE("decode classifies kSib on a gs segment-relative SIB access") {
     Disassembler d(true);
-    // 65 48 8B 04 25 30 00 00 00 : mov rax, gs:[0x30]  (TEB self-pointer read)
-    // This is the shape that made papa over-emit number(0x30) and falsely match
-    // get-process-heap-force-flags. It is SIB-encoded, hence kSib (offset), and
-    // capa never produces a Number for it
+    // 65 48 8B 04 25 30 00 00 00 : mov rax, gs:[0x30] (TEB self-pointer read)
     const auto bytes = make_bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
@@ -235,11 +230,8 @@ TEST_CASE("decode flags unconditional jmp as not falling through") {
     CHECK(*r->branch_target == 0x1007U);
 }
 
-// vivisect's envi iflag_lookup marks several non-branch classes IF_NOFALL:
-// INS_DEBUG (int3), INS_HALT (hlt), INS_INVALIDOP (ud0/ud1/ud2), INS_OFLOW
-// (into), INS_TRET (iret), and INS_TRAP (int N, except the platform syscall
-// gate). papa must stop a block on these too, or recovery walks an int3 pad
-// into the next function (the ipconfig get-MAC over-merge)
+// vivisect's envi iflag_lookup marks several non-branch classes IF_NOFALL, so papa
+// must stop a block on them or recovery walks an int3 pad into the next function
 TEST_CASE("decode flags int3 as not falling through") {
     Disassembler d(true);
     // CC : int3
@@ -383,9 +375,8 @@ TEST_CASE("decode streams first 1000 instructions of notepad.exe .text") {
     while (!cursor.empty() && decoded < hard_cap) {
         const auto ins = dis.decode(cursor, va);
         if (!ins) {
-            // linear sweep may hit padding bytes (e.g. CC INT3 runs are fine,
-            // but alignment 00-runs decode as "add [rax],al" which is also ok)
-            // advance by 1 and try again so a bad byte does not fault the sweep
+            // A linear sweep may hit padding bytes, so advance by one and try again rather
+            // than letting a bad byte fault the sweep
             cursor = cursor.subspan(1);
             va    += 1;
             continue;

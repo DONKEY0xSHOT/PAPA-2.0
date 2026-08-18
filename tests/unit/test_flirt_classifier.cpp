@@ -20,9 +20,7 @@ namespace flirt = papa::features::extractors::papa_native::flirt;
 
 namespace {
 
-// A scriptable FunctionContext. The maps stand in for the recovered functions,
-// their instruction xrefs, the import table, and the function-entry set, so the
-// classifier can be exercised without any binary, CFG, or disassembler
+// A scriptable FunctionContext
 class MockContext : public flirt::FunctionContext {
 public:
     std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> code;
@@ -112,9 +110,8 @@ TEST_CASE("flirt_classifier: a local name at offset zero still names the functio
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0xDDU, 0x00U, 0x00U};
 
-    // A statically linked helper (e.g. _check_managed_app) carries only a local
-    // name at offset 0. viv_utils.flirt.get_match_name takes the offset-0 name
-    // regardless of kind, so the function is still a library match
+    // A statically linked helper (e.g. _check_managed_app) carries only a local name at
+    // offset 0
     const flirt::FlirtModule helper = local_module("_check_managed_app");
     flirt::FlirtClassifier::Cache cache;
     const flirt::FlirtClassifier classifier(byte_dispatch({{0xDDU, {&helper}}}), ctx, cache);
@@ -129,9 +126,8 @@ TEST_CASE("flirt_classifier: a name only at a non-zero offset names nothing") {
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0xDEU, 0x00U, 0x00U};
 
-    // No name sits at offset 0, so get_match_name yields nothing and the match
-    // confers no identity. A name only at a non-zero offset is a sibling marker,
-    // not this function's name
+    // No name sits at offset 0, so get_match_name yields nothing and the match confers
+    // no identity
     flirt::FlirtModule m;
     m.names.push_back({0x40, "sibling", flirt::FlirtNameType::kPublic});
     flirt::FlirtClassifier::Cache cache;
@@ -152,9 +148,8 @@ TEST_CASE("flirt_classifier: a reference to an import is rejected") {
     flirt::FlirtClassifier::Cache cache;
     const flirt::FlirtClassifier classifier(byte_dispatch({{0xAAU, {&foo}}}), ctx, cache);
 
-    // capa satisfies a named reference only via a local matched library function,
-    // not an import, so a candidate whose only reference resolves to an imported
-    // API is rejected (this is why ___crtTlsAlloc@4 does not match)
+    // capa satisfies a named reference only via a local matched library function, not
+    // an import, so a candidate whose only reference resolves to an imported
     CHECK_FALSE(classifier.classify(0x2000U).has_value());
 }
 
@@ -260,9 +255,7 @@ TEST_CASE("flirt_classifier: an accepted match reports the winning module") {
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x22U, 0x00U, 0x00U};
 
-    // A module that names itself at offset 0 and carries a local and a public
-    // sibling. The driver applies viv_utils.flirt's name loops from the winner,
-    // so the classifier just has to hand it over once, on acceptance
+    // A module that names itself at offset 0 and carries a local and a public sibling
     flirt::FlirtModule outer = public_module("outer");
     outer.names.push_back({0x40, "inner_local", flirt::FlirtNameType::kLocal});
     outer.names.push_back({0x80, "inner_public", flirt::FlirtNameType::kPublic});

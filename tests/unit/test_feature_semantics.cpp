@@ -107,9 +107,8 @@ TEST_CASE("Substring short-circuits on first hit") {
     Substring s{"foo"};
     auto r = s.evaluate(fs, /*sc=*/true);
     CHECK(r.success);
-    // Under short-circuit we return as soon as any match is found
-    // Locations
-    // must be non-empty but may cover only one of the matching entries
+    // Under short-circuit we return as soon as any match is found. Locations must be
+    // non-empty but may cover only one of the matching entries
     CHECK(r.locations.size() >= 1);
     CHECK(r.locations.size() <= 2);
 }
@@ -269,9 +268,7 @@ TEST_CASE("Different feature kinds never collide in a FeatureSet") {
 }  // TEST_SUITE
 
 TEST_CASE("feature semantics: matches agrees with evaluate success for every kind") {
-    // The probe pass calls matches while the reporting pass calls evaluate.
-    // If the two ever disagree a rule would match without a match tree, or
-    // build a tree for a rule that did not match, so pin them together here
+    // The probe pass calls matches while the reporting pass calls evaluate
     FeatureSet fs;
     fs.add(make<String>("hello world"), va(0x1000));
     fs.add(make<String>("GetProcAddress"), va(0x1004));

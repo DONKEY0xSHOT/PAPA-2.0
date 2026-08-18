@@ -263,3 +263,35 @@ TEST_CASE("yaml: invalid hex escape rejected") {
     auto r = parse(text);
     REQUIRE_FALSE(r);
 }
+
+TEST_CASE("yaml: nesting is bounded so a crafted document cannot overflow the stack") {
+    // Parsing is recursive and the rules directory is untrusted input. On Windows a
+    // stack overflow raises an exception the CLI's catch cannot intercept
+    const auto nested = [](std::size_t depth) {
+        std::string doc = "root:\n";
+        for (std::size_t i = 0; i < depth; ++i) {
+            doc.append(std::string(i + 2U, ' ')).append("-\n");
+        }
+        doc.append(std::string(depth + 2U, ' ')).append("leaf: v\n");
+        return doc;
+    };
+
+    SUBCASE("nesting a real rule could plausibly use still parses") {
+        // Well inside the limit. The exact cost per visual level is an implementation
+        // detail, so this checks the property rather than the precise boundary
+        auto ok = papa::util::yaml::parse(nested(20U));
+        CHECK(ok.has_value());
+    }
+
+    SUBCASE("past the limit is rejected rather than fatal") {
+        auto deep = papa::util::yaml::parse(nested(papa::util::yaml::kMaxNestingDepth * 4U));
+        REQUIRE_FALSE(deep.has_value());
+        CHECK(deep.error().kind == papa::ErrorKind::kYamlParseError);
+    }
+
+    SUBCASE("far past the limit is still just an error") {
+        auto absurd = papa::util::yaml::parse(nested(5000U));
+        REQUIRE_FALSE(absurd.has_value());
+        CHECK(absurd.error().kind == papa::ErrorKind::kYamlParseError);
+    }
+}

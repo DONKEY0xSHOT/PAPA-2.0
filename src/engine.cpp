@@ -25,10 +25,8 @@ Result And::evaluate(const features::FeatureSet& fs, bool sc) const {
     r.children.reserve(children_.size());
     for (const auto& child : children_) {
         if (!child) {
-            // Defensive guard against a null child slot
-            // A null would otherwise dereference in the recursive call
-            // Treat it as a false child so a construction bug fails loudly
-            // rather than silently succeeding
+            // Defensive guard against a null child slot. A null would otherwise
+            // dereference in the recursive call
             all_ok = false;
             if (sc) { break; }
             continue;
@@ -112,8 +110,6 @@ Result Some::evaluate(const features::FeatureSet& fs, bool sc) const {
     r.children.reserve(children_.size());
 
     // count_ == 0 is the "optional:" idiom and is unconditionally true
-    // Children are still evaluated so result trees reflect the full structure
-    // for renderers, though short-circuit may shorten the walk once satisfied
     std::size_t ok_count = 0;
     for (const auto& child : children_) {
         if (!child) { continue; }
@@ -173,9 +169,8 @@ Subscope::Subscope(rules::Scope scope, std::unique_ptr<Statement> inner)
 }
 
 Result Subscope::evaluate(const features::FeatureSet&, bool) const {
-    // Subscope must be extracted into its own Rule before matching begins
-    // Reaching evaluate means the RuleSet build pipeline has a bug
-    // Fail fast with a logic-error subclass rather than return a misleading result
+    // Subscope must be extracted into its own Rule before matching begins. Reaching
+    // evaluate means the RuleSet build pipeline has a bug
     throw PapaInvariantError(
         "Subscope statement reached evaluate before extraction");
 }
@@ -199,8 +194,6 @@ void index_rule_matches(features::FeatureSet& fs,
 
     auto emit = [&](std::string name) {
         // Allocate one MatchedRule per distinct name and attach it to every address
-        // The FeatureSet deduplicates by structural equality so repeated calls
-        // with the same name share a single entry and only extend its address set
         auto mr = std::make_shared<const features::MatchedRule>(std::move(name));
         for (const auto& addr : addresses) {
             fs.add(mr, addr);
@@ -213,9 +206,8 @@ void index_rule_matches(features::FeatureSet& fs,
     }
 }
 
-// evaluate_quick fast paths
-// These avoid every Result/vector allocation that the full evaluate() builds
-// for the renderer. The probe pass in match() only needs a boolean
+// evaluate_quick fast paths. These avoid every Result/vector allocation that the full
+// evaluate() builds for the renderer. The probe pass in match() only needs a boolean
 
 bool And::evaluate_quick(const features::FeatureSet& fs) const {
     for (const auto& child : children_) {
@@ -263,9 +255,8 @@ bool Range::evaluate_quick(const features::FeatureSet& fs) const {
 }
 
 bool FeatureStatement::evaluate_quick(const features::FeatureSet& fs) const {
-    // Delegate to the feature's boolean path so subclass-specific scans
-    // (substring, regex, bytes-prefix, os/arch wildcards) reach the right
-    // semantics without building a Result or copying the location set
+    // Delegate to the feature's boolean path so subclass scans reach the right semantics
+    // without building a Result
     return feature_->matches(fs);
 }
 

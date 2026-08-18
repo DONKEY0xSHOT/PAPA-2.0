@@ -4,6 +4,8 @@ set(PAPA_UNIT_TEST_SOURCES
     test_main.cpp
     test_version.cpp
     test_pe_parser.cpp
+    test_pe_builder.cpp
+    test_pipeline_synthetic.cpp
     test_disassembler.cpp
     test_cfg.cpp
     test_viv_location_db.cpp

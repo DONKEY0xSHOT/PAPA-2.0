@@ -11,10 +11,8 @@
 
 namespace papa::features::extractors::papa_native::emu {
 
-// The image sections copied once into emulator-owned byte buffers, reused as
-// the read-only backing of every per-candidate emulation (each candidate gets
-// its own register state and write overlay, but shares this backing). Building
-// it once avoids copying the image per candidate
+// The image sections copied once into emulator-owned buffers, reused as the
+// read-only backing of every per-candidate emulation
 struct ImageMaps {
     struct Entry {
         std::uint64_t base{0};
@@ -27,41 +25,27 @@ struct ImageMaps {
 // Translate PE section characteristics to emulator memory permissions
 [[nodiscard]] std::uint32_t section_perms(std::uint32_t characteristics) noexcept;
 
-// Collect function-pointer candidate target VAs (deduplicated, sorted) the way
-// vivisect's relocations.py and generic/pointers.py do: every HIGHLOW/DIR64
-// base relocation marks a stored absolute pointer to follow (section-agnostic,
-// so .text-resident callback/vtable/island-entry pointers are included), unioned
-// with a findPointers scan of initialized data for aligned slots that point into
-// code. Targets are validated behaviorally (validate_candidate) before being
-// treated as functions, so raw noise here is filtered downstream
+// Collect function-pointer candidate target VAs the way vivisect's relocations.py
+// and generic/pointers.py do. Targets are validated behaviorally before use
 [[nodiscard]] std::vector<std::uint64_t>
     find_pointer_candidates(const pe::PeImage& image);
 
 // Copy each section's bytes into emulator-owned buffers with derived perms
 [[nodiscard]] ImageMaps build_image_maps(const pe::PeImage& image);
 
-// The absolute pointer a RIP-relative `lea` computes (va + length + disp), or
-// nullopt when the instruction is not a `lea` with a RIP-relative operand. This
-// is vivisect's amd64 code-derived REF_PTR set: on amd64 the only code
-// instruction that emits a REF_PTR is `lea reg, [rip + disp]`, whose operand is
-// an address rather than a dereference. emucode treats these targets as function
-// candidates. The caller filters them to undefined executable space
+// The absolute pointer a RIP-relative `lea` computes (va + length + disp), or nullopt
+// when the instruction is not a `lea` with a RIP-relative operand
 [[nodiscard]] std::optional<std::uint64_t>
     riprel_lea_target(const DecodedInsn& insn) noexcept;
 
-// Emulate from `va` over the image and report whether it behaves like a real
-// function (analysis/generic/emucode.py: runFunction(maxhit=1) + watcher
-// looks_good). Returns false if `va` is not in executable memory. This is the
-// behavioral validator the discovery passes use to accept a candidate
+// Emulate from `va` over the image and report whether it behaves like a real function
+// (analysis/generic/emucode.py: runFunction(maxhit=1) + watcher looks_good)
 [[nodiscard]] bool validate_candidate(const ImageMaps& maps,
                                       const Disassembler& disasm,
                                       std::uint64_t va);
 
-// Collects runtime-resolved indirect call targets as new function seeds during
-// per-function emulation, a port of the discovery tail of vivisect's impemu
-// AnalysisMonitor.apicall ("Emulation Found"). A target is seeded when it is
-// concrete executable code, is not the function's own entry (recursion), and is
-// not the fall-through immediately after the call
+// Collects runtime-resolved indirect call targets as new function seeds during per-
+// function emulation, a port of the discovery tail of vivisect's impemu
 class AnalysisMonitor : public EmulationMonitor {
 public:
     explicit AnalysisMonitor(std::uint64_t funcva) noexcept : funcva_(funcva) {}
@@ -77,19 +61,14 @@ private:
     std::unordered_set<std::uint64_t> seeds_;
 };
 
-// Emulate from `va` (maxhit=1) and return the distinct executable indirect-call
-// targets the emulation resolved (sorted). The per-function-emulation discovery
-// primitive used by the i386 calling pass. Returns empty if `va` is not in
-// executable memory
+// Emulate from `va` (maxhit=1) and return the distinct executable indirect-call targets
+// the emulation resolved (sorted)
 [[nodiscard]] std::vector<std::uint64_t>
     discover_call_targets(const ImageMaps& maps, const Disassembler& disasm,
                           std::uint64_t va);
 
 // Emulate the function at funcva until execution first reaches target_va, then
-// return the concrete value of reg at that point, or nullopt if the emulation
-// never reaches target_va (or funcva is not executable). This resolves a base
-// register a switch dispatch computes far from the jump, where a static window
-// scan cannot follow a path-sensitive value
+// return the concrete value of reg there, or nullopt if it is never reached
 [[nodiscard]] std::optional<std::uint64_t>
     emulate_to_read_register(const ImageMaps& maps, const Disassembler& disasm,
                              std::uint64_t funcva, std::uint64_t target_va,

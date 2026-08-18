@@ -46,9 +46,8 @@ PapaNativeBackend::build(const ::papa::pe::PeImage& image) {
 }
 
 const ::papa::pe::PeImage& PapaNativeBackend::image() const noexcept {
-    // The pointer is non-null after construction
-    // build() either returns by value or fails outright so dereferencing
-    // here is always safe
+    // The pointer is non-null after construction build() either returns by value or
+    // fails outright so dereferencing here is always safe
     return *image_;
 }
 

@@ -12,12 +12,7 @@ namespace papa::rules {
 
 class Rule;
 
-/// Narrows a scope's rule list to the ones a feature set could possibly match.
-///
-/// A rule's required features are the leaves reachable from its root through
-/// and-statements only, so their absence makes the rule unmatchable. Rules with
-/// no such leaf are always evaluated, which keeps the filter conservative: it
-/// can only skip a rule that could not have matched anyway
+/// Narrows a scope's rule list to the ones a feature set could possibly match
 class RuleFeatureIndex {
 public:
     /// Index a scope's topologically-ordered rules

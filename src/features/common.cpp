@@ -20,9 +20,8 @@ namespace papa::features {
 
 namespace {
 
-// Fold the feature tag into a payload hash so features of different kinds
-// but identical payload bytes (for example string "any" vs os "any") never
-// collide in a FeatureSet bucket
+// Fold the feature tag into the payload hash so different kinds with identical payload
+// bytes never collide in a FeatureSet bucket
 std::size_t mix_tag(FeatureTag t, std::size_t h) noexcept {
     return util::hashing::hash_combine(static_cast<std::size_t>(t), h);
 }
@@ -91,8 +90,6 @@ engine::Result Substring::evaluate(const FeatureSet& fs, bool sc) const {
     engine::Result r;
     r.node = this;
     // Iterate the dedicated string index so we never traverse non-String entries
-    // For function-scope FeatureSets the full map can have tens of thousands of
-    // entries while the string index has at most a few thousand
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
         if (s.value().find(value_) != std::string::npos) {
@@ -123,10 +120,8 @@ Regex::Regex(std::string literal, std::string desc)
     case_insensitive_ = parsed.case_insensitive;
     auto flags = std::regex::ECMAScript | std::regex::optimize;
     if (case_insensitive_) { flags |= std::regex::icase; }
-    // CAPA rules are written against Python's re flavor which supports a few
-    // constructs std::regex does not. Rather than abort corpus loading on the
-    // first incompatible pattern we mark the Regex as dead and let evaluate()
-    // return false. A v2 release may swap in a compatibility shim
+    // CAPA rules use Python's re flavor, which has constructs std::regex lacks. An
+    // incompatible pattern is marked dead rather than aborting the corpus load
     try {
         compiled_     = std::regex(pattern_, flags);
         compiled_ok_  = true;
@@ -139,8 +134,6 @@ engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
     engine::Result r;
     r.node = this;
     // A pattern std::regex could not compile produces no matches
-    // The rule still loads but the regex always fails, mirroring how the
-    // dynamic-only CAPA rules contribute nothing to the static pipeline
     if (!compiled_ok_) { return r; }
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
@@ -203,8 +196,6 @@ bool Bytes::matches(const FeatureSet& fs) const {
 
 std::size_t Bytes::hash() const noexcept {
     // FNV-1a 64-bit over the raw byte buffer
-    // Using std::hash<std::vector<std::byte>> would require extra plumbing
-    // and does not give byte-exact stability across standard library versions
     const std::size_t payload =
         util::hashing::fnv1a64(std::span<const std::byte>(value_.data(), value_.size()));
     return mix_tag(tag_, payload);

@@ -19,8 +19,6 @@ inline constexpr std::uint64_t kFnv64OffsetBasis = 0xCBF29CE484222325ULL;
 inline constexpr std::uint64_t kFnv64Prime = 0x100000001B3ULL;
 
 // Mix two hash values in the spirit of boost::hash_combine
-// The golden-ratio constant plus a shift-xor pattern prevents adjacent payloads
-// from collapsing to the same combined hash
 [[nodiscard]] constexpr std::size_t hash_combine(std::size_t seed,
                                                  std::size_t value) noexcept {
     return seed ^ (value
@@ -30,8 +28,6 @@ inline constexpr std::uint64_t kFnv64Prime = 0x100000001B3ULL;
 }
 
 // FNV-1a over an arbitrary byte range
-// Chosen over std::hash<std::string_view> for byte-exact stability across runs
-// and across translation units that pass raw std::byte buffers
 [[nodiscard]] constexpr std::size_t fnv1a64(std::span<const std::byte> data) noexcept {
     std::uint64_t h = kFnv64OffsetBasis;
     for (std::byte b : data) {

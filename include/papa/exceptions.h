@@ -2,6 +2,7 @@
 
 #include "papa/util/expected.h"
 
+#include <cstdint>
 #include <source_location>
 #include <stdexcept>
 #include <string>

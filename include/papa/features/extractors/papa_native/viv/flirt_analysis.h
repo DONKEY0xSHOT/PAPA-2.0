@@ -20,12 +20,8 @@ namespace papa::features::extractors::papa_native::viv {
 
 class Discovery;
 
-/// A FunctionContext over a Discovery's live analysis state plus the image bytes,
-/// so FLIRT can run as an interleaved discovery fmod rather than a post-hoc pass.
-/// code_at reads the image, xref_from decodes the instruction containing an
-/// address and resolves its static reference from the live location map, and
-/// is_function_entry consults the functions made so far, so FLIRT sees the
-/// in-progress workspace its analyzer sees during vw.analyze
+/// A FunctionContext over a Discovery's live analysis state plus the image bytes, so
+/// FLIRT can run as an interleaved discovery fmod rather than a post-hoc pass
 class DiscoveryFlirtContext : public flirt::FunctionContext {
 public:
     DiscoveryFlirtContext(const pe::PeImage& image, InsnReader read,
@@ -47,14 +43,7 @@ private:
 };
 
 /// The FLIRT analysis module, a port of the analyzers
-/// viv_utils.flirt.register_flirt_signature_analyzers adds to the workspace. As
-/// each function is made it is matched against every signature tree in registry
-/// order, and an accepted match applies viv_utils.flirt's two name loops: a
-/// local name at a non-zero offset whose address is undefined and executable
-/// becomes its own function, and every named address that is a function is
-/// marked a library function under that name. This is the single FLIRT pass, so
-/// both the sub-function creation and the library naming the report uses come
-/// from here, exactly as capa does it during vw.analyze
+/// viv_utils.flirt.register_flirt_signature_analyzers adds to the workspace
 class FlirtDiscoveryAnalyzer {
 public:
     /// Creates a function at va during discovery, the makeFunction the local-name
@@ -87,9 +76,7 @@ private:
     const flirt::FunctionContext*     context_;
     MakeFunction                      make_function_;
     IsFunction                        is_function_;
-    // The library functions found so far, keyed by address. A function already in
-    // here is skipped by later trees, the is_library_function short-circuit at the
-    // top of match_function_flirt_signatures
+    // The library functions found so far, keyed by address
     std::unordered_map<std::uint64_t, std::string> library_names_;
 };
 

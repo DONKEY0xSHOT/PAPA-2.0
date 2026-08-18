@@ -13,19 +13,16 @@ enum class ComKind : std::uint8_t {
     kInterface,
 };
 
-// One row of the COM lookup tables
-// guid_bytes is the little-endian binary form used in PE constants
-// guid_string is the canonical brace-wrapped lowercase form used in PE strings
-// Each table is sorted by name to permit binary-search lookups in lookup_com
+// One row of the COM lookup tables, holding the little-endian binary GUID and the
+// canonical string form. Each table is sorted by name for binary search
 struct ComEntry {
     std::string_view              name;
     std::string_view              guid_string;
     std::array<std::byte, 16>     guid_bytes;
 };
 
-// Look up an entry by name within the requested table
-// Returns a pointer into the static table or nullptr when no entry matches
-// Comparison is case-sensitive on the name field, matching CAPA's behaviour
+// Look up an entry by name within the requested table. Returns a pointer into the
+// static table or nullptr when no entry matches
 [[nodiscard]] const ComEntry* lookup_com(ComKind kind, std::string_view name) noexcept;
 
 // Test-facing accessors for the underlying tables

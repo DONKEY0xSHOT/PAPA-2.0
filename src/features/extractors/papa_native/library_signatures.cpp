@@ -29,9 +29,8 @@ bool LibrarySignatureSet::is_thunk(const Function& fn) noexcept {
     if (ins.operand_count == 0) { return false; }
 
     const auto& op0 = ins.operands.front();
-    // kImmMem is x86 absolute "[disp32]"
-    // kRipRel is x64 RIP-relative "[rip+disp]"
-    // Both encode a memory operand whose target is an IAT slot in normal thunks
+    // kImmMem is x86 absolute "[disp32]" kRipRel is x64 RIP-relative "[rip+disp]". Both
+    // encode a memory operand whose target is an IAT slot in normal thunks
     return op0.kind == OperandKind::kImmMem || op0.kind == OperandKind::kRipRel;
 }
 

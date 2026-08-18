@@ -36,11 +36,8 @@ void Writer::newline_and_indent() {
 }
 
 void Writer::emit_separator_for_value() {
-    // The value about to be written follows either:
-    //   - the start of a container (no separator)
-    //   - a key inside an object (already emitted ":" and optional space)
-    //   - a previous value or container in the same parent (need ",")
-    // awaiting_value_ short-circuits the comma path because key() handles its own separator
+    // Pick the separator for the value about to be written, which depends on whether it
+    // opens a container, follows a key, or follows a previous value
     if (awaiting_value_) {
         awaiting_value_ = false;
         return;
@@ -156,9 +153,8 @@ void Writer::value_uint(std::uint64_t v) {
 void Writer::value_double(double v) {
     start_value();
     if (!std::isfinite(v)) {
-        // JSON has no representation for NaN or +/-inf
-        // Emit null and let the reader treat it as "no value"
-        // This matches CAPA's behavior on degenerate inputs
+        // JSON has no representation for NaN or +/-inf. Emit null and let the reader
+        // treat it as "no value". This matches CAPA's behavior on degenerate inputs
         out_->write("null", 4);
         need_comma_ = true;
         return;

@@ -26,9 +26,6 @@ extract_file_section_names(const ::papa::pe::PeImage& image);
 extract_file_import_names(const ::papa::pe::PeImage& image);
 
 // One Export feature per export
-// Forwarders also emit Characteristic("forwarded export") and a synthetic Import
-// pointing at the destination DLL.symbol so capa-rules that look for the
-// forwarded routine match unchanged
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_file_export_names(const ::papa::pe::PeImage& image);
 

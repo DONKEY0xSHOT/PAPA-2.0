@@ -11,10 +11,7 @@ namespace papa::features::extractors::papa_native::viv {
 
 namespace {
 
-// The static reference a single instruction emits, if any. A call or jump yields
-// a code reference to its target, any other instruction that dereferences a fixed
-// address yields a data reference, and register-indexed or register-only operands
-// yield nothing
+// The static reference a single instruction emits, if any
 [[nodiscard]] std::optional<flirt::FlirtXref> resolve_xref(const DecodedInsn& ins) {
     if (ins.is_call || ins.is_jump) {
         if (ins.branch_target.has_value()) {
@@ -83,9 +80,8 @@ DiscoveryFlirtContext::code_at(std::uint64_t va, std::size_t max_len) const {
 
 std::optional<flirt::FlirtXref>
 DiscoveryFlirtContext::xref_from(std::uint64_t site_va) const {
-    // vivisect resolves a reference through the instruction that contains the
-    // reference offset (getLocation then getXrefsFrom). Find the containing code
-    // location, decode it, and resolve its static reference
+    // vivisect resolves a reference through the instruction that contains the reference
+    // offset (getLocation then getXrefsFrom)
     const auto loc = disc_->locations().get_location(site_va);
     if (!loc.has_value() || loc->type != LocType::kOp) {
         return std::nullopt;
@@ -119,12 +115,8 @@ FlirtDiscoveryAnalyzer::FlirtDiscoveryAnalyzer(
 
 void FlirtDiscoveryAnalyzer::apply_names(std::uint64_t             va,
                                          const flirt::FlirtModule& winner) {
-    // Local names first, then public ones, so a public name takes precedence at
-    // an address both kinds cover (viv_utils.flirt runs the loops in that order).
-    // A local name may need its function created first, which is what carves a
-    // signature's internal helper out of an enclosing function. A name only
-    // sticks where an actual function ends up, since add_function_flirt_match
-    // raises InvalidFunction otherwise and the caller skips it
+    // Local names first, then public ones, so a public name takes precedence at an
+    // address both kinds cover (viv_utils.flirt runs the loops in that order)
     for (const flirt::FlirtName& named : winner.names) {
         if (named.type != flirt::FlirtNameType::kLocal) {
             continue;
@@ -150,16 +142,12 @@ void FlirtDiscoveryAnalyzer::apply_names(std::uint64_t             va,
 
 void FlirtDiscoveryAnalyzer::on_function(std::uint64_t va) {
     // A function an earlier signature already named is not re-matched, the
-    // is_library_function short-circuit at the top of
-    // match_function_flirt_signatures
+    // is_library_function short-circuit at the top of match_function_flirt_signatures
     if (library_names_.count(va) != 0) {
         return;
     }
-    // capa registers one analyzer per signature file and they all run, in order,
-    // on each function as it is made. Each call builds a fresh match cache, so
-    // the recursion memo stays local and re-entrancy is safe: a match's
-    // makeFunction re-enters on_function for the new sub-function, which starts
-    // its own caches
+    // capa registers one analyzer per signature file and they all run, in order, on
+    // each function as it is made
     for (const flirt::ModuleMatchFn& matcher : matchers_) {
         if (library_names_.count(va) != 0) {
             break;

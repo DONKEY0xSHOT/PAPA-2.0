@@ -12,7 +12,9 @@ endif()
 project(papa
     VERSION 0.1.0
     DESCRIPTION "C++ port of CAPA static PE capability detector"
-    LANGUAGES CXX
+    # C as well as C++, because Zydis and miniz are C libraries. Visual Studio's
+    # generator tolerates the omission, so only Makefile and Ninja builds failed
+    LANGUAGES C CXX
 )
 
 cmake_policy(SET CMP0091 NEW)

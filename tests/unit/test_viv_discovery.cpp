@@ -91,9 +91,8 @@ TEST_CASE("Discovery's FLIRT fmod creates a sub-function when a function is made
     const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
 
     pv::Discovery disc(reader, [](std::uint64_t) { return true; });
-    // A stub FLIRT fmod that, when the enclosing function is made, creates the
-    // helper at 0x1010, the way viv_utils.flirt.makeFunction creates a local
-    // name. It fires for the helper too, but the guard keeps it from recursing
+    // A stub FLIRT fmod that, when the enclosing function is made, creates the helper
+    // at 0x1010, the way viv_utils.flirt.makeFunction creates a local name
     disc.set_flirt_fmod([&disc](std::uint64_t va) {
         if (va == 0x1000 && !disc.is_function(0x1010)) {
             disc.make_function(0x1010);
@@ -102,9 +101,8 @@ TEST_CASE("Discovery's FLIRT fmod creates a sub-function when a function is made
 
     disc.make_function(0x1000);
 
-    // The fmod ran at the end of the enclosing function's analysis (after its
-    // blocks were built) and re-entered make_function safely, so the helper is a
-    // function with its own inline-built block
+    // The fmod ran at the end of the enclosing function's analysis and re-entered
+    // make_function safely, so the helper is a function with its own block
     CHECK(disc.is_function(0x1000));
     CHECK(disc.is_function(0x1010));
     const auto& helper = disc.blocks().function_blocks(0x1010);

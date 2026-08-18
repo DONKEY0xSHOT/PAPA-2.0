@@ -38,9 +38,8 @@ void run_emucode(Discovery& disc, const CandidateSource& collect_candidates) {
         }
         std::sort(docode.begin(), docode.end());
         for (const std::uint64_t va : docode) {
-            // An earlier make_function this pass may have covered a later target,
-            // so re-check the getLocation gate before each make the way emucode
-            // does
+            // An earlier make_function this pass may have covered a later target, so
+            // re-check the getLocation gate before each make the way emucode does
             if (!disc.locations().get_location(va).has_value()) {
                 disc.make_function(va);
             }
@@ -49,10 +48,8 @@ void run_emucode(Discovery& disc, const CandidateSource& collect_candidates) {
 }
 
 void run_funcentries(Discovery& disc, const CandidateSource& collect_prologues) {
-    // Making a function shrinks the undefined gaps the next scan sees, so iterate
-    // until a pass finds no new prologue. A prologue candidate is already
-    // validated, so an undefined one becomes a function directly. A bounded pass
-    // count guards against a candidate that make_function cannot cover
+    // Making a function shrinks the undefined gaps the next scan sees, so iterate until
+    // a pass finds no new prologue
     constexpr int kMaxPasses = 8;
     for (int pass = 0; pass < kMaxPasses; ++pass) {
         bool added = false;

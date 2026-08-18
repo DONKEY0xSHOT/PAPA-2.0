@@ -37,9 +37,8 @@ make_characteristic(const char* name, std::uint64_t va) {
              va_addr(va) };
 }
 
-// Mirror of the same helper in insn.cpp
-// Keeping it private here avoids a public dependency between the two extractor
-// modules just to share a three-line predicate
+// Mirror of the same helper in insn.cpp. Keeping it private here avoids a public
+// dependency between the two extractor modules just to share a three-line predicate
 [[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
     if (reg == ZYDIS_REGISTER_NONE) { return false; }
     const ZydisMachineMode mode =
@@ -51,9 +50,8 @@ make_characteristic(const char* name, std::uint64_t va) {
     return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
 }
 
-// Count printable bytes in the low width_bytes octets of imm
-// Returns the number of leading printable bytes
-// Stops counting at the first non-printable byte and returns the partial count
+// Count printable bytes in the low width_bytes octets of imm. Returns the number of
+// leading printable bytes
 [[nodiscard]] std::size_t
 leading_printable_bytes(std::uint64_t imm, std::size_t width_bytes) noexcept {
     if (width_bytes == 0U) { return 0U; }
@@ -67,11 +65,8 @@ leading_printable_bytes(std::uint64_t imm, std::size_t width_bytes) noexcept {
     return count;
 }
 
-// Default operand width when Zydis did not populate width_bytes
-// Most stack-store operands are dword on x86 and qword on x64
-// We conservatively fall back to four because that matches the common
-// stack-string idiom in MSVC shellcode and minimizes false positives compared
-// to assuming eight
+// Default operand width when Zydis did not populate width_bytes. Most stack-store
+// operands are dword on x86 and qword on x64
 constexpr std::size_t kDefaultStoreWidth = 4;
 
 }  // namespace
@@ -137,8 +132,6 @@ std::vector<FeatureWithAddress>
 extract_basic_block_features(const BasicBlock& bb, bool is_64bit) {
     std::vector<FeatureWithAddress> out;
     // Emit a BasicBlock tag feature for every BB
-    // The function-scope FeatureSet aggregates these so count(basic blocks)
-    // rules see one address per basic block in the parent function
     out.emplace_back(
         std::make_shared<const ::papa::features::BasicBlock>(),
         ::papa::features::Address{

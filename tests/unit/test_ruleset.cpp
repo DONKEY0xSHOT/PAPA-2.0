@@ -134,9 +134,8 @@ TEST_CASE("ruleset: duplicate rule names are rejected") {
 }
 
 TEST_CASE("ruleset: rule with unresolved match reference is dropped, not failed") {
-    // Real CAPA corpora always contain a few rules whose match: targets were
-    // skipped earlier in the load (irregular YAML, COM lookups, etc.)
-    // The corpus must still load and the dependent rule must simply be absent
+    // Real CAPA corpora always contain a few rules whose match: targets were skipped
+    // earlier in the load (irregular YAML, COM lookups, etc.)
     std::vector<std::unique_ptr<Rule>> rules;
     rules.push_back(make_rule(
         "rule:\n"

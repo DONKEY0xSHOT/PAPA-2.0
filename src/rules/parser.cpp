@@ -126,13 +126,6 @@ constexpr std::string_view kInlineDescSep = " = ";
 }
 
 // scope conformance table
-// Mirrors capa.rules.SUPPORTED_FEATURES from plan section 19, with the same
-// upward-propagation policy CAPA applies at corpus load time:
-//   instruction features bubble into BB, function, and file rule sets
-//   BB features bubble into function and file
-//   function features bubble into file
-// File-only features (Import, Export, Section, file-origin characteristics)
-// stay file-only because lower scopes never extract them
 
 [[nodiscard]] int scope_level(Scope s) noexcept {
     switch (s) {
@@ -144,9 +137,8 @@ constexpr std::string_view kInlineDescSep = " = ";
     }
 }
 
-// Lowest scope at which a non-characteristic feature may appear in a rule
-// File-only features return kFile and are filtered out everywhere else
-// Instruction features return kInstruction so any of insn, BB, function, file accept them
+// Lowest scope at which a non-characteristic feature may appear in a rule. File-only
+// features return kFile and are filtered out everywhere else
 [[nodiscard]] std::optional<Scope> feature_origin(FeatureTag tag) noexcept {
     using ::papa::features::FeatureTag;
     switch (tag) {
@@ -194,19 +186,15 @@ constexpr std::string_view kInlineDescSep = " = ";
     using ::papa::features::FeatureTag;
     if (tag == FeatureTag::kBasicBlock) { return false; }
 
-    // Dynamic scopes (process/thread/call/span of calls) are out of scope for
-    // PAPA's static pipeline. We accept any feature inside them so the rule
-    // corpus loads cleanly
-    // The dynamic backend (post-v1) will own validation for those scopes
+    // Dynamic scopes are out of scope for the static pipeline, so any feature inside
+    // them is accepted and the rule corpus loads cleanly
     if (scope == Scope::kProcess     || scope == Scope::kThread ||
         scope == Scope::kCall        || scope == Scope::kSpanOfCalls) {
         return true;
     }
 
-    // FunctionName, Class, Namespace originate at instruction scope in dotnet
-    // and at file scope for native PE inspection
-    // CAPA propagates them through BB and function, so any insn-or-higher
-    // static scope accepts them
+    // FunctionName, Class, Namespace originate at instruction scope in dotnet and at
+    // file scope for native PE inspection
     if (tag == FeatureTag::kFunctionName ||
         tag == FeatureTag::kClass        ||
         tag == FeatureTag::kNamespace) {
@@ -276,9 +264,8 @@ constexpr std::string_view kInlineDescSep = " = ";
         return Unexpected{rule_error(ErrorKind::kInvalidRule, "empty number literal")};
     }
 
-    // Detect float vs integer
-    // A leading 0x or 0X always means hex integer regardless of any 'e' digits
-    // Otherwise the presence of '.', 'e', or 'E' triggers float parsing
+    // Detect float vs integer. A leading 0x or 0X always means hex integer regardless
+    // of any 'e' digits
     const bool is_hex_prefix =
         (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) ||
         (s.size() >= 3 && (s[0] == '+' || s[0] == '-') &&
@@ -368,10 +355,7 @@ parse_scope_name(std::string_view name) noexcept {
     if (t == "thread")        return std::optional<Scope>{Scope::kThread};
     if (t == "call")          return std::optional<Scope>{Scope::kCall};
     if (t == "span of calls") return std::optional<Scope>{Scope::kSpanOfCalls};
-    // CAPA uses "unsupported" to mark a rule that does not target the given
-    // pipeline
-    // We model this as an absent scope so the rule never participates
-    // in matching at that level
+    // CAPA uses "unsupported" to mark a rule that does not target the given pipeline
     if (t == "unsupported")   return std::optional<Scope>{};
     return Unexpected{rule_error(ErrorKind::kInvalidRule,
                                  std::string{"unknown scope name: "}.append(t))};
@@ -490,13 +474,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return {};
 }
 
-// feature parsing
-// Parse a leaf "feature: value [= description]" into a FeaturePtr
-// Mirrors capa's trim_dll_part: since capa v7 the api feature matches on the
-// bare symbol, so a single-dot native name like kernel32.CreateFileA is reduced
-// to CreateFileA. Ordinal imports (ws2_32.#1) and dotnet names (Class::Method)
-// keep their full form. This lets api rules match calls whose import resolves
-// through an API-Set dll (api-ms-win-...) rather than the classic dll
+// feature parsing. Parse a leaf "feature: value [= description]" into a FeaturePtr
 [[nodiscard]] std::string trim_dll_part(std::string_view api) {
     if (api.find(".#") != std::string_view::npos) { return std::string(api); }
     std::size_t dots = 0;
@@ -509,8 +487,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return std::string(api);
 }
 
-// key has already been split off the YAML mapping
-// value is the raw YAML scalar
+// key has already been split off the YAML mapping value is the raw YAML scalar
 // description, when non-empty, comes from inline "= ..." or a sibling description key
 [[nodiscard]] Expected<FeaturePtr>
 build_feature_leaf(std::string_view key,
@@ -693,20 +670,16 @@ split_count_call(std::string_view key) noexcept {
 [[nodiscard]] Expected<std::unique_ptr<Statement>>
 parse_statement_item(const yaml::Node& mapping, Scope scope);
 
-// True when the sequence item is a CAPA inline description label
-// CAPA rules sprinkle "- description: free text" entries inside operator children
-// to annotate intent
-// These have no match semantics and are stripped here so the engine does not
-// try to evaluate them as predicates
+// True when the sequence item is a CAPA inline description label. CAPA rules sprinkle
+// "- description: free text" entries inside operator children to annotate intent
 [[nodiscard]] bool is_inline_description_item(const yaml::Node& node) noexcept {
     if (node.kind() != yaml::NodeKind::kMapping) { return false; }
     const auto m = node.mapping();
     return !m.empty() && m.front().first == "description";
 }
 
-// Parse the value of an operator key (and/or/not/...) into an ordered child list
-// Inline description items are filtered because they label the surrounding
-// statement rather than contribute to its truth value
+// Parse the value of an operator key into an ordered child list. Inline description
+// items are filtered, since they label the statement rather than its truth value
 [[nodiscard]] Expected<std::vector<std::unique_ptr<Statement>>>
 parse_statement_children(const yaml::Node& seq_node, Scope scope) {
     if (seq_node.kind() != yaml::NodeKind::kSequence) {
@@ -798,9 +771,6 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
     }();
     if (subscope_kind.has_value()) {
         // Inner statements are evaluated at the subscope's scope, not the parent's
-        // A "basic block:" inside a function rule means the inner features must
-        // conform to basic-block scope rules, e.g. "loop" is a function-only
-        // characteristic and is rejected here
         auto kids = parse_statement_children(value, *subscope_kind);
         if (!kids) { return Unexpected{kids.error()}; }
         std::unique_ptr<Statement> inner;
@@ -860,10 +830,8 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
         return std::make_unique<Or>(std::move(kids));
     }
 
-    // count(basic blocks) or count(basic block) is a tag form CAPA rules use
-    // to set a numeric bound on the number of basic blocks in the function
-    // Internally we count occurrences of the BasicBlock tag feature, which
-    // PapaNativeStaticExtractor emits exactly once per basic block
+    // count(basic blocks) or count(basic block) is a tag form CAPA rules use to set a
+    // numeric bound on the number of basic blocks in the function
     if (key == "count(basic blocks)" || key == "count(basic block)") {
         if (value.kind() != yaml::NodeKind::kScalar) {
             return Unexpected{rule_error(ErrorKind::kInvalidRule,

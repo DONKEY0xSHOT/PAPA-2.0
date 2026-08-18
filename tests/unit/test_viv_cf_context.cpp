@@ -11,6 +11,7 @@
 
 #include "doctest.h"
 
+#include "papa/constants.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/viv/cf_context.h"
@@ -60,10 +61,8 @@ TEST_CASE("CodeFlowContext decodes a straight-line run once (decode-once gate)")
 
 TEST_CASE("CodeFlowContext explores both edges of a conditional branch and records the non-fall xref") {
     const Disassembler d(/*is_64bit=*/false);
-    // 0x1000: 74 03   jz 0x1005   (fall-through 0x1002, branch target 0x1005)
-    // 0x1002: c3      ret
-    // 0x1003: 90 90   padding
-    // 0x1005: c3      ret
+    // A conditional jump at 0x1000 with its fall-through at 0x1002, padding, and the
+    // branch target at 0x1005, both ending in a ret
     const auto bytes  = make_bytes(0x74, 0x03, 0xC3, 0x90, 0x90, 0xC3);
     const auto reader = pn::cfg::make_span_reader(bytes, 0x1000, d);
 
@@ -174,9 +173,8 @@ TEST_CASE("CodeFlowContext delays a function that tail-jumps into an in-analysis
 
     cf.add_entry_point(0x1000);
 
-    // 0x2000 tail-jumps into 0x1000, which is still being flowed, so 0x2000's
-    // registration is deferred until 0x1000 completes: 0x1000 is reported first,
-    // the reverse of the plain post-order [0x2000, 0x1000]
+    // 0x2000 tail-jumps into 0x1000, which is still being flowed, so its registration
+    // is deferred and 0x1000 is reported first
     REQUIRE(fn_order.size() == 2);
     CHECK(fn_order[0] == 0x1000);
     CHECK(fn_order[1] == 0x2000);
@@ -263,9 +261,8 @@ TEST_CASE("CodeFlowContext suppresses the fall-through after a call to a no-retu
 
 TEST_CASE("CodeFlowContext caps call-descent depth over a crafted deep chain") {
     const Disassembler d(/*is_64bit=*/false);
-    // A chain of 6-byte functions, each `call +1` then `ret`, so function i at
-    // base + i*6 calls function i+1. Longer than the descent cap, so a naive
-    // recursive descent would overflow the stack
+    // A chain of 6-byte functions, each `call +1` then `ret`, so function i at base +
+    // i*6 calls function i+1
     const std::size_t chain_len = pv::kMaxDescentDepth + 20;
     const std::size_t region_size = chain_len * 6;
     std::vector<std::byte> region(region_size, std::byte{0x00});
@@ -292,9 +289,8 @@ TEST_CASE("CodeFlowContext caps call-descent depth over a crafted deep chain") {
         },
         [&](std::uint64_t) { ++function_events; });
 
-    // The chain is longer than the cap, so descent stops cleanly at the cap
-    // without a stack overflow, registering exactly the reachable-within-cap
-    // functions rather than the whole chain
+    // The chain is longer than the cap, so descent stops cleanly without a stack
+    // overflow, registering only the functions reachable within the cap
     cf.add_entry_point(base);
     CHECK(function_events > 0);
     CHECK(function_events <= static_cast<int>(pv::kMaxDescentDepth));
@@ -368,4 +364,35 @@ TEST_CASE("CodeFlowContext does not descend into a call already on the active pa
     // descending forever. The entry is made exactly once
     cf.add_entry_point(0x1000);
     CHECK(function_events == 1);
+}
+
+TEST_CASE("the per-flow instruction cap stays above real corpus usage") {
+    // This cap bounds the memory one flow's instruction map holds, not the work it does.
+    // It must keep a wide margin over measured usage, so this guards the value
+    constexpr std::size_t kLargestMeasuredFlow = 36141;
+    CHECK(papa::constants::kMaxInsnsPerFunction > kLargestMeasuredFlow * 8U);
+}
+
+TEST_CASE("CodeFlowContext bounds the number of functions in one image") {
+    // Entry points come from sample-controlled pointers and relocations, so a
+    // crafted image can offer far more of them than it has real functions
+    const Disassembler d(/*is_64bit=*/false);
+    const std::size_t  over = papa::constants::kMaxFunctionsPerImage + 64U;
+    std::vector<std::byte> rets(over, std::byte{0xC3});
+    const auto reader = pn::cfg::make_span_reader(rets, 0x1000, d);
+
+    std::unordered_set<std::uint64_t> defined;
+    std::size_t                       functions = 0;
+    pv::CodeFlowContext cf(
+        reader, [](std::uint64_t) { return true; },
+        [&](std::uint64_t va) { return defined.count(va) != 0; },
+        [&](std::uint64_t va, const DecodedInsn&, std::span<const pv::CfBranch>) {
+            defined.insert(va);
+        },
+        [&](std::uint64_t) { ++functions; });
+
+    for (std::size_t i = 0; i < over; ++i) {
+        cf.add_entry_point(0x1000 + i);
+    }
+    CHECK(functions == papa::constants::kMaxFunctionsPerImage);
 }

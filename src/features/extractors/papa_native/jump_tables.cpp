@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <unordered_set>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -320,6 +321,8 @@ resolve_two_level_indexed_jump_table(std::span<const DecodedInsn> window,
     out.table_va   = off_va;
     out.table_size = 0;  // both tables sit in read-only data, never decoded as code
     std::vector<std::uint64_t> seen;
+    // Membership index beside the ordered list
+    std::unordered_set<std::uint64_t> seen_index;
     for (std::uint64_t v = 0; v < *count; ++v) {
         const auto idx = read_u8(map_va + v);
         if (!idx.has_value()) { break; }
@@ -327,11 +330,9 @@ resolve_two_level_indexed_jump_table(std::span<const DecodedInsn> window,
         if (!entry.has_value()) { break; }
         const std::uint64_t target = *base_va + static_cast<std::uint64_t>(*entry);
         if (target < range_lo || target >= range_hi) { continue; }
-        bool already = false;
-        for (const std::uint64_t t : seen) {
-            if (t == target) { already = true; break; }
-        }
+        const bool already = seen_index.count(target) != 0;
         if (!already) {
+            seen_index.insert(target);
             seen.push_back(target);
             out.targets.push_back(target);
         }
@@ -378,19 +379,15 @@ resolve_switch_jump_table(std::span<const DecodedInsn> window,
     }
     if (!found_add || base == ZYDIS_REGISTER_NONE) { return std::nullopt; }
 
-    // The base register's value comes from the live emulator (getOperValue), so a
-    // path-sensitive base a static lea scan cannot follow resolves. The offset
-    // table is image-base-relative, so vivisect requires the base to be the image
-    // base (getSwitchBase: regbase must equal imgbase)
+    // The base register's value comes from the live emulator (getOperValue), so a path-
+    // sensitive base a static lea scan cannot follow resolves
     const auto base_val = env.base_reg_value(base);
     if (!base_val.has_value() || *base_val != env.image_base) {
         return std::nullopt;
     }
 
-    // findOp 'mov' reg: the SIB load of the offset-table entry into the jump
-    // register (mov tgt, [base + index*4 + disp]). This is the 32-bit
-    // image-base-relative offset table, so the index scale and the entry width
-    // are both 4, matching read_entry
+    // findOp 'mov' reg: the SIB load of the offset-table entry into the jump register
+    // (mov tgt, [base + index*4 + disp])
     std::int64_t  table_disp = 0;
     bool          found_load = false;
     for (std::size_t i = add_pos; i-- > 0;) {
@@ -410,14 +407,15 @@ resolve_switch_jump_table(std::span<const DecodedInsn> window,
     if (!found_load) { return std::nullopt; }
     constexpr std::uint64_t kEntryWidth = 4;
 
-    // makeJumpTable / iterJumpTable: walk the offset table sequentially, rebasing
-    // each image-base-relative entry, while the target is probable code. Distinct
-    // targets are the case bodies (makeJumpTable dedups via tabdone)
+    // makeJumpTable / iterJumpTable: walk the offset table sequentially, rebasing each
+    // image-base-relative entry, while the target is probable code
     const std::uint64_t table_va = env.image_base +
                                    static_cast<std::uint64_t>(table_disp);
     JumpTableTargets out;
     out.table_va = table_va;
     std::vector<std::uint64_t> seen;
+    // Membership index beside the ordered list
+    std::unordered_set<std::uint64_t> seen_index;
     std::uint64_t entries = 0;
     for (; entries < kMaxJumpTableEntries; ++entries) {
         const auto raw = env.read_entry(table_va + entries * kEntryWidth);
@@ -425,11 +423,9 @@ resolve_switch_jump_table(std::span<const DecodedInsn> window,
         std::uint64_t rdest = *raw;
         if (rdest < env.image_base) { rdest += env.image_base; }
         if (!env.is_probably_code(rdest)) { break; }
-        bool already = false;
-        for (const std::uint64_t t : seen) {
-            if (t == rdest) { already = true; break; }
-        }
+        const bool already = seen_index.count(rdest) != 0;
         if (!already) {
+            seen_index.insert(rdest);
             seen.push_back(rdest);
             out.targets.push_back(rdest);
         }
@@ -446,9 +442,7 @@ std::optional<JumpTableTargets> resolve_memory_indirect_jump_table(
         return std::nullopt;
     }
     const DecodedOperand& op = jmp_insn.operands[0];
-    // Only the constant-base indexed form: jmp [index*scale + table]. A base
-    // register makes the table address runtime-dependent, and without an index
-    // there is no table to walk
+    // Only the constant-base indexed form: jmp [index*scale + table]
     if (op.kind != OperandKind::kSib) { return std::nullopt; }
     if (op.base_reg != ZYDIS_REGISTER_NONE) { return std::nullopt; }
     if (op.index_reg == ZYDIS_REGISTER_NONE) { return std::nullopt; }

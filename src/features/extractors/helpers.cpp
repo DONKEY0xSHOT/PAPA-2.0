@@ -130,39 +130,31 @@ carve_pe_files(std::span<const std::byte> buf) {
         return out;
     }
 
-    constexpr std::size_t kKeyCount = 256;
-    for (std::size_t key_value = 0; key_value < kKeyCount; ++key_value) {
-        const auto key = static_cast<std::uint8_t>(key_value);
-        const std::uint8_t needle_lo = kAsciiM ^ key;
-        const std::uint8_t needle_hi = kAsciiZ ^ key;
+    // One pass, not one per key
+    for (std::uint64_t pos = 0; pos + kPeBigramSize <= buf.size(); ++pos) {
+        const auto key = static_cast<std::uint8_t>(
+            static_cast<std::uint8_t>(buf[pos]) ^ kAsciiM);
+        if (static_cast<std::uint8_t>(buf[pos + 1U]) != (kAsciiZ ^ key)) { continue; }
 
-        for (std::uint64_t pos = 0;
-             pos + kPeBigramSize <= buf.size(); ++pos) {
-            if (static_cast<std::uint8_t>(buf[pos])     != needle_lo) { continue; }
-            if (static_cast<std::uint8_t>(buf[pos + 1U]) != needle_hi) { continue; }
+        const std::uint64_t lfanew_off = pos + ::papa::constants::kImageDosEofLfanewOffset;
+        if (lfanew_off + kPeLfanewSize > buf.size()) { continue; }
 
-            const std::uint64_t lfanew_off = pos + ::papa::constants::kImageDosEofLfanewOffset;
-            if (lfanew_off + kPeLfanewSize > buf.size()) { continue; }
+        const std::uint32_t lfanew_raw = read_le_u32(buf, lfanew_off);
+        const std::uint32_t lfanew     = xor_u32_key8(lfanew_raw, key);
 
-            const std::uint32_t lfanew_raw = read_le_u32(buf, lfanew_off);
-            const std::uint32_t lfanew     = xor_u32_key8(lfanew_raw, key);
+        const std::uint64_t sig_off = pos + lfanew;
+        if (sig_off + kPeSigSize > buf.size()) { continue; }
 
-            const std::uint64_t sig_off = pos + lfanew;
-            if (sig_off + kPeSigSize > buf.size()) { continue; }
+        const std::uint32_t sig_raw = read_le_u32(buf, sig_off);
+        const std::uint32_t sig     = xor_u32_key8(sig_raw, key);
 
-            const std::uint32_t sig_raw = read_le_u32(buf, sig_off);
-            const std::uint32_t sig     = xor_u32_key8(sig_raw, key);
-
-            if (sig == ::papa::constants::kImageNtSignature) {
-                out.push_back(pos);
-            }
+        if (sig == ::papa::constants::kImageNtSignature) {
+            out.push_back(pos);
         }
     }
 
-    // Multiple keys may report the same position when the byte values coincide
-    // Sort and de-duplicate to keep callers' assumptions about ordering simple
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
+    // Positions are produced in ascending order and at most once each, so the
+    // sort and de-duplicate the per-key sweep needed are no longer required
     return out;
 }
 

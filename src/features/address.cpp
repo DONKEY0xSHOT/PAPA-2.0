@@ -54,8 +54,6 @@ std::uint64_t linearize(const Address& a) noexcept {
                 payload = 0;
             } else if constexpr (std::is_same_v<T, DnTokenOffsetAddress>) {
                 // Token and offset are independent spaces
-                // Combine them via the golden-ratio multiplier so near-zero
-                // offsets do not collapse into identical payloads
                 payload = v.token ^ (v.offset * util::hashing::kGoldenRatio64);
             } else if constexpr (std::is_same_v<T, DnTokenAddress>) {
                 payload = v.token;

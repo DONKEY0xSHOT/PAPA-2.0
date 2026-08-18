@@ -19,10 +19,8 @@ struct CodeBlock {
     std::uint64_t function_va{0};
 };
 
-/// The two block stores vivisect keeps (base.py _handleADDCODEBLOCK): a
-/// multi-owner per-function list (getFunctionBlocks, which capa reads, where one
-/// block may belong to several functions) and a single-owner last-writer map
-/// keyed by block start (getCodeBlock)
+/// The two block stores vivisect keeps, a multi-owner per-function list that capa
+/// reads and a single-owner last-writer map keyed by block start
 class CodeBlockStore {
 public:
     /// Record a block, appending it to its function's list and making it the
@@ -44,29 +42,15 @@ private:
     std::unordered_map<std::uint64_t, CodeBlock>              by_start_;
 };
 
-/// Predicate: true when the instruction at va does not fall through, the envi
-/// IF_NOFALL signal, including a no-return call the noret pass marked. Supplied
-/// by the driver so codeblocks stays a pure reader of analysis state
+/// Predicate: true when the instruction at va does not fall through, the envi.
+/// IF_NOFALL signal, including a no-return call the noret pass marked
 using NoFallPredicate = std::function<bool(std::uint64_t va)>;
 
 /// Predicate: true when the bytes at va decode to a valid instruction, the
-/// vw.parseOpcode(va) call codeblocks makes for every instruction. It is
-/// re-derived from the raw bytes at the walk address, so an address whose
-/// containing location says LOC_OP can still fail to parse when a later,
-/// overlapping decode left the byte map inconsistent (a FLIRT-created
-/// sub-function whose fresh decode overlaps its enclosing function). On failure
-/// vivisect breaks the walk without recording the block, so the enclosing
-/// function ends with no blocks. Supplied by the driver over its instruction
-/// reader
+/// vw.parseOpcode(va) call codeblocks makes for every instruction
 using ParsePredicate = std::function<bool(std::uint64_t va)>;
 
-/// Port of vivisect's generic codeblocks analyzeFunction. Walks the function's
-/// flow over the global location and cross-reference state, ending a block at a
-/// branch, a join, a no-fall instruction, or an undefined address, and registers
-/// the resulting blocks in store. A bad-opcode reparse breaks the walk without
-/// recording the block, reproducing vivisect's graph-build failure on an
-/// overlapping decode. It reads the shared state and never mutates it, so it can
-/// run interleaved at function make-time
+/// Port of vivisect's generic codeblocks analyzeFunction
 void analyze_function(const LocationDb& locations, const XrefDb& xrefs,
                       const NoFallPredicate& is_no_fall,
                       const ParsePredicate& can_parse,

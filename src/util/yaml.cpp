@@ -79,9 +79,8 @@ struct Pos {
     std::size_t column { 1 };
 };
 
-// One physical line, pre-stripped of trailing CR
-// indent is the column of the first non-space byte
-// payload is the substring from indent to end excluding trailing CR
+// One physical line, pre-stripped of trailing CR indent is the column of the first non-
+// space byte payload is the substring from indent to end excluding trailing CR
 struct Line {
     std::size_t       line_no { 0 };
     std::size_t       indent  { 0 };
@@ -322,6 +321,21 @@ struct Line {
     return c == '&' || c == '*' || c == '!' || c == '[' || c == '{';
 }
 
+// Restores the nesting depth on every exit path, of which parse_value has many
+class DepthGuard {
+public:
+    explicit DepthGuard(std::size_t& depth) noexcept : depth_(depth) { ++depth_; }
+    ~DepthGuard() { --depth_; }
+
+    DepthGuard(const DepthGuard&)            = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&)                 = delete;
+    DepthGuard& operator=(DepthGuard&&)      = delete;
+
+private:
+    std::size_t& depth_;
+};
+
 class Parser {
 public:
     Parser(std::span<const Line> lines) noexcept : lines_(lines) {}
@@ -354,12 +368,6 @@ private:
     [[nodiscard]] Expected<Node> parse_inline_scalar(
         std::string_view body, std::size_t line, std::size_t column);
 
-    // Plain (unquoted) scalar continuation across multiple lines
-    // CAPA rules use this for descriptions and free-text fields
-    [[nodiscard]] Expected<Node> parse_plain_continuation(
-        std::string first_line, std::size_t key_indent,
-        std::size_t line, std::size_t column);
-
     // Block scalar starting with | or >
     [[nodiscard]] Expected<Node> parse_block_scalar(
         char style, std::size_t indent,
@@ -372,6 +380,7 @@ private:
 
     std::span<const Line> lines_;
     std::size_t           cursor_ { 0 };
+    std::size_t           depth_  { 0 };
 };
 
 std::optional<std::pair<std::string_view, std::string_view>>
@@ -422,8 +431,6 @@ Expected<Node> Parser::parse_inline_scalar(
 
     // For quoted scalars, find the actual closing quote first so trailing inline
     // comments do not look like an unterminated string
-    // The interior of a double-quoted string may contain escaped quotes (\")
-    // which must not count as terminators
     if (trimmed.front() == '"') {
         std::size_t end = std::string_view::npos;
         for (std::size_t i = 1; i < trimmed.size(); ++i) {
@@ -467,14 +474,8 @@ Expected<Node> Parser::parse_inline_scalar(
 Expected<Node> Parser::parse_block_scalar(
     char style, std::size_t indent,
     std::size_t line, std::size_t column) {
-    // The | and > headers may carry a chomp indicator
-    // We accept the six combinations |, |-, |+, >, >-, >+ with this policy:
-    //   |   keep newlines, strip trailing blank lines down to one
-    //   |-  keep newlines, strip all trailing newlines
-    //   |+  keep newlines, keep all trailing newlines
-    //   >   fold to spaces, single trailing newline
-    //   >-  fold to spaces, no trailing newline
-    //   >+  fold to spaces, keep all trailing newlines
+    // The | and > headers may carry a chomp indicator. All six combinations are
+    // accepted, with | keeping newlines and > folding them to spaces
     char chomp = '\0';
     if (cursor_ > 0) {
         std::string_view header = lines_[cursor_ - 1].payload;
@@ -506,27 +507,9 @@ Expected<Node> Parser::parse_block_scalar(
         if (ln.indent < block_indent) {
             break;
         }
-        // Strip exactly block_indent leading spaces
-        std::size_t strip = std::min(block_indent, ln.indent);
-        std::string_view payload = ln.payload;
-        // payload was already advanced past leading spaces
-        // Reconstruct the relative indent so block-scalar handling stays consistent
-        std::size_t rel = ln.indent - strip;
-        std::string_view rel_view;
-        if (rel == 0) {
-            rel_view = payload;
-        } else {
-            // We do not have direct access to the leading spaces here
-            // Re-emit them via a temporary string view backed by static padding
-            // Simpler: build a leading-space string and concat
-            // Push raw payload prefixed with rel spaces by using a dedicated buffer
-            // Use a local buffer per line
-            // To keep the code simple we ignore relative indent within the block
-            // Block indent is the minimum used (relative indent is ignored)
-            // This matches CAPA rule usage where every line shares the same indent
-            rel_view = payload;
-        }
-        raw_lines.push_back(rel_view);
+        // Relative indent within the block is ignored, which matches CAPA rule usage
+        // where every line of a block scalar shares the same indent
+        raw_lines.push_back(ln.payload);
         ++cursor_;
     }
 
@@ -541,10 +524,10 @@ Expected<Node> Parser::parse_block_scalar(
         for (std::size_t i = 0; i < raw_lines.size(); ++i) {
             const bool is_blank = raw_lines[i].empty();
             if (is_blank) {
+                // A pending fold space becomes the newline, otherwise the
+                // newline is appended
                 if (!out.empty() && out.back() == ' ') {
                     out.back() = '\n';
-                } else if (!out.empty() && out.back() != '\n') {
-                    out.push_back('\n');
                 } else {
                     out.push_back('\n');
                 }
@@ -574,46 +557,21 @@ Expected<Node> Parser::parse_block_scalar(
     return Node{std::move(out), line, column};
 }
 
-Expected<Node> Parser::parse_plain_continuation(
-    std::string first_line, std::size_t key_indent,
-    std::size_t line, std::size_t column) {
-    // Continuation lines must be indented strictly past key_indent
-    std::string acc = std::move(first_line);
-    while (!at_end()) {
-        const Line& ln = peek();
-        if (ln.is_blank) {
-            ++cursor_;
-            continue;
-        }
-        if (ln.is_comment) {
-            ++cursor_;
-            continue;
-        }
-        if (ln.indent <= key_indent) {
-            break;
-        }
-        // A continuation line cannot start a new mapping or sequence
-        if (!ln.payload.empty() && (ln.payload.front() == '-' || split_key(ln.payload).has_value())) {
-            break;
-        }
-        if (!acc.empty()) {
-            acc.push_back(' ');
-        }
-        acc.append(strip_inline_comment(ln.payload));
-        ++cursor_;
-    }
-    return Node{std::move(acc), line, column};
-}
-
 Expected<Node> Parser::parse_value(std::size_t indent) {
+    // Nesting recurses through here, so one bound covers the whole cycle
+    if (depth_ >= kMaxNestingDepth) {
+        const std::size_t line_no = at_end() ? 0U : peek().line_no;
+        return Unexpected{yaml_err(line_no, 1U, "nesting is too deep")};
+    }
+    const DepthGuard guard(depth_);
+
     skip_blank_and_comment();
     if (at_end()) {
         return Node{};
     }
     const Line& ln = peek();
-    // YAML allows a block sequence value to share its parent key's column
-    // i.e. a "- " line dedented by one space relative to other value content
-    // CAPA rules use this layout extensively in their feature trees
+    // YAML allows a block sequence value to share its parent key's column i.e. a "- "
+    // line dedented by one space relative to other value content
     if (!ln.payload.empty() && ln.payload.front() == '-' &&
         (ln.payload.size() == 1 || ln.payload[1] == ' ') &&
         ln.indent + 1 >= indent) {
@@ -814,8 +772,6 @@ Expected<Node> Parser::parse_mapping(std::size_t indent) {
         ++cursor_;
         Node value;
         // Treat comment-only inline values the same as an empty value
-        // CAPA rules use "or: # explanation" patterns where the real value is
-        // a block sequence on the following lines
         const bool inline_value_is_comment_only =
             !vraw.empty() && (vraw.front() == '#' ||
                               strip_inline_comment(rtrim(vraw)).empty());

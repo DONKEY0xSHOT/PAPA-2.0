@@ -17,9 +17,8 @@
 
 namespace papa::features::extractors::papa_native::viv {
 
-/// Maximum nested call descent. A DoS bound on the native recursion of
-/// add_entry_point over a crafted deep call chain (CLAUDE.md 7.7). Real call
-/// chains are far shallower, so this never triggers on a real image
+/// Maximum nested call descent. A DoS bound on the native recursion of add_entry_point
+/// over a crafted deep call chain (CLAUDE.md 7.7)
 inline constexpr std::size_t kMaxDescentDepth = 512;
 
 /// A control-flow edge in vivisect's envi getBranches model: an optional target
@@ -29,11 +28,7 @@ struct CfBranch {
     std::uint16_t                flags{0};
 };
 
-/// A faithful port of vivisect's envi/codeflow.py CodeFlowContext. It decodes
-/// from a function entry, descends into a called function to completion before
-/// the caller's own fall-through, decodes each address at most once, and reports
-/// each opcode and each completed function through callbacks so the driver can
-/// define locations, record xrefs, and run the per-function analysis fmods
+/// A faithful port of vivisect's envi/codeflow.py CodeFlowContext
 class CodeFlowContext {
 public:
     /// True when an address already holds a code location, the decode-once gate
@@ -45,14 +40,11 @@ public:
                            std::span<const CfBranch> branches)>;
     /// Called once a function's code flow is complete, to run its fmods
     using OnFunction = std::function<void(std::uint64_t va)>;
-    /// True when a call instruction does not return, so the fall-through after it
-    /// is suppressed. Given the call opcode (not just its target) so an import
-    /// call can be resolved through its thunk. Queried after the callee has been
-    /// analyzed, so a call to a proven-no-return function is recognized too
+    /// True when a call instruction does not return, so the fall-through after it is
+    /// suppressed
     using NoReturnCall = std::function<bool(const DecodedInsn& call_op)>;
-    /// Called for each resolved jump-table case, from the indirect jump to the
-    /// case target, so the driver can record the code cross-reference codeblocks
-    /// splits on. Ports vivisect's _cb_branchtable
+    /// Called for each resolved jump-table case so the driver can record the code
+    /// cross-reference codeblocks splits on. Ports vivisect's _cb_branchtable
     using OnBranchTable =
         std::function<void(std::uint64_t from_va, std::uint64_t case_va)>;
 
@@ -63,17 +55,15 @@ public:
                     OnBranchTable on_branch_table = {});
 
     /// Make va a function (guarding duplicates), flow its code, then fire the
-    /// on_function callback unless it is being held by the deferral machinery.
-    /// Ports addEntryPoint
+    /// on_function callback unless it is being held by the deferral machinery
     void add_entry_point(std::uint64_t va);
 
     /// Decode and follow control flow from va. Ports addCodeFlow
     void add_code_flow(std::uint64_t va);
 
 private:
-    // Report va as a completed function and release any function whose only
-    // remaining reason to wait was va. Ports the _cb_function firing plus the
-    // _cf_delaying release in addEntryPoint
+    // Report va as a completed function and release any function whose only remaining
+    // reason to wait was va
     void report_function(std::uint64_t va);
 
     // True when va is a function currently being flowed, so a branch to it must
@@ -94,9 +84,8 @@ private:
     std::unordered_set<std::uint64_t>  functions_;  // addEntryPoint dedup guard
     std::unordered_set<std::uint64_t>  reported_;   // on_function has fired
     std::vector<std::uint64_t>         cf_blocks_;  // active call path
-    // A function that jumped into an in-analysis ancestor waits (as a key) on the
-    // set of ancestors it jumped into. The inverse index maps each ancestor to
-    // the functions waiting on it. Ports _cf_delayed and _cf_delaying
+    // A function that jumped into an in-analysis ancestor waits on the set of ancestors
+    // it jumped into, with an inverse index. Ports _cf_delayed and _cf_delaying
     std::unordered_map<std::uint64_t, std::unordered_set<std::uint64_t>> waits_on_;
     std::unordered_map<std::uint64_t, std::unordered_set<std::uint64_t>> awaited_by_;
     std::unordered_set<std::uint64_t> report_held_;  // report stashed until a wait clears

@@ -87,11 +87,7 @@ bool is_noreturn_api(std::string_view libname, std::string_view impname) {
 }
 
 bool function_is_noreturn(const Function& fn, const NoReturnOracle& is_noreturn) {
-    // A function with no blocks is not no-return. vivisect's noret.py calls
-    // buildFunctionGraph first, which throws for a function whose graph cannot be
-    // built (a zero-block function, as a FLIRT overlap can leave the enclosing
-    // function), and the exception path returns without addNoReturnVa. Without
-    // this guard the empty leaf scan below vacuously reports no-return
+    // A function with no blocks is not no-return
     if (fn.basic_blocks.empty()) {
         return false;
     }

@@ -30,10 +30,8 @@ struct TaintInfo {
     std::uint64_t info{0};
 };
 
-// Allocates sentinel "taint" values and recovers their meaning. Faithful to
-// impemu/emulator.py: values come from count(0x4156000F, 0x2000) offset by
-// 0x1000 and are keyed by value & taintmask, so near-taint lookups resolve.
-// The reserved band is chosen so taints read as non-pointers in a normal image
+// Allocates sentinel taint values and recovers their meaning, faithful to
+// impemu/emulator.py. The reserved band makes taints read as non-pointers
 class TaintRegistry {
 public:
     // Allocate a new taint of the given kind and return its sentinel value

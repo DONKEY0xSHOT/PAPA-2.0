@@ -36,9 +36,8 @@ const pn::NoReturnOracle kAllCallsNoReturn =
 
 }  // namespace
 
-// norm_file_name is a faithful port of vivisect's normFileName: basename,
-// lowercase, strip the final extension (joining any earlier dotted parts with
-// '_'), then replace every character outside [a-z0-9_] with '_'
+// norm_file_name is a faithful port of vivisect's normFileName, forming the library
+// half of an import's identity
 TEST_CASE("norm_file_name lowercases and strips the extension") {
     CHECK(pn::norm_file_name("kernel32.dll") == "kernel32");
     CHECK(pn::norm_file_name("KERNEL32.DLL") == "kernel32");
@@ -93,15 +92,11 @@ TEST_CASE("is_noreturn_api rejects ordinary and near-miss APIs") {
     CHECK_FALSE(pn::is_noreturn_api("kernel32.dll", "exit"));
 }
 
-// function_is_noreturn ports vivisect noret.py analyzeFunction's leaf scan: a
-// function does not return when none of its terminal blocks ends in a ret or a
-// dynamic branch, where a leaf ending in a no-return call does not count
+// function_is_noreturn ports vivisect's leaf scan, where a function does not return
+// when none of its terminal blocks ends in a ret or a dynamic branch
 TEST_CASE("function_is_noreturn: a function with no blocks is not no-return") {
-    // vivisect noret.py bails when buildFunctionGraph throws (an empty or
-    // graph-build-failed function), returning without addNoReturnVa. A FLIRT
-    // overlap can leave an enclosing function with zero blocks, and it must not
-    // be treated as no-return, or a caller's fall-through after the call would be
-    // wrongly suppressed
+    // vivisect noret.py bails when buildFunctionGraph throws (an empty or graph-build-
+    // failed function), returning without addNoReturnVa
     pn::Function fn;
     fn.va = 0x1000;  // no basic blocks
     CHECK_FALSE(pn::function_is_noreturn(fn, kAllCallsNoReturn));
@@ -165,9 +160,8 @@ TEST_CASE("function_is_noreturn: every leaf a no-return call makes it no-return"
 
 TEST_CASE("function_is_noreturn: an ordinary (returning) call leaf does not "
           "by itself prove no-return but yields no ret either") {
-    // A leaf ending in a call the oracle does not flag contributes no ret and
-    // no branch, mirroring noret.py where a bare call is neither IF_RET nor
-    // IF_BRANCH. With no returning leaf anywhere, the function is no-return
+    // A leaf ending in a call the oracle does not flag contributes no ret and no
+    // branch, mirroring noret.py where a bare call is neither IF_RET nor. IF_BRANCH
     pn::Function fn;
     fn.va = 0x6000;
     pn::NoReturnOracle never = [](const pn::DecodedInsn&) { return false; };

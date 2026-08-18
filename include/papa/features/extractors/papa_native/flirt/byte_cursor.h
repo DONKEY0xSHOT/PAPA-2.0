@@ -7,11 +7,8 @@
 
 namespace papa::features::extractors::papa_native::flirt::detail {
 
-/// Bounds-checked forward cursor over a borrowed byte buffer.
-///
-/// Every read validates remaining length first and advances the position
-/// only on success. Reads return false and leave both the out parameter
-/// and the position untouched when the buffer is too short
+/// Bounds-checked forward cursor over a borrowed byte buffer. Every read validates
+/// remaining length first and advances the position only on success
 class ByteCursor {
 public:
     /// Construct a cursor positioned at the start of `buf`
@@ -61,10 +58,7 @@ public:
         return true;
     }
 
-    /// Read a FLAIR variable-length integer in the 0..0x7FFF range.
-    ///
-    /// One byte when the high bit is clear, otherwise two bytes with the
-    /// low 7 bits of the lead byte forming the high byte of the result
+    /// Read a FLAIR variable-length integer in the 0..0x7FFF range
     [[nodiscard]] bool read_vle16(std::uint16_t& out) noexcept {
         if (!remaining(1)) {
             return false;
@@ -85,10 +79,8 @@ public:
         return true;
     }
 
-    /// Read a FLAIR variable-length integer of up to 32 bits.
-    ///
-    /// The top bits of the lead byte select a 1, 2, 4, or 5 byte encoding.
-    /// The 5-byte form carries a full big-endian u32 in the trailing bytes
+    /// Read a FLAIR variable-length integer of up to 32 bits. The top bits of the lead
+    /// byte select a 1, 2, 4, or 5 byte encoding
     [[nodiscard]] bool read_vle32(std::uint32_t& out) noexcept {
         if (!remaining(1)) {
             return false;
