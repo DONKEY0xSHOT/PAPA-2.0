@@ -35,6 +35,25 @@ find_file_capabilities(
     const std::vector<::papa::features::extractors::FeatureWithAddress>*
         cached_file_features = nullptr);
 
+// The file-scope rules that can decide whether a static-limitation rule
+// matches: the limitation rules themselves plus everything they reach through
+// match:, in topological order. Exposed for testing
+[[nodiscard]] std::vector<const ::papa::rules::Rule*>
+limitation_gate_rules(const ::papa::rules::RuleSet& rules);
+
+// Run only the limitation gate rather than the whole file-scope corpus.
+//
+// The caller discards the full file-scope result unless a limitation fires, so
+// evaluating all of it is wasted work. This evaluates the closure instead,
+// which answers has_static_limitation identically. A caller that does see a
+// limitation should re-run find_file_capabilities to build its report
+[[nodiscard]] Expected<FileCapabilities>
+find_limitation_capabilities(
+    const ::papa::rules::RuleSet&                                     rules,
+    const ::papa::features::extractors::StaticFeatureExtractor&       extractor,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>*
+        cached_file_features = nullptr);
+
 // True when any rule under namespace "internal/limitation/static" matched
 // CAPA shortcut: when this returns true the caller drops to a pefile-only
 // rendering path because deeper analysis would be misleading

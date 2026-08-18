@@ -217,21 +217,29 @@ int run(const Args& args) {
     PhaseLog timing{args.timing};
 
     auto mark = SteadyClock::now();
-    const auto sample_buf_opt = read_entire_file(args.sample_path);
+    auto sample_buf_opt = read_entire_file(args.sample_path);
     if (!sample_buf_opt.has_value()) {
         std::cerr << "error: cannot read sample: " << args.sample_path << '\n';
         return kExitMissingFile;
     }
-    const auto& sample_buf = *sample_buf_opt;
+    if (sample_buf_opt->size() > constants::kMaxSampleBytes) {
+        std::cerr << "error: sample is too large to analyze: "
+                  << sample_buf_opt->size() << " bytes\n";
+        return kExitInvalidFileType;
+    }
     timing.record("read sample", mark);
 
     mark = SteadyClock::now();
-    auto image = pe::PeParser::parse_file(args.sample_path);
+    // The buffer moves into the image rather than the parser reading the file a
+    // second time. Two copies of the sample used to be live at once, which on a
+    // large file is the largest allocation the process makes
+    auto image = pe::PeParser::parse(std::move(*sample_buf_opt));
     if (!image) {
         std::cerr << "error: not a parseable PE file: "
                   << image.error().detail << '\n';
         return kExitInvalidFileType;
     }
+    const std::span<const std::byte> sample_buf = image->raw_buffer();
     timing.record("parse PE", mark);
 
     if (!std::filesystem::exists(args.rules_dir)) {
@@ -262,16 +270,27 @@ int run(const Args& args) {
 
     // First-pass file-only check for static-limitation rules
     {
+        // Only the limitation gate runs here. Its verdict is the single thing
+        // this pass decides, and the full file-scope result would be discarded
         mark = SteadyClock::now();
-        auto file_caps =
-            capabilities::find_file_capabilities(*ruleset, pe_only, &file_features);
-        if (!file_caps) {
+        auto gate_caps =
+            capabilities::find_limitation_capabilities(*ruleset, pe_only, &file_features);
+        if (!gate_caps) {
             std::cerr << "error: file-scope match failed: "
-                      << file_caps.error().detail << '\n';
+                      << gate_caps.error().detail << '\n';
             return kExitUnexpectedFailure;
         }
         timing.record("file pre-pass", mark);
-        if (capabilities::has_static_limitation(*ruleset, *file_caps)) {
+        if (capabilities::has_static_limitation(*ruleset, *gate_caps)) {
+            // The report needs every file-scope match, not just the gate, so
+            // pay for the full pass on the rare path that actually renders one
+            auto file_caps =
+                capabilities::find_file_capabilities(*ruleset, pe_only, &file_features);
+            if (!file_caps) {
+                std::cerr << "error: file-scope match failed: "
+                          << file_caps.error().detail << '\n';
+                return kExitUnexpectedFailure;
+            }
             if (!args.quiet) {
                 std::cerr << "static-only limitation rule matched; "
                           << "consider dynamic analysis\n";
