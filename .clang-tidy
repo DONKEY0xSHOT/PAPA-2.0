@@ -30,7 +30,7 @@ Checks: >
   -readability-named-parameter
 
 WarningsAsErrors: ''
-HeaderFilterRegex: '.*papa/.*\\.h$'
+HeaderFilterRegex: '.*papa/.*\.h$'
 FormatStyle: file
 
 CheckOptions:
