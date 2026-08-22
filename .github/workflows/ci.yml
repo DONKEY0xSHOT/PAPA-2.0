@@ -1,13 +1,15 @@
 name: CI
 
-# Check the coding standards, build and test on the supported platform, and
-# publish a release when a push to main changed the code itself
+# One gate in four stages, each depending on the one before it: coding
+# standards, clang-tidy, ASan, then the release build, test and publish
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "23 5 * * 2"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,9 +31,83 @@ jobs:
       - name: Check coding standards
         run: python3 tools/check_standards.py
 
+  clang-tidy:
+    name: clang-tidy
+    needs: standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-tidy and ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang clang-tidy ninja-build
+
+      # A configure is enough to produce compile_commands.json, which is all
+      # clang-tidy needs. The checks themselves live in .clang-tidy
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      # Only papa's own sources and headers. third_party and the system headers
+      # are not ours to fix, and without the filter they bury the real findings
+      - name: Run clang-tidy
+        run: |
+          files=$(git ls-files 'src/**/*.cpp' 'tools/**/*.cpp')
+          echo "$files" | tr ' ' '\n'
+          clang-tidy -p build-tidy \
+            --header-filter='.*/(include/papa|src)/.*' \
+            --warnings-as-errors='*' \
+            $files
+
+  asan:
+    name: ASan (Windows, MSVC)
+    needs: clang-tidy
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Debug, because the sanitizer flags are gated on that configuration. The
+      # static CRT is the pairing whose ASan thunk the toolset actually ships
+      - name: Configure
+        run: >
+          cmake -S . -B build-asan -G "Visual Studio 17 2022" -A x64
+          -DPAPA_ENABLE_SANITIZERS=ON
+          -DPAPA_STATIC_RUNTIME=ON
+
+      - name: Build (Debug)
+        run: cmake --build build-asan --config Debug --parallel
+
+      # The instrumented binary loads the ASan runtime DLL at startup, and it is
+      # not on PATH by default, so without this the tests exit before they run
+      - name: Put the ASan runtime on PATH
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $dir = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory |
+                 Sort-Object Name -Descending |
+                 ForEach-Object { Join-Path $_.FullName 'bin\Hostx64\x64' } |
+                 Where-Object { Test-Path (Join-Path $_ 'clang_rt.asan_dynamic-x86_64.dll') } |
+                 Select-Object -First 1
+          if (-not $dir) { throw "ASan runtime DLL not found under $vs" }
+          Write-Host "ASan runtime: $dir"
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+
+      # abort_on_error turns a report into a crash, so the step cannot pass while
+      # printing one. Leak detection is not available in the MSVC runtime
+      - name: Unit tests under ASan
+        env:
+          ASAN_OPTIONS: abort_on_error=1
+        run: ./build-asan/tests/unit/Debug/papa_unit_tests.exe
+
   build-and-test:
     name: Build and test (Windows, Release)
-    needs: standards
+    needs: asan
     runs-on: windows-2022
     steps:
       - name: Checkout
