@@ -18,7 +18,7 @@
 namespace papa::features::extractors::papa_native::viv {
 
 /// Maximum nested call descent. A DoS bound on the native recursion of add_entry_point
-/// over a crafted deep call chain (CLAUDE.md 7.7)
+/// over a crafted deep call chain
 inline constexpr std::size_t kMaxDescentDepth = 512;
 
 /// A control-flow edge in vivisect's envi getBranches model: an optional target

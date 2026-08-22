@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the source tree against the project's coding standards (CLAUDE.md 7.4).
+"""Check the source tree against the project's coding standards.
 
 Run it from the project root with no arguments. Exits non-zero and prints every
 violation with its file and line, so CI failures point straight at the fix.
@@ -18,7 +18,8 @@ SOURCE_DIRS = ("src", "include", "tools", "tests")
 SOURCE_SUFFIXES = (".cpp", ".h")
 
 # Build and CI files, checked for comment length the same way the sources are
-BUILD_PATTERNS = ("*.yml", "*.yaml", "*.cmake", "CMakeLists.txt", "*.py")
+BUILD_PATTERNS = ("*.yml", "*.yaml", "*.cmake", "CMakeLists.txt", "*.py",
+                  ".clang-tidy", ".clang-format")
 
 # Abbreviations that legitimately end a sentence with a period
 ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "..")
