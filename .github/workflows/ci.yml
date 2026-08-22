@@ -52,16 +52,13 @@ jobs:
           CXX: clang++
         run: cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
-      # Only papa's own sources and headers. third_party and the system headers
-      # are not ours to fix, and without the filter they bury the real findings
+      # No flags here on purpose. The check set, the header filter and which
+      # findings are fatal all live in .clang-tidy, so a local run matches CI
       - name: Run clang-tidy
         run: |
           files=$(git ls-files 'src/**/*.cpp' 'tools/**/*.cpp')
           echo "$files" | tr ' ' '\n'
-          clang-tidy -p build-tidy \
-            --header-filter='.*/(include/papa|src)/.*' \
-            --warnings-as-errors='*' \
-            $files
+          clang-tidy -p build-tidy $files
 
   asan:
     name: ASan (Windows, MSVC)
