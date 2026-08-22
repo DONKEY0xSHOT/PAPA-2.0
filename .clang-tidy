@@ -33,7 +33,6 @@ Checks: >
 # The style families above stay enabled for reporting
 WarningsAsErrors: 'clang-analyzer-*,-clang-analyzer-core.uninitialized.Assign'
 HeaderFilterRegex: '.*papa/.*\.h$'
-FormatStyle: file
 
 CheckOptions:
   - key:   readability-function-cognitive-complexity.Threshold
