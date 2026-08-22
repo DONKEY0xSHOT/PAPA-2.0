@@ -29,9 +29,10 @@ Checks: >
   -readability-magic-numbers,
   -readability-named-parameter
 
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*papa/.*\\.h$'
-FormatStyle: file
+# Only the path-sensitive analyzer blocks a merge.
+# The style families above stay enabled for reporting
+WarningsAsErrors: 'clang-analyzer-*,-clang-analyzer-core.uninitialized.Assign'
+HeaderFilterRegex: '.*papa/.*\.h$'
 
 CheckOptions:
   - key:   readability-function-cognitive-complexity.Threshold

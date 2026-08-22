@@ -710,10 +710,9 @@ ExecResult IntelEmulator::execute_opcode(const DecodedInsn& insn) {
         case ZYDIS_MNEMONIC_OR: {
             const std::uint64_t dst = get_oper_value(insn, 0);
             std::uint64_t src = get_oper_value(insn, 1);
-            std::size_t ssize = insn.operands[1].width_bytes;
+            const std::size_t ssize = insn.operands[1].width_bytes;
             if (dsize != ssize) {
                 src = bits::sign_extend(src, ssize, dsize);
-                ssize = dsize;
             }
             const std::uint64_t res = dst | src;
             set_oper_value(insn, 0, res);
