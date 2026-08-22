@@ -39,17 +39,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned to a version rather than the image default. clang-tidy check
+      # behaviour changes between releases, so an unpinned tool moves the gate
       - name: Install clang-tidy and ninja
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang clang-tidy ninja-build
+          sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
 
       # A configure is enough to produce compile_commands.json, which is all
       # clang-tidy needs. The checks themselves live in .clang-tidy
       - name: Configure
         env:
-          CC: clang
-          CXX: clang++
+          CC: clang-18
+          CXX: clang++-18
         run: cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       # No flags here on purpose. The check set, the header filter and which
@@ -58,7 +60,7 @@ jobs:
         run: |
           files=$(git ls-files 'src/**/*.cpp' 'tools/**/*.cpp')
           echo "$files" | tr ' ' '\n'
-          clang-tidy -p build-tidy $files
+          clang-tidy-18 -p build-tidy $files
 
   asan:
     name: ASan (Windows, MSVC)
