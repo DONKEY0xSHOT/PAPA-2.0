@@ -8,7 +8,8 @@ namespace papa::util {
 
 namespace {
 
-constexpr std::size_t kNone = std::string_view::npos;
+constexpr std::size_t      kNone       = std::string_view::npos;
+constexpr std::string_view kBraceChars = "0123456789,";
 
 [[nodiscard]] constexpr bool is_digit(char c) noexcept { return c >= '0' && c <= '9'; }
 
@@ -36,28 +37,6 @@ constexpr std::size_t kNone = std::string_view::npos;
     return kNone;
 }
 
-// True when the pattern has an alternation outside every group and class, or a class
-// the scanner cannot delimit
-[[nodiscard]] bool has_top_level_alternation(std::string_view p) noexcept {
-    int depth = 0;
-    for (std::size_t i = 0; i < p.size(); ++i) {
-        const char c = p[i];
-        if (c == '\\') { ++i; continue; }
-        if (c == '[') {
-            const std::size_t end = class_end(p, i);
-            if (end == kNone) { return true; }
-            i = end - 1;
-        } else if (c == '(') {
-            ++depth;
-        } else if (c == ')') {
-            --depth;
-        } else if (c == '|' && depth == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // Index just past the group or class that opens at i, or kNone when it never closes or
 // holds a class the scanner cannot delimit
 [[nodiscard]] std::size_t skip_bracketed(std::string_view p, std::size_t i) noexcept {
@@ -79,46 +58,43 @@ constexpr std::size_t kNone = std::string_view::npos;
     return kNone;
 }
 
-// Parses a quantifier at i into its minimum repeat count and the index past it
-// Returns nullopt for a malformed brace quantifier
+// A parsed quantifier: the index just past it and whether it allows zero repeats
 struct Quantifier {
-    std::size_t min_count{1};
     std::size_t end{0};
-    bool        present{false};
+    bool        optional{false};
 };
 
-[[nodiscard]] std::optional<Quantifier> parse_quantifier(std::string_view p, std::size_t i) {
-    Quantifier q;
-    q.end = i;
+// Parses the quantifier at i, if any, keeping i as the end when there is none
+// Returns nullopt for a malformed brace quantifier
+[[nodiscard]] std::optional<Quantifier> parse_quantifier(std::string_view p,
+                                                         std::size_t      i) noexcept {
+    Quantifier q{i, false};
     if (i >= p.size()) { return q; }
     const char c = p[i];
-    if (c == '*' || c == '?') { q.min_count = 0; q.end = i + 1; }
-    else if (c == '+') { q.end = i + 1; }
-    else if (c == '{') {
-        std::size_t k = i + 1;
-        std::size_t n = 0;
-        const std::size_t digits_start = k;
-        while (k < p.size() && is_digit(p[k])) {
-            n = (n * 10) + static_cast<std::size_t>(p[k] - '0');
-            ++k;
-        }
-        if (k == digits_start) { return std::nullopt; }
-        while (k < p.size() && (p[k] == ',' || is_digit(p[k]))) { ++k; }
-        if (k >= p.size() || p[k] != '}') { return std::nullopt; }
-        q.min_count = n;
-        q.end       = k + 1;
+    if (c == '*' || c == '?') {
+        q = Quantifier{i + 1, true};
+    } else if (c == '+') {
+        q.end = i + 1;
+    } else if (c == '{') {
+        const std::size_t close = p.find('}', i);
+        if (close == kNone) { return std::nullopt; }
+        std::string_view body = p;
+        body.remove_suffix(p.size() - close);
+        body.remove_prefix(i + 1);
+        const std::size_t min_len = std::min(body.find(','), body.size());
+        if (min_len == 0 || body.find_first_not_of(kBraceChars) != kNone) { return std::nullopt; }
+        q.optional = body.find_first_not_of('0') >= min_len;
+        q.end      = close + 1;
     } else {
         return q;
     }
-    q.present = true;
     if (q.end < p.size() && p[q.end] == '?') { ++q.end; }   // lazy form
     return q;
 }
 
 }  // namespace
 
-std::string required_literal(std::string_view p, bool icase) {
-    if (has_top_level_alternation(p)) { return {}; }
+std::string required_literal(std::string_view pattern, bool icase) {
     std::string best;
     std::string run;
     const auto flush = [&best, &run] {
@@ -126,33 +102,34 @@ std::string required_literal(std::string_view p, bool icase) {
         run.clear();
     };
     std::size_t i = 0;
-    while (i < p.size()) {
-        const char          c = p[i];
+    while (i < pattern.size()) {
+        const char          c = pattern[i];
         std::optional<char> literal;
         std::size_t         next = i + 1;
         if (c == '(' || c == '[') {
-            next = skip_bracketed(p, i);
+            next = skip_bracketed(pattern, i);
             if (next == kNone) { return {}; }
         } else if (c == '\\') {
-            if (i + 1 >= p.size()) { return {}; }
-            const char e = p[i + 1];
+            if (i + 1 >= pattern.size()) { return {}; }
+            const char e = pattern[i + 1];
             next = i + 2;
             if (!is_alnum(e)) {
                 literal = e;
             } else if (std::string_view("dDwWsSbB").find(e) == kNone) {
                 return {};   // hex, unicode, control and back-reference escapes are not modelled
             }
-        } else if (std::string_view(")]}*+?{").find(c) != kNone) {
+        } else if (std::string_view("|)]}*+?{").find(c) != kNone) {
             return {};
         } else if (c != '.' && c != '^' && c != '$') {
             literal = c;
         }
-        const auto q = parse_quantifier(p, next);
+        const auto q = parse_quantifier(pattern, next);
         if (!q.has_value()) { return {}; }
+        // Only printable ASCII, since std::regex folds case by locale and fold covers ASCII only
         const bool printable = literal.has_value() && *literal >= 0x20 && *literal <= 0x7E;
-        if (printable && q->min_count >= 1) { run.push_back(icase ? fold(*literal) : *literal); }
+        if (printable && !q->optional) { run.push_back(icase ? fold(*literal) : *literal); }
         // Any repetition, and any non-literal atom, breaks contiguity with what follows
-        if (!printable || q->present) { flush(); }
+        if (!printable || q->end != next) { flush(); }
         i = q->end;
     }
     flush();
@@ -163,7 +140,7 @@ bool contains_literal(std::string_view haystack, std::string_view literal, bool 
     if (literal.empty()) { return true; }
     if (!icase) { return haystack.find(literal) != kNone; }
     return std::search(haystack.begin(), haystack.end(), literal.begin(), literal.end(),
-                       [](char h, char l) { return fold(h) == l; }) != haystack.end();
+                       [](char h, char l) { return fold(h) == fold(l); }) != haystack.end();
 }
 
 }  // namespace papa::util
