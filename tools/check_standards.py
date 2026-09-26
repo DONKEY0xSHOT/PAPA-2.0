@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,6 +34,25 @@ PII_PATTERNS = (
     re.compile(r"/home/[a-z0-9_.-]+/", re.IGNORECASE),
     re.compile(r"[A-Za-z]:[\\/]Documents and Settings[\\/]", re.IGNORECASE),
 )
+
+
+def tracked_files(root: Path) -> set[Path] | None:
+    """The resolved paths git tracks under root, or None outside a git checkout."""
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {(root / name).resolve()
+            for name in listing.decode("utf-8").split("\0") if name}
+
+
+def only_tracked(paths: list[Path], tracked: set[Path] | None) -> list[Path]:
+    """Drop the paths git does not track, or keep them all outside a checkout."""
+    if tracked is None:
+        return paths
+    return [p for p in paths if p.resolve() in tracked]
 
 
 def source_files(root: Path) -> list[Path]:
@@ -141,7 +161,9 @@ def check_file(path: Path, root: Path) -> list[str]:
 
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
-    files = source_files(root)
+    # Untracked files never reach the tree, so they are not checked
+    tracked = tracked_files(root)
+    files = only_tracked(source_files(root), tracked)
     if not files:
         print(f"no source files found under {root}", file=sys.stderr)
         return 2
@@ -152,7 +174,7 @@ def main() -> int:
 
     # The build and CI files get the comment-length rule too, since a wall of
     # commentary is as hard to read in a workflow as it is beside the code
-    build = build_files(root)
+    build = only_tracked(build_files(root), tracked)
     for path in build:
         try:
             lines = io.open(path, encoding="utf-8").read().splitlines()
