@@ -37,6 +37,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_capabilities.cpp
     test_hash.cpp
     test_json_writer.cpp
+    test_regex_prefilter.cpp
     test_render.cpp
     test_render_table.cpp
     test_library_signatures.cpp
