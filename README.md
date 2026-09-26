@@ -41,3 +41,8 @@ known false positives or false negatives on tested samples.
 
 Perfect match-set parity on an *arbitrary* binary is currently not promised, so an unseen sample can still diverge a bit. 
 In practice, precision and recall should stay ~100%.
+
+## License
+
+PAPA is licensed under the GNU AGPL-3.0 (see `LICENSE`). It ports capa, vivisect,
+viv-utils and python-flirt (Apache-2.0) and rich (MIT). See `NOTICE`.
