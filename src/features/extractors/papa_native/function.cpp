@@ -34,37 +34,27 @@ make_characteristic(const char* name, std::uint64_t va) {
              va_addr(va) };
 }
 
-// True when some cycle spans two or more blocks, capa's size-two SCC loop test
-// Iterative, so a crafted chain of blocks cannot exhaust the native stack
-[[nodiscard]] bool has_multi_block_cycle(const std::vector<std::vector<std::size_t>>& succ) {
-    enum class Mark : std::uint8_t { kNew, kOnPath, kDone };
-    std::vector<Mark> mark(succ.size(), Mark::kNew);
-    // Each frame is a block and the index of its next successor to visit
-    std::vector<std::pair<std::size_t, std::size_t>> path;
-    for (std::size_t root = 0; root < succ.size(); ++root) {
-        if (mark[root] != Mark::kNew) { continue; }
-        mark[root] = Mark::kOnPath;
-        path.emplace_back(root, 0U);
-        while (!path.empty()) {
-            const std::size_t v    = path.back().first;
-            const std::size_t next = path.back().second;
-            if (next == succ[v].size()) {
-                mark[v] = Mark::kDone;
-                path.pop_back();
-                continue;
-            }
-            path.back().second = next + 1;
-            const std::size_t w = succ[v][next];
-            // A self-loop alone is a size-one component
-            if (w == v) { continue; }
-            if (mark[w] == Mark::kOnPath) { return true; }
-            if (mark[w] == Mark::kNew) {
-                mark[w] = Mark::kOnPath;
-                path.emplace_back(w, 0U);
-            }
+// True when the block graph has a cycle, which is capa's loop test once self-loops are dropped
+// Kahn's peel is iterative, so a crafted chain of blocks cannot exhaust the native stack
+[[nodiscard]] bool has_cycle(const std::vector<std::vector<std::size_t>>& succ) {
+    std::vector<std::size_t> in_degree(succ.size(), 0);
+    for (const auto& targets : succ) {
+        for (const std::size_t w : targets) { ++in_degree[w]; }
+    }
+    std::vector<std::size_t> ready;
+    for (std::size_t v = 0; v < succ.size(); ++v) {
+        if (in_degree[v] == 0) { ready.push_back(v); }
+    }
+    std::size_t peeled = 0;
+    while (!ready.empty()) {
+        const std::size_t v = ready.back();
+        ready.pop_back();
+        ++peeled;
+        for (const std::size_t w : succ[v]) {
+            if (--in_degree[w] == 0) { ready.push_back(w); }
         }
     }
-    return false;
+    return peeled != succ.size();
 }
 
 }  // namespace
@@ -85,12 +75,13 @@ extract_loop(const Function& fn) {
     for (std::size_t i = 0; i < n; ++i) {
         for (const std::uint64_t s : fn.basic_blocks[i].successors) {
             const auto it = bb_index.find(s);
-            if (it == bb_index.end()) { continue; }
+            // A self-loop alone is a size-one component, which capa does not count
+            if (it == bb_index.end() || it->second == i) { continue; }
             succ[i].push_back(it->second);
         }
     }
 
-    if (!has_multi_block_cycle(succ)) { return std::nullopt; }
+    if (!has_cycle(succ)) { return std::nullopt; }
     return make_characteristic(kCharLoop, fn.va);
 }
 
