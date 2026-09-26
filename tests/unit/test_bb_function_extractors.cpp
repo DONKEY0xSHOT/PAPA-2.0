@@ -172,6 +172,47 @@ TEST_CASE("function: extract_loop ignores a lone self-loop") {
     CHECK_FALSE(extract_loop(fn).has_value());
 }
 
+TEST_CASE("function: extract_loop ignores reconverging paths") {
+    Function fn;
+    fn.va = 0x4000;
+    BasicBlock a;
+    a.va = 0x4000;
+    a.successors.push_back(0x4010);
+    a.successors.push_back(0x4020);
+    BasicBlock b;
+    b.va = 0x4010;
+    b.successors.push_back(0x4030);
+    BasicBlock c;
+    c.va = 0x4020;
+    c.successors.push_back(0x4030);   // d is reached twice, but no path returns
+    BasicBlock d;
+    d.va = 0x4030;
+    fn.basic_blocks.push_back(std::move(a));
+    fn.basic_blocks.push_back(std::move(b));
+    fn.basic_blocks.push_back(std::move(c));
+    fn.basic_blocks.push_back(std::move(d));
+    CHECK_FALSE(extract_loop(fn).has_value());
+}
+
+TEST_CASE("function: extract_loop finds a cycle reached only from a later block") {
+    Function fn;
+    fn.va = 0x4000;
+    BasicBlock a;
+    a.va = 0x4000;
+    BasicBlock b;
+    b.va = 0x4010;
+    b.successors.push_back(0x4020);
+    BasicBlock c;
+    c.va = 0x4020;
+    c.successors.push_back(0x4010);   // back-edge forms a 2-node cycle
+    fn.basic_blocks.push_back(std::move(a));
+    fn.basic_blocks.push_back(std::move(b));
+    fn.basic_blocks.push_back(std::move(c));
+    auto r = extract_loop(fn);
+    REQUIRE(r.has_value());
+    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "loop");
+}
+
 namespace {
 
 // A straight chain of blocks, optionally closed back to the entry
