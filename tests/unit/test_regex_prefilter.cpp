@@ -4,8 +4,12 @@
 
 #include "papa/util/regex_prefilter.h"
 
+#include <cstddef>
+#include <iterator>
+#include <random>
 #include <regex>
 #include <string>
+#include <string_view>
 
 using papa::util::contains_literal;
 using papa::util::required_literal;
@@ -40,6 +44,14 @@ TEST_CASE("regex_prefilter: required_literal picks the longest mandatory run") {
         {"[[]abc",                false, "abc"},
         {"[\\]]abc",              false, "abc"},
         {"([a-z]|q)xyz",          false, "xyz"},
+        {"abc{0,2}de",            false, "ab"},
+        {"ab+?cd",                false, "ab"},
+        {"ab*?cd",                false, "cd"},
+        {"(ab)|cd",               false, ""},
+        {"[|]abc",                false, "abc"},
+        {"\\|abc",                false, "|abc"},
+        {"abc\\",                 false, ""},
+        {"(abc",                  false, ""},
     };
     for (const Row& r : rows) {
         CAPTURE(r.pattern);
@@ -84,4 +96,53 @@ TEST_CASE("regex_prefilter: every match contains the required literal") {
         REQUIRE(std::regex_search(r.subject, std::regex(r.pattern, flags)));
         CHECK(contains_literal(r.subject, required_literal(r.pattern, r.icase), r.icase));
     }
+}
+
+TEST_CASE("regex_prefilter: random patterns never match a subject that lacks the literal") {
+    constexpr std::string_view kAtoms[] = {
+        "a", "ab", ".", "\\.", "\\d", "\\b", "\\x41", "\\cJ", "A", "\\0", "\\1", "[ab]", "[^a]",
+        "[[:alpha:", "[[.a.", "[[=a=", "[]", "(a)", "(?:ab|b)", "(?=a)", "|", ")", "]", "[",
+        "{", "}", "\\|", "[|]",
+    };
+    constexpr std::string_view kQuantifiers[] = {
+        "", "*", "+", "?", "{0}", "{1}", "{2,}", "{0,2}", "*?", "+?",
+    };
+    constexpr std::string_view kSubjectChars = "abAB:.=[]|\n";
+
+    // A fixed seed and raw modulo keep the sequence identical across standard libraries
+    std::mt19937 rng(20260927U);
+    std::string  bad_pattern;
+    std::string  bad_subject;
+    for (int n = 0; n < 2000 && bad_pattern.empty(); ++n) {
+        std::string pattern;
+        const std::size_t pairs = 1 + (rng() % 5);
+        for (std::size_t k = 0; k < pairs; ++k) {
+            pattern += kAtoms[rng() % std::size(kAtoms)];
+            pattern += kQuantifiers[rng() % std::size(kQuantifiers)];
+        }
+        const bool icase = (rng() % 2) == 1U;
+        auto flags = std::regex::ECMAScript;
+        if (icase) { flags |= std::regex::icase; }
+        std::regex re;
+        try {
+            re = std::regex(pattern, flags);
+        } catch (const std::regex_error&) {
+            continue;
+        }
+        const std::string literal  = required_literal(pattern, icase);
+        const std::string alphabet = std::string(kSubjectChars) + pattern;
+        for (int s = 0; s < 20; ++s) {
+            std::string subject;
+            const std::size_t len = rng() % 12;
+            for (std::size_t c = 0; c < len; ++c) { subject += alphabet[rng() % alphabet.size()]; }
+            if (std::regex_search(subject, re) && !contains_literal(subject, literal, icase)) {
+                bad_pattern = pattern;
+                bad_subject = subject;
+                break;
+            }
+        }
+    }
+    CAPTURE(bad_pattern);
+    CAPTURE(bad_subject);
+    CHECK(bad_pattern.empty());
 }
