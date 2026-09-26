@@ -10,6 +10,7 @@ The rules enforced here are the ones a compiler cannot catch. Everything else
 from __future__ import annotations
 
 import io
+import os
 import re
 import subprocess
 import sys
@@ -37,22 +38,21 @@ PII_PATTERNS = (
 
 
 def tracked_files(root: Path) -> set[Path] | None:
-    """The resolved paths git tracks under root, or None outside a git checkout."""
+    """The paths git tracks under root, or None when git is unavailable or lists none."""
     try:
         listing = subprocess.run(
             ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
         ).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
-    return {(root / name).resolve()
-            for name in listing.decode("utf-8").split("\0") if name}
+    return {root / name for name in os.fsdecode(listing).split("\0") if name} or None
 
 
 def only_tracked(paths: list[Path], tracked: set[Path] | None) -> list[Path]:
     """Drop the paths git does not track, or keep them all outside a checkout."""
     if tracked is None:
         return paths
-    return [p for p in paths if p.resolve() in tracked]
+    return [p for p in paths if p in tracked]
 
 
 def source_files(root: Path) -> list[Path]:
