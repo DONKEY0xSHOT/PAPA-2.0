@@ -158,6 +158,47 @@ TEST_CASE("function: extract_loop ignores trivial single-node SCCs without self-
     CHECK_FALSE(extract_loop(fn).has_value());
 }
 
+TEST_CASE("function: extract_loop ignores a lone self-loop") {
+    Function fn;
+    fn.va = 0x4000;
+    BasicBlock a;
+    a.va = 0x4000;
+    a.successors.push_back(0x4000);   // a size-one component, which capa does not count
+    a.successors.push_back(0x4010);
+    BasicBlock b;
+    b.va = 0x4010;
+    fn.basic_blocks.push_back(std::move(a));
+    fn.basic_blocks.push_back(std::move(b));
+    CHECK_FALSE(extract_loop(fn).has_value());
+}
+
+namespace {
+
+// A straight chain of blocks, optionally closed back to the entry
+[[nodiscard]] Function block_chain(std::size_t count, bool close_cycle) {
+    Function fn;
+    fn.va = 0x10000;
+    fn.basic_blocks.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        BasicBlock bb;
+        bb.va = fn.va + (2 * i);
+        if (i + 1 < count) {
+            bb.successors.push_back(bb.va + 2);
+        } else if (close_cycle) {
+            bb.successors.push_back(fn.va);
+        }
+        fn.basic_blocks.push_back(std::move(bb));
+    }
+    return fn;
+}
+
+}  // namespace
+
+TEST_CASE("function: extract_loop survives a 300k-block chain") {
+    CHECK_FALSE(extract_loop(block_chain(300000, false)).has_value());
+    CHECK(extract_loop(block_chain(300000, true)).has_value());
+}
+
 TEST_CASE("function: extract_calls_from emits one feature per resolvable call") {
     Function fn;
     fn.va = 0x4000;

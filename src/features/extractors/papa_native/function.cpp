@@ -6,12 +6,10 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -36,50 +34,37 @@ make_characteristic(const char* name, std::uint64_t va) {
              va_addr(va) };
 }
 
-// State for one Tarjan-SCC iteration over a function's BB graph
-struct TarjanState {
-    std::vector<int>          index_of;            // -1 means unvisited
-    std::vector<int>          lowlink;
-    std::vector<bool>         on_stack;
-    std::stack<std::size_t>   work_stack;
-    int                       next_index{0};
-    bool                      found_cycle{false};
-};
-
-// Recursive Tarjan strongconnect. Depth is bounded by the number of basic blocks in fn,
-// which is itself capped by kMaxFunctionsPerImage during CFG recovery
-void strongconnect(std::size_t                                                v,
-                   const std::vector<std::vector<std::size_t>>&               succ,
-                   TarjanState&                                                state) {
-    if (state.found_cycle) { return; }
-    state.index_of[v] = state.next_index;
-    state.lowlink[v]  = state.next_index;
-    ++state.next_index;
-    state.work_stack.push(v);
-    state.on_stack[v] = true;
-
-    for (const std::size_t w : succ[v]) {
-        if (state.index_of[w] == -1) {
-            strongconnect(w, succ, state);
-            state.lowlink[v] = std::min(state.lowlink[v], state.lowlink[w]);
-        } else if (state.on_stack[w]) {
-            state.lowlink[v] = std::min(state.lowlink[v], state.index_of[w]);
+// True when some cycle spans two or more blocks, capa's size-two SCC loop test
+// Iterative, so a crafted chain of blocks cannot exhaust the native stack
+[[nodiscard]] bool has_multi_block_cycle(const std::vector<std::vector<std::size_t>>& succ) {
+    enum class Mark : std::uint8_t { kNew, kOnPath, kDone };
+    std::vector<Mark> mark(succ.size(), Mark::kNew);
+    // Each frame is a block and the index of its next successor to visit
+    std::vector<std::pair<std::size_t, std::size_t>> path;
+    for (std::size_t root = 0; root < succ.size(); ++root) {
+        if (mark[root] != Mark::kNew) { continue; }
+        mark[root] = Mark::kOnPath;
+        path.emplace_back(root, 0U);
+        while (!path.empty()) {
+            const std::size_t v    = path.back().first;
+            const std::size_t next = path.back().second;
+            if (next == succ[v].size()) {
+                mark[v] = Mark::kDone;
+                path.pop_back();
+                continue;
+            }
+            path.back().second = next + 1;
+            const std::size_t w = succ[v][next];
+            // A self-loop alone is a size-one component
+            if (w == v) { continue; }
+            if (mark[w] == Mark::kOnPath) { return true; }
+            if (mark[w] == Mark::kNew) {
+                mark[w] = Mark::kOnPath;
+                path.emplace_back(w, 0U);
+            }
         }
     }
-
-    if (state.lowlink[v] == state.index_of[v]) {
-        // Pop the entire SCC
-        // Non-trivial means size >= 2 in CAPA's loop characteristic
-        std::size_t component_size = 0;
-        while (!state.work_stack.empty()) {
-            const std::size_t w = state.work_stack.top();
-            state.work_stack.pop();
-            state.on_stack[w] = false;
-            ++component_size;
-            if (w == v) { break; }
-        }
-        if (component_size >= 2) { state.found_cycle = true; }
-    }
+    return false;
 }
 
 }  // namespace
@@ -105,15 +90,7 @@ extract_loop(const Function& fn) {
         }
     }
 
-    TarjanState state;
-    state.index_of.assign(n, -1);
-    state.lowlink.assign(n, -1);
-    state.on_stack.assign(n, false);
-
-    for (std::size_t i = 0; i < n && !state.found_cycle; ++i) {
-        if (state.index_of[i] == -1) { strongconnect(i, succ, state); }
-    }
-    if (!state.found_cycle) { return std::nullopt; }
+    if (!has_multi_block_cycle(succ)) { return std::nullopt; }
     return make_characteristic(kCharLoop, fn.va);
 }
 
