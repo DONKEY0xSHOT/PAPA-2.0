@@ -44,5 +44,5 @@ In practice, precision and recall should stay ~100%.
 
 ## License
 
-PAPA is licensed under the GNU AGPL-3.0 (see `LICENSE`). It ports capa, vivisect,
-viv-utils and python-flirt (Apache-2.0) and rich (MIT). See `NOTICE`.
+PAPA is licensed under the GNU AGPL-3.0-only (see `LICENSE`). Third-party credits
+and licenses are in `NOTICE`.

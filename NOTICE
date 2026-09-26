@@ -2,35 +2,46 @@ PAPA
 Copyright (C) 2026 DONKEY0xSHOT
 
 PAPA is free software, licensed under the GNU Affero General Public License
-version 3. See LICENSE.
+version 3 only (AGPL-3.0-only). See LICENSE.
 
-PAPA is a C++ port of capa and of the parts of vivisect, viv-utils and
-python-flirt that capa uses, and it vendors the libraries listed below.
+PAPA is a C++ port, with modifications, of capa and of the parts of
+vivisect, viv-utils and python-flirt that capa uses, and it vendors the
+libraries listed below.
 
 Ported projects (Apache License 2.0, text below)
-  capa, https://github.com/mandiant/capa, Copyright 2020 Google LLC
+  capa, https://github.com/mandiant/capa
+    Copyright 2020-2024 Google LLC
     rule semantics, feature extraction, result document and text report
-  vivisect and envi, https://github.com/vivisect/vivisect, Copyright 2014 invisigoth <invisigoth@kenshoto.com>
+  vivisect and envi, https://github.com/vivisect/vivisect
+    Copyright 2014 invisigoth <invisigoth@kenshoto.com>
     function discovery, code flow, emulator and ordinal name tables
-  viv-utils, https://github.com/williballenthin/viv-utils, Willi Ballenthin and Moritz Raabe
-  python-flirt, https://github.com/williballenthin/lancelot/tree/master/pyflirt, Copyright (C) 2020 Mandiant, Inc.
+  viv-utils, https://github.com/williballenthin/viv-utils
+    authors: Willi Ballenthin and Moritz Raabe
+    FLIRT analyzer registration and naming passes
+  python-flirt, https://github.com/williballenthin/lancelot
+    Copyright (C) 2020 Mandiant, Inc.
     FLIRT signature reader, matcher and classifier
 
 Ported project (MIT License, text below)
-  rich, https://github.com/Textualize/rich, Copyright (c) 2020 Will McGugan
+  rich, https://github.com/Textualize/rich
+    Copyright (c) 2020 Will McGugan
     table layout of the text report
 
-Vendored (see each directory's own license file)
+Vendored (license texts below and in each directory)
   third_party/flirt_sigs  FLIRT signature packs from capa, Apache License 2.0
-  third_party/zydis       Zydis and Zycore, MIT,
-                          Copyright (c) 2014-2024 Florian Bernd (Zydis)
-                          Copyright (c) 2014-2024 Joel Hoener (Zydis)
-                          Copyright (c) 2018-2024 Florian Bernd (Zycore)
-                          Copyright (c) 2018-2024 Joel Hoener (Zycore)
-  third_party/miniz       miniz, MIT,
-                          Copyright 2013-2014 RAD Game Tools and Valve Software
-                          Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
-  third_party/doctest     doctest, MIT, Copyright (c) 2016-2023 Viktor Kirilov
+  third_party/zydis       Zydis and its Zycore dependency, MIT
+    Zydis
+      Copyright (c) 2014-2024 Florian Bernd
+      Copyright (c) 2014-2024 Joel Höner
+    Zycore
+      Copyright (c) 2018-2024 Florian Bernd
+      Copyright (c) 2018-2024 Joel Höner
+  third_party/miniz       miniz, MIT
+    Copyright 2013-2014 RAD Game Tools and Valve Software
+    Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+    All Rights Reserved.
+  third_party/doctest     doctest, MIT
+    Copyright (c) 2016-2023 Viktor Kirilov
 
 ----- Apache License 2.0 -----
 
@@ -236,9 +247,26 @@ Vendored (see each directory's own license file)
    See the License for the specific language governing permissions and
    limitations under the License.
 
------ MIT License (rich) -----
+----- MIT License (rich, Zydis, Zycore, miniz, doctest) -----
 
+rich
 Copyright (c) 2020 Will McGugan
+
+Zydis
+Copyright (c) 2014-2024 Florian Bernd
+Copyright (c) 2014-2024 Joel Höner
+
+Zycore
+Copyright (c) 2018-2024 Florian Bernd
+Copyright (c) 2018-2024 Joel Höner
+
+miniz
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+All Rights Reserved.
+
+doctest
+Copyright (c) 2016-2023 Viktor Kirilov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
