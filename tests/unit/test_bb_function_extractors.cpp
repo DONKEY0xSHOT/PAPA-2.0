@@ -213,6 +213,23 @@ TEST_CASE("function: extract_loop finds a cycle reached only from a later block"
     CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "loop");
 }
 
+TEST_CASE("function: extract_loop ignores several entry-less blocks and duplicate edges") {
+    Function fn;
+    fn.va = 0x4000;
+    BasicBlock a;
+    a.va = 0x4000;
+    BasicBlock b;
+    b.va = 0x4010;
+    b.successors.push_back(0x4020);
+    b.successors.push_back(0x4020);   // a jcc to the next block gives two identical edges
+    BasicBlock c;
+    c.va = 0x4020;
+    fn.basic_blocks.push_back(std::move(a));
+    fn.basic_blocks.push_back(std::move(b));
+    fn.basic_blocks.push_back(std::move(c));
+    CHECK_FALSE(extract_loop(fn).has_value());
+}
+
 namespace {
 
 // A straight chain of blocks, optionally closed back to the entry
