@@ -19,8 +19,8 @@ class FlirtSignatureSet;
 
 class PapaNativeBackend {
 public:
-    // Construct a backend from a parsed image, matching FLIRT against sigs during
-    // discovery. The backend keeps no reference to sigs once build returns
+    /// Construct a backend from a parsed image, matching FLIRT against sigs during
+    /// discovery. The backend keeps no reference to sigs once build returns
     [[nodiscard]] static Expected<PapaNativeBackend>
     build(const ::papa::pe::PeImage& image, const flirt::FlirtSignatureSet& sigs);
 
