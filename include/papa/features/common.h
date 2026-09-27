@@ -173,8 +173,7 @@ private:
     std::string value_;
 };
 
-// Os, Arch, and Format support "any" as a wildcard in either the rule
-// or the feature set, mirroring CAPA's bidirectional wildcard semantics
+// Os treats "any" as a wildcard in either the rule or the feature set, as capa does
 class Os : public Feature {
 public:
     explicit Os(std::string v, std::string desc = {});
@@ -190,13 +189,12 @@ private:
     std::string value_;
 };
 
+// Arch matches only an equal value, so arch: any matches only a literal any, as in capa
 class Arch : public Feature {
 public:
     explicit Arch(std::string v, std::string desc = {});
     [[nodiscard]] const std::string& value() const noexcept { return value_; }
 
-    [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
-    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
     [[nodiscard]] std::string    to_string() const override;

@@ -203,19 +203,25 @@ TEST_CASE("Os fs side any matches any concrete rule") {
     CHECK(r.success);
 }
 
-TEST_CASE("Arch wildcard behaves like Os wildcard") {
+TEST_CASE("Arch has no wildcard, so any matches only a literal any") {
     FeatureSet fs;
     fs.add(make<Arch>(std::string("amd64")), va(0x0));
 
     Arch any_rule{"any"};
-    auto r = any_rule.evaluate(fs, false);
-    CHECK(r.success);
+    CHECK_FALSE(any_rule.evaluate(fs, false).success);
+
+    Arch exact{"amd64"};
+    CHECK(exact.evaluate(fs, false).success);
 
     Arch mismatch{"i386"};
     CHECK_FALSE(mismatch.evaluate(fs, false).success);
+
+    FeatureSet literal_any;
+    literal_any.add(make<Arch>(std::string("any")), va(0x0));
+    CHECK(any_rule.evaluate(literal_any, false).success);
 }
 
-TEST_CASE("Os and Arch: wildcard semantics hold in both directions") {
+TEST_CASE("Os and Arch: only os treats any as a wildcard, in both directions") {
     const Address a = va(0x1000);
 
     FeatureSet any_os;
@@ -233,10 +239,10 @@ TEST_CASE("Os and Arch: wildcard semantics hold in both directions") {
     FeatureSet i386;
     i386.add(make<Arch>(std::string("i386")), a);
     CHECK_FALSE(Arch("amd64").matches(i386));
-    CHECK(Arch("any").matches(i386));
+    CHECK_FALSE(Arch("any").matches(i386));
     FeatureSet any_arch;
     any_arch.add(make<Arch>(std::string("any")), a);
-    CHECK(Arch("amd64").matches(any_arch));
+    CHECK_FALSE(Arch("amd64").matches(any_arch));
 }
 
 TEST_CASE("Os: only the set side any contributes locations to a concrete rule") {
