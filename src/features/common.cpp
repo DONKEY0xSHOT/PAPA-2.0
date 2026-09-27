@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -49,6 +50,17 @@ RegexLiteral parse_regex_literal(std::string_view lit) {
 // "any" wildcard used by Os and Arch evaluate paths
 // Kept local so the constants module does not need to leak in through the header
 constexpr std::string_view kAnyWildcard = "any";
+
+// The set-side wildcards, found by lookup instead of a scan of the whole set
+[[nodiscard]] const FeaturePtr& any_os() {
+    static const FeaturePtr any = std::make_shared<const Os>(std::string(kAnyWildcard));
+    return any;
+}
+
+[[nodiscard]] const FeaturePtr& any_arch() {
+    static const FeaturePtr any = std::make_shared<const Arch>(std::string(kAnyWildcard));
+    return any;
+}
 
 }  // namespace
 
@@ -372,33 +384,32 @@ Os::Os(std::string v, std::string desc)
       value_(std::move(v)) {}
 
 engine::Result Os::evaluate(const FeatureSet& fs, bool sc) const {
-    // Exact-structural path first to handle the common case without scanning
     auto r = Feature::evaluate(fs, sc);
     if (r.success) { return r; }
-
-    // Wildcard pass: rule side "any" matches any concrete Os in the set and
-    // set side "any" matches any concrete rule
     r.node = this;
-    const bool self_any = (value_ == kAnyWildcard);
+    if (value_ != kAnyWildcard) {
+        // Set side any matches every concrete rule value
+        if (const auto it = fs.find(any_os()); it != fs.end()) {
+            r.success = true;
+            r.locations.insert(it->second.begin(), it->second.end());
+        }
+        return r;
+    }
+    // Rule side any matches every Os in the set
     for (const auto& [f, locs] : fs) {
         if (!f || f->tag() != FeatureTag::kOs) { continue; }
-        const auto& other = static_cast<const Os&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) {
-            r.success = true;
-            r.locations.insert(locs.begin(), locs.end());
-            if (sc) { return r; }
-        }
+        r.success = true;
+        r.locations.insert(locs.begin(), locs.end());
+        if (sc) { return r; }
     }
     return r;
 }
 
 bool Os::matches(const FeatureSet& fs) const {
     if (Feature::matches(fs)) { return true; }
-    const bool self_any = (value_ == kAnyWildcard);
-    for (const auto& [f, locs] : fs) {
-        if (!f || f->tag() != FeatureTag::kOs) { continue; }
-        const auto& other = static_cast<const Os&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) { return true; }
+    if (value_ != kAnyWildcard) { return fs.find(any_os()) != fs.end(); }
+    for (const auto& entry : fs) {
+        if (entry.first && entry.first->tag() == FeatureTag::kOs) { return true; }
     }
     return false;
 }
@@ -425,28 +436,30 @@ Arch::Arch(std::string v, std::string desc)
 engine::Result Arch::evaluate(const FeatureSet& fs, bool sc) const {
     auto r = Feature::evaluate(fs, sc);
     if (r.success) { return r; }
-
     r.node = this;
-    const bool self_any = (value_ == kAnyWildcard);
+    if (value_ != kAnyWildcard) {
+        // Set side any matches every concrete rule value
+        if (const auto it = fs.find(any_arch()); it != fs.end()) {
+            r.success = true;
+            r.locations.insert(it->second.begin(), it->second.end());
+        }
+        return r;
+    }
+    // Rule side any matches every Arch in the set
     for (const auto& [f, locs] : fs) {
         if (!f || f->tag() != FeatureTag::kArch) { continue; }
-        const auto& other = static_cast<const Arch&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) {
-            r.success = true;
-            r.locations.insert(locs.begin(), locs.end());
-            if (sc) { return r; }
-        }
+        r.success = true;
+        r.locations.insert(locs.begin(), locs.end());
+        if (sc) { return r; }
     }
     return r;
 }
 
 bool Arch::matches(const FeatureSet& fs) const {
     if (Feature::matches(fs)) { return true; }
-    const bool self_any = (value_ == kAnyWildcard);
-    for (const auto& [f, locs] : fs) {
-        if (!f || f->tag() != FeatureTag::kArch) { continue; }
-        const auto& other = static_cast<const Arch&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) { return true; }
+    if (value_ != kAnyWildcard) { return fs.find(any_arch()) != fs.end(); }
+    for (const auto& entry : fs) {
+        if (entry.first && entry.first->tag() == FeatureTag::kArch) { return true; }
     }
     return false;
 }

@@ -214,6 +214,30 @@ TEST_CASE("Arch wildcard behaves like Os wildcard") {
     CHECK_FALSE(mismatch.evaluate(fs, false).success);
 }
 
+TEST_CASE("Os and Arch: wildcard semantics hold in both directions") {
+    const Address a = va(0x1000);
+
+    FeatureSet any_os;
+    any_os.add(make<Os>(std::string("any")), a);
+    CHECK(Os("windows").matches(any_os));
+    const auto r = Os("windows").evaluate(any_os, false);
+    CHECK(r.success);
+    CHECK(r.locations.size() == 1U);
+
+    FeatureSet windows;
+    windows.add(make<Os>(std::string("windows")), a);
+    CHECK(Os("any").matches(windows));
+    CHECK_FALSE(Os("linux").matches(windows));
+
+    FeatureSet i386;
+    i386.add(make<Arch>(std::string("i386")), a);
+    CHECK_FALSE(Arch("amd64").matches(i386));
+    CHECK(Arch("any").matches(i386));
+    FeatureSet any_arch;
+    any_arch.add(make<Arch>(std::string("any")), a);
+    CHECK(Arch("amd64").matches(any_arch));
+}
+
 TEST_CASE("Property equality requires both name and access to match") {
     auto p1 = make<Property>(std::string("MyProp"), Property::Access::kRead);
     auto p2 = make<Property>(std::string("MyProp"), Property::Access::kRead);
