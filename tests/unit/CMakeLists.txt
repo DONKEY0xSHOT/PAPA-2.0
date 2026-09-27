@@ -25,6 +25,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_rules_parser.cpp
     test_ruleset.cpp
     test_optimizer.cpp
+    test_feature_index.cpp
     test_com_lookup.cpp
     test_string_utils.cpp
     test_extractor_helpers.cpp
