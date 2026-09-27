@@ -434,11 +434,14 @@ void emit_rules(::papa::util::json::Writer& w, const ResultDocument& doc) {
 }  // namespace
 
 void render(const ResultDocument& doc, std::ostream& out, bool pretty) {
-    ::papa::util::json::Writer w(out, pretty);
+    // One write, since per-character writes to a synced console stream are slow
+    std::ostringstream buf;
+    ::papa::util::json::Writer w(buf, pretty);
     w.begin_object();
     emit_meta(w, doc.meta);
     emit_rules(w, doc);
     w.end_object();
+    out << buf.view();
 }
 
 std::string render_to_string(const ResultDocument& doc, bool pretty) {
