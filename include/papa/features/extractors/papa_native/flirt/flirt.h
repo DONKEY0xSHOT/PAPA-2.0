@@ -25,8 +25,8 @@ struct EmbeddedSig {
 
 }  // namespace embedded
 
-/// A collection of parsed FLIRT trees. The production constructor is
-/// make_embedded() and add_from_buffer exists for tests
+/// A collection of parsed FLIRT trees. Production uses the shared embedded() set,
+/// make_embedded() decodes a fresh copy and add_from_buffer exists for tests
 class FlirtSignatureSet {
 public:
     FlirtSignatureSet()                                        = default;

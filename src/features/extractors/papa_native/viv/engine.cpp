@@ -220,7 +220,7 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
             return flirt::match_flirt_modules(tree, bytes);
         });
     }
-    FlirtDiscoveryAnalyzer      flirt_analyzer(
+    FlirtDiscoveryAnalyzer flirt_analyzer(
         std::move(matchers), flirt_context,
         [&disc, &image](std::uint64_t target) {
             // makeFunction runs for a local-name offset only where the address is

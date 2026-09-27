@@ -206,7 +206,7 @@ TEST_CASE("flirt_signature_set: embedded registry loads every bundled sig") {
 #endif
 }
 
-TEST_CASE("flirt: the embedded set is decoded once and shared") {
+TEST_CASE("flirt_signature_set: the embedded set is decoded once and shared") {
     const auto& first  = flirt::FlirtSignatureSet::embedded();
     const auto& second = flirt::FlirtSignatureSet::embedded();
     CHECK(&first == &second);
