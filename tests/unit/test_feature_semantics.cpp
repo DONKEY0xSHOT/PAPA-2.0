@@ -137,6 +137,7 @@ TEST_CASE("Regex: a required literal never hides a case-insensitive match") {
     FeatureSet fs;
     fs.add(make<String>(std::string("C:\\Program Files\\VirtualBox Guest Additions")), va(0x1000));
     CHECK(Regex("/virtualbox guest/i").matches(fs));
+    CHECK(Regex("/virtualbox guest/i").evaluate(fs, false).locations.count(va(0x1000)) == 1);
     CHECK(Regex("/VirtualBox/").matches(fs));
     CHECK_FALSE(Regex("/vmware tools/i").matches(fs));
 }
