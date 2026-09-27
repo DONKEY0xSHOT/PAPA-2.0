@@ -2,6 +2,7 @@
 
 #include "papa/engine.h"
 #include "papa/util/hashing.h"
+#include "papa/util/regex_prefilter.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -128,6 +129,7 @@ Regex::Regex(std::string literal, std::string desc)
     } catch (const std::regex_error&) {
         compiled_ok_  = false;
     }
+    required_ = util::required_literal(pattern_, case_insensitive_);
 }
 
 engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
@@ -137,6 +139,7 @@ engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
     if (!compiled_ok_) { return r; }
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
+        if (!util::contains_literal(s.value(), required_, case_insensitive_)) { continue; }
         if (std::regex_search(s.value(), compiled_)) {
             r.success = true;
             const auto it = fs.find(f);
@@ -153,6 +156,7 @@ bool Regex::matches(const FeatureSet& fs) const {
     if (!compiled_ok_) { return false; }
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
+        if (!util::contains_literal(s.value(), required_, case_insensitive_)) { continue; }
         if (std::regex_search(s.value(), compiled_)) { return true; }
     }
     return false;

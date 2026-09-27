@@ -58,6 +58,8 @@ private:
     // CAPA rules are linted against Python's re module which supports a few constructs
     // std::regex does not (named groups, inline flags, possessive quantifiers)
     bool        compiled_ok_{true};
+    // A literal every match contains, lowercased when case-insensitive, or empty
+    std::string required_;
 };
 
 // Bytes matches when self.value is a prefix of any Bytes feature's value

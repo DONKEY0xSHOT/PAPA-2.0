@@ -133,6 +133,14 @@ TEST_CASE("Regex literal forms parse slashes and case-insensitive suffix") {
     CHECK(r_anch.locations.count(va(0x2)) == 1);
 }
 
+TEST_CASE("Regex: a required literal never hides a case-insensitive match") {
+    FeatureSet fs;
+    fs.add(make<String>(std::string("C:\\Program Files\\VirtualBox Guest Additions")), va(0x1000));
+    CHECK(Regex("/virtualbox guest/i").matches(fs));
+    CHECK(Regex("/VirtualBox/").matches(fs));
+    CHECK_FALSE(Regex("/vmware tools/i").matches(fs));
+}
+
 TEST_CASE("Bytes matches when self is a prefix of a candidate") {
     FeatureSet fs;
     fs.add(make<Bytes>(bytes_of({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE})), va(0x100));
