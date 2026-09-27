@@ -94,7 +94,7 @@ TEST_CASE("api: chrome resolves thunked and register-indirect imports") {
     }
     auto img = papa::pe::PeParser::parse_file(chrome);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img);
+    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend.has_value());
 
     // jmp [rip+slot] import thunks. MiniDumpWriteDump is called at 0x140213915, which

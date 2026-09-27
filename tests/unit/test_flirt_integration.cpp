@@ -63,7 +63,7 @@ TEST_CASE("flirt: per-tree priming marks certutil mainCRTStartup library") {
     }
     auto img = papa::pe::PeParser::parse_file(certutil);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img);
+    auto backend = pn::PapaNativeBackend::build(*img, flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend);
     const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 

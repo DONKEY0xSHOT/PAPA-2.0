@@ -2,6 +2,7 @@
 
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_image.h"
 
 #include <cstddef>
@@ -53,9 +54,10 @@ using InsnReader = std::function<Expected<DecodedInsn>(std::uint64_t va)>;
 namespace cfg {
 
 /// Whole-image function recovery, a faithful port of vivisect's analysis. Returns the
-/// functions together with the library functions FLIRT named during the same pass
+/// functions together with the library functions FLIRT named from sigs in the same pass
 [[nodiscard]] Expected<RecoveredImage>
-    recover(const pe::PeImage& image, const Disassembler& disasm);
+    recover(const pe::PeImage& image, const Disassembler& disasm,
+            const flirt::FlirtSignatureSet& sigs);
 
 /// Scan undefined code for boundary-anchored function prologues and return candidate
 /// function-entry VAs

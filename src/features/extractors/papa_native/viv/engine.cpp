@@ -178,7 +178,8 @@ std::vector<std::uint64_t> reloc_pointer_sites(const pe::PeImage& image) {
 }  // namespace
 
 RecoveredImage
-discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
+discover_functions(const pe::PeImage& image, const Disassembler& disasm,
+                   const flirt::FlirtSignatureSet& sigs) {
     const std::uint64_t ptr_size = image.is_64bit() ? 8U : 4U;
     const emu::ImageMaps maps    = emu::build_image_maps(image);
     const InsnReader     reader  = cfg::make_image_reader(image, disasm);
@@ -212,10 +213,9 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
 
     // FLIRT runs as an analysis module, installed before any function is made so it
     // fires as each one is analyzed. This is the only FLIRT pass
-    const flirt::FlirtSignatureSet& flirt_sigs = flirt::FlirtSignatureSet::embedded();
     const DiscoveryFlirtContext flirt_context(image, reader, disc);
     std::vector<flirt::ModuleMatchFn> matchers;
-    for (const flirt::FlirtTree& tree : flirt_sigs.trees()) {
+    for (const flirt::FlirtTree& tree : sigs.trees()) {
         matchers.emplace_back([&tree](std::span<const std::uint8_t> bytes) {
             return flirt::match_flirt_modules(tree, bytes);
         });

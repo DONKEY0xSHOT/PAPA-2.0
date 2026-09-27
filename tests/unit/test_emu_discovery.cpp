@@ -9,6 +9,7 @@
 #include "papa/features/extractors/papa_native/emu/workspace_emulator.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_parser.h"
 
 #include "fixture_paths.h"
@@ -187,7 +188,7 @@ TEST_CASE("emu discovery: x64 lea-referenced function is recovered (certutil adl
     auto img = papa::pe::PeParser::parse_file(path);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
-    auto rec = pn::cfg::recover(*img, disasm);
+    auto rec = pn::cfg::recover(*img, disasm, pn::flirt::FlirtSignatureSet::embedded());
     REQUIRE(rec.has_value());
     const auto& funcs = rec->functions;
     // adler32 at 0x140109160 is referenced only by `lea rdx, [rip + ...]` at

@@ -26,14 +26,15 @@ PapaNativeBackend::PapaNativeBackend(PapaNativeBackend&&) noexcept        = defa
 PapaNativeBackend& PapaNativeBackend::operator=(PapaNativeBackend&&) noexcept = default;
 
 ::papa::Expected<PapaNativeBackend>
-PapaNativeBackend::build(const ::papa::pe::PeImage& image) {
+PapaNativeBackend::build(const ::papa::pe::PeImage& image,
+                         const flirt::FlirtSignatureSet& sigs) {
     // The disassembler is constructed first because every downstream artifact
     // depends on its bitness and decoded operand semantics
     Disassembler disasm(image.is_64bit());
 
     ImportTable imports = build_import_table(image);
 
-    auto cfg_result = cfg::recover(image, disasm);
+    auto cfg_result = cfg::recover(image, disasm, sigs);
     if (!cfg_result) {
         return ::papa::Unexpected{cfg_result.error()};
     }

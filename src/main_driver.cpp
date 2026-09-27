@@ -6,6 +6,7 @@
 #include "papa/features/address.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/pefile_extractor.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
@@ -256,8 +257,10 @@ int run(const Args& args) {
         }
     }
 
-    // Full code pipeline
-    auto backend = features::extractors::papa_native::PapaNativeBackend::build(*image);
+    // Full code pipeline. The FLIRT signatures are needed only during discovery, so the
+    // decoded set is a temporary that is freed as soon as the backend is built
+    auto backend = features::extractors::papa_native::PapaNativeBackend::build(
+        *image, features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded());
     if (!backend) {
         std::cerr << "error: backend build failed: "
                   << backend.error().detail << '\n';

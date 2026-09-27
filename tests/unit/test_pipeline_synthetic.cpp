@@ -11,6 +11,7 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_parser.h"
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
@@ -82,7 +83,7 @@ TEST_CASE("pipeline: a synthetic PE is parsed, recovered, and its functions foun
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
 
-    auto backend = pn::PapaNativeBackend::build(*img);
+    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend.has_value());
 
     // Both .pdata begins are recovered as functions
@@ -106,7 +107,7 @@ TEST_CASE("pipeline: the extractor emits an api feature for the imported call") 
     const SyntheticImage synth = build_calling_writefile();
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img);
+    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend.has_value());
 
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
@@ -132,7 +133,7 @@ TEST_CASE("pipeline: a rule matches end to end against a synthetic PE") {
     const SyntheticImage synth = build_calling_writefile();
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img);
+    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend.has_value());
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 

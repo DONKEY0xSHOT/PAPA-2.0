@@ -3,6 +3,7 @@
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/pe/pe_image.h"
 
@@ -15,10 +16,10 @@ namespace papa::features::extractors::papa_native {
 
 class PapaNativeBackend {
 public:
-    // Construct a backend from a parsed image. Internally: build a Disassembler,
-    // recover the CFG, and index the IAT
+    // Construct a backend from a parsed image, matching FLIRT against sigs during
+    // discovery. The backend keeps no reference to sigs once build returns
     [[nodiscard]] static Expected<PapaNativeBackend>
-    build(const ::papa::pe::PeImage& image);
+    build(const ::papa::pe::PeImage& image, const flirt::FlirtSignatureSet& sigs);
 
     PapaNativeBackend(PapaNativeBackend&&) noexcept;
     PapaNativeBackend& operator=(PapaNativeBackend&&) noexcept;
