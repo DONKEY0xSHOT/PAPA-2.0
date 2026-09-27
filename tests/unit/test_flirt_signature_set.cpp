@@ -205,3 +205,10 @@ TEST_CASE("flirt_signature_set: embedded registry loads every bundled sig") {
     CHECK(flirt::embedded::registry().empty());
 #endif
 }
+
+TEST_CASE("flirt: the embedded set is decoded once and shared") {
+    const auto& first  = flirt::FlirtSignatureSet::embedded();
+    const auto& second = flirt::FlirtSignatureSet::embedded();
+    CHECK(&first == &second);
+    CHECK(first.tree_count() == flirt::FlirtSignatureSet::make_embedded().tree_count());
+}

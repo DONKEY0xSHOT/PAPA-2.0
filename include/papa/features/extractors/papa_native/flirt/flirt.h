@@ -38,6 +38,9 @@ public:
     /// Build a set from the compile-time embedded signature registry
     [[nodiscard]] static FlirtSignatureSet make_embedded();
 
+    /// The embedded signature packs, decoded once per process on first use
+    [[nodiscard]] static const FlirtSignatureSet& embedded();
+
     /// Parse one raw .sig buffer and append its tree. Returns false and logs
     /// once to stderr on any parse failure. Never throws
     [[nodiscard]] bool add_from_buffer(std::span<const std::uint8_t> sig_bytes) noexcept;

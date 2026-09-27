@@ -11,8 +11,8 @@
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/features/extractors/papa_native/jump_tables.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
-#include "papa/features/extractors/papa_native/library_signatures.h"
 #include "papa/features/extractors/papa_native/noreturn.h"
 #include "papa/features/extractors/papa_native/viv/discovery.h"
 #include "papa/features/extractors/papa_native/viv/discovery_passes.h"
@@ -212,10 +212,10 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm) {
 
     // FLIRT runs as an analysis module, installed before any function is made so it
     // fires as each one is analyzed. This is the only FLIRT pass
-    const LibrarySignatureSet   library_sigs = LibrarySignatureSet::make_default();
+    const flirt::FlirtSignatureSet& flirt_sigs = flirt::FlirtSignatureSet::embedded();
     const DiscoveryFlirtContext flirt_context(image, reader, disc);
     std::vector<flirt::ModuleMatchFn> matchers;
-    for (const flirt::FlirtTree& tree : library_sigs.flirt().trees()) {
+    for (const flirt::FlirtTree& tree : flirt_sigs.trees()) {
         matchers.emplace_back([&tree](std::span<const std::uint8_t> bytes) {
             return flirt::match_flirt_modules(tree, bytes);
         });

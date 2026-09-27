@@ -56,6 +56,11 @@ FlirtSignatureSet FlirtSignatureSet::make_embedded() {
     return set;
 }
 
+const FlirtSignatureSet& FlirtSignatureSet::embedded() {
+    static const FlirtSignatureSet set = make_embedded();
+    return set;
+}
+
 bool FlirtSignatureSet::add_from_buffer(std::span<const std::uint8_t> sig_bytes) noexcept {
     auto parsed = parse_sig_buffer(sig_bytes);
     if (!parsed.has_value()) {
