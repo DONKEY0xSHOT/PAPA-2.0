@@ -41,7 +41,7 @@ public:
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
 };
 
-// Regex scans every String feature in fs via std::regex_search
+// Regex runs std::regex_search on every String feature that holds its required literal
 class Regex : public String {
 public:
     explicit Regex(std::string literal, std::string desc = {});
