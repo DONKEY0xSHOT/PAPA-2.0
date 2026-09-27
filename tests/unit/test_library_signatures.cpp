@@ -84,17 +84,8 @@ TEST_CASE("library_signatures: is_thunk rejects conditional jumps and register o
 }
 
 TEST_CASE("library_signatures: classify_as_library flags a thunk regardless of bytes") {
-    const auto set = LibrarySignatureSet::make_default();
+    const LibrarySignatureSet set{};
     const auto fn = make_single_insn_function(make_jmp_iat(0x1000));
     // A thunk is library code by structure alone, so FLIRT is never consulted
     CHECK(set.classify_as_library(fn, std::span<const std::uint8_t>{}));
-}
-
-TEST_CASE("library_signatures: make_default carries the embedded FLIRT set") {
-    const auto sigs = LibrarySignatureSet::make_default();
-#if defined(_WIN32) && defined(_MSC_VER)
-    CHECK(sigs.flirt_tree_count() == 3U);
-#else
-    CHECK(sigs.flirt_tree_count() == 0U);
-#endif
 }

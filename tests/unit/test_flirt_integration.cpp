@@ -30,7 +30,7 @@ TEST_CASE("flirt: embedded signatures classify real library functions") {
     }
     auto img = papa::pe::PeParser::parse_file(chrome);
     REQUIRE(img.has_value());
-    const auto sigs = flirt::FlirtSignatureSet::make_embedded();
+    const auto& sigs = flirt::FlirtSignatureSet::embedded();
     // The packs are embedded as a Windows resource, so the registry is empty on any
     // other toolchain and there is nothing to classify against
     if (sigs.tree_count() == 0U) {
