@@ -77,7 +77,7 @@ PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
     : backend_(std::move(backend)) {
     const auto& fns = backend_.functions();
     function_index_.reserve(fns.size());
-    // emplace keeps the first function at a VA, as the linear scan did
+    // Discovery drops repeat entries, so each entry VA is unique and maps to one position
     for (std::size_t i = 0; i < fns.size(); ++i) { function_index_.emplace(fns[i].va, i); }
 }
 
