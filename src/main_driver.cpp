@@ -187,13 +187,6 @@ int run(const Args& args) {
                   << image.error().detail << '\n';
         return kExitInvalidFileType;
     }
-
-    // The FLIRT packs decode on a background thread while the rules load and the file
-    // pass runs. The backend build is the only consumer and waits for the result
-    auto flirt_sigs = std::async(
-        std::launch::async,
-        &features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded);
-
     const std::span<const std::byte> sample_buf = image->raw_buffer();
 
     if (!std::filesystem::exists(args.rules_dir)) {
@@ -201,6 +194,13 @@ int run(const Args& args) {
                   << '\n';
         return kExitInvalidRule;
     }
+
+    // The FLIRT packs decode on a background thread while the rules load and the file
+    // pass runs. The backend build is the only consumer and waits for the result
+    auto flirt_sigs = std::async(
+        std::launch::async,
+        &features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded);
+
     auto ruleset = rules::RuleSet::from_directory(args.rules_dir);
     if (!ruleset) {
         std::cerr << "error: failed to load rules: "
