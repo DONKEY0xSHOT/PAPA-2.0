@@ -6,47 +6,57 @@
 #include "papa/rules/rule.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
-#include <optional>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
 #include <variant>
-#include <vector>
 
 namespace papa::rules {
 
 namespace {
 
-// A feature can be indexed only when its match semantics are structural presence in the
-// set
-[[nodiscard]] bool indexable(features::FeatureTag tag) noexcept {
+using features::FeatureTag;
+
+// A feature is indexable when a structural lookup in the set decides whether it matches
+// Unlike capa, match: and scanning leaves are never indexed
+[[nodiscard]] bool indexable(FeatureTag tag) noexcept {
     switch (tag) {
-        case features::FeatureTag::kSubstring:
-        case features::FeatureTag::kRegex:
-        case features::FeatureTag::kBytes:
-        case features::FeatureTag::kOs:
-        case features::FeatureTag::kArch:
-        case features::FeatureTag::kMatchedRule:
+        // Scanning and wildcard features can match without an equal feature in the set
+        case FeatureTag::kSubstring:
+        case FeatureTag::kRegex:
+        case FeatureTag::kBytes:
+        case FeatureTag::kOs:
+        case FeatureTag::kArch:
+        // Injected during the match cycle, after select has already picked the candidates
+        case FeatureTag::kMatchedRule:
             return false;
-        default:
+        case FeatureTag::kString:
+        case FeatureTag::kNumber:
+        case FeatureTag::kOffset:
+        case FeatureTag::kMnemonic:
+        case FeatureTag::kApi:
+        case FeatureTag::kImport:
+        case FeatureTag::kExport:
+        case FeatureTag::kSection:
+        case FeatureTag::kFunctionName:
+        case FeatureTag::kClass:
+        case FeatureTag::kNamespace:
+        case FeatureTag::kProperty:
+        case FeatureTag::kCharacteristic:
+        case FeatureTag::kFormat:
+        case FeatureTag::kOperandNumber:
+        case FeatureTag::kOperandOffset:
+        case FeatureTag::kBasicBlock:
             return true;
     }
+    return false;
 }
 
-// What a subtree needs: one of feats present, scored like capa to pick among and-children
-// wild means no structurally present feature is provably required
-struct Requirement {
-    int                               score{0};
-    std::vector<features::FeaturePtr> feats;
-    bool                              wild{false};
-};
-
-[[nodiscard]] Requirement wild() {
-    Requirement r;
-    r.wild = true;
-    return r;
-}
-
-// capa's number score: small and near-maximum values are common, others selective
+// capa's number score, where small and near-maximum values are common and others selective
+// Scoring a double as 7 extends capa, whose numbers are always integers
 [[nodiscard]] int number_score(const features::Number::Value& v) noexcept {
     std::uint64_t x = 0;
     if (const auto* u = std::get_if<std::uint64_t>(&v)) {
@@ -63,8 +73,7 @@ struct Requirement {
 }
 
 // capa's _score_feature, higher means more selective
-[[nodiscard]] int score(const features::Feature& f) {
-    using features::FeatureTag;
+[[nodiscard]] int score(const features::Feature& f) noexcept {
     switch (f.tag()) {
         case FeatureTag::kString:        return 9;
         case FeatureTag::kApi:           return 8;
@@ -84,61 +93,73 @@ struct Requirement {
         case FeatureTag::kOperandOffset: return 4;
         case FeatureTag::kMnemonic:      return 2;
         case FeatureTag::kBasicBlock:    return 1;
-        default:                         return 0;
+        case FeatureTag::kFormat:        return 0;
+        // Never indexable, so never scored
+        case FeatureTag::kSubstring:
+        case FeatureTag::kRegex:
+        case FeatureTag::kBytes:
+        case FeatureTag::kOs:
+        case FeatureTag::kArch:
+        case FeatureTag::kMatchedRule:   return 0;
     }
+    return 0;
 }
 
-[[nodiscard]] Requirement leaf(const features::FeaturePtr& f) {
-    if (!f || !indexable(f->tag())) { return wild(); }
-    Requirement r;
-    r.score = score(*f);
-    r.feats.push_back(f);
-    return r;
+using Feats = std::unordered_set<features::FeaturePtr,
+                                 features::FeatureHashKey,
+                                 features::FeatureEqKey>;
+
+// Features a subtree cannot match without, any one of which must be present
+// Empty when nothing is provably required, as under not, optional or a scanning leaf
+struct Need {
+    int   score{0};
+    Feats feats;
+};
+
+[[nodiscard]] Need leaf(const features::FeaturePtr& f) {
+    if (!f || !indexable(f->tag())) { return {}; }
+    return {score(*f), Feats{f}};
 }
 
 // A port of capa's _index_rules_by_feature recursion
-// nullopt means the subtree adds no requirement, as for not, optional and count(x): 0
-[[nodiscard]] std::optional<Requirement> requirement(const engine::Statement& st) {
-    const std::string_view name = st.name();
+[[nodiscard]] Need need(const engine::Statement* st) {
+    if (st == nullptr) { return {}; }
+    const std::string_view name = st->name();
     if (name == "feature") {
-        return leaf(static_cast<const engine::FeatureStatement&>(st).feature());
+        return leaf(static_cast<const engine::FeatureStatement*>(st)->feature());
     }
     if (name == "count") {
-        const auto& range = static_cast<const engine::Range&>(st);
-        if (range.min() == 0) { return std::nullopt; }
-        return leaf(range.feature());
+        // count(x) with a zero minimum is satisfied without x
+        const auto* range = static_cast<const engine::Range*>(st);
+        return range->min() == 0 ? Need{} : leaf(range->feature());
     }
-    if (name == "not" || name == "optional") { return std::nullopt; }
     if (name == "and") {
-        std::optional<Requirement> best;
-        for (const auto& child : st.children()) {
-            // A missing child makes the and unsatisfiable, so skipping it stays sound
-            if (!child) { continue; }
-            auto r = requirement(*child);
-            if (!r.has_value() || r->wild) { continue; }
-            if (!best.has_value() || r->score > best->score ||
-                (r->score == best->score && r->feats.size() < best->feats.size())) {
-                best = std::move(r);
+        // Every child must match, so the most selective one is enough, ties going to fewer
+        Need best;
+        for (const auto& child : st->children()) {
+            Need n = need(child.get());
+            if (n.feats.empty()) { continue; }
+            if (best.feats.empty() || n.score > best.score ||
+                (n.score == best.score && n.feats.size() < best.feats.size())) {
+                best = std::move(n);
             }
         }
-        if (!best.has_value()) { return wild(); }
         return best;
     }
     if (name == "or" || name == "some") {
-        Requirement any;
-        any.score = std::numeric_limits<int>::max();
-        for (const auto& child : st.children()) {
-            // A missing child never matches, so it adds nothing to the union
-            if (!child) { continue; }
-            auto r = requirement(*child);
-            if (!r.has_value() || r->wild) { return wild(); }
-            any.score = std::min(any.score, r->score);
-            any.feats.insert(any.feats.end(), r->feats.begin(), r->feats.end());
+        // Any child can satisfy it, so an unconstrained child leaves nothing required
+        Need any{std::numeric_limits<int>::max(), {}};
+        for (const auto& child : st->children()) {
+            Need n = need(child.get());
+            if (n.feats.empty()) { return {}; }
+            any.score = std::min(any.score, n.score);
+            any.feats.merge(n.feats);
         }
-        if (any.feats.empty()) { return wild(); }
+        if (any.feats.empty()) { return {}; }
         return any;
     }
-    return wild();
+    // not, optional and subscope require nothing
+    return {};
 }
 
 }  // namespace
@@ -150,17 +171,14 @@ void RuleFeatureIndex::build(std::span<const Rule* const> rules) {
     indexed_count_ = 0;
 
     for (std::size_t i = 0; i < order_.size(); ++i) {
-        const auto req = requirement(order_[i]->statement());
-        if (!req.has_value() || req->wild) { continue; }
+        const Need n = need(&order_[i]->statement());
+        // A rule with nothing provably required stays always-run
+        if (n.feats.empty()) { continue; }
 
         always_run_[i] = 0U;
         ++indexed_count_;
-        for (const auto& f : req->feats) {
-            auto& slot = by_feature_[f];
-            const auto idx = static_cast<std::uint32_t>(i);
-            // An or-block can name the same feature more than once
-            if (std::find(slot.begin(), slot.end(), idx) == slot.end()) { slot.push_back(idx); }
-        }
+        const auto idx = static_cast<std::uint32_t>(i);
+        for (const auto& f : n.feats) { by_feature_[f].push_back(idx); }
     }
 }
 
