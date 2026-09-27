@@ -23,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <ostream>
@@ -186,6 +187,13 @@ int run(const Args& args) {
                   << image.error().detail << '\n';
         return kExitInvalidFileType;
     }
+
+    // The FLIRT packs decode on a background thread while the rules load and the file
+    // pass runs. The backend build is the only consumer and waits for the result
+    auto flirt_sigs = std::async(
+        std::launch::async,
+        &features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded);
+
     const std::span<const std::byte> sample_buf = image->raw_buffer();
 
     if (!std::filesystem::exists(args.rules_dir)) {
@@ -260,7 +268,7 @@ int run(const Args& args) {
     // Full code pipeline. The FLIRT signatures are needed only during discovery, so the
     // decoded set is a temporary that is freed as soon as the backend is built
     auto backend = features::extractors::papa_native::PapaNativeBackend::build(
-        *image, features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded());
+        *image, flirt_sigs.get());
     if (!backend) {
         std::cerr << "error: backend build failed: "
                   << backend.error().detail << '\n';
