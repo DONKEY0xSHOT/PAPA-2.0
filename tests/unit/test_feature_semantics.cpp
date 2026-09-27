@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -236,6 +237,18 @@ TEST_CASE("Os and Arch: wildcard semantics hold in both directions") {
     FeatureSet any_arch;
     any_arch.add(make<Arch>(std::string("any")), a);
     CHECK(Arch("amd64").matches(any_arch));
+}
+
+TEST_CASE("Os: only the set side any contributes locations to a concrete rule") {
+    const Address a = va(0x1000);
+    const Address b = va(0x2000);
+    FeatureSet    fs;
+    fs.add(make<Os>(std::string("windows")), a);
+    fs.add(make<Os>(std::string("any")), b);
+
+    const auto r = Os("linux").evaluate(fs, false);
+    CHECK(r.success);
+    CHECK(r.locations == std::unordered_set<Address>{b});
 }
 
 TEST_CASE("Property equality requires both name and access to match") {

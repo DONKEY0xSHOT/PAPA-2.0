@@ -8,6 +8,7 @@
 
 #include "papa/capabilities/static_.h"
 #include "papa/engine.h"
+#include "papa/features/address.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/extractor.h"
@@ -160,4 +161,33 @@ TEST_CASE("pipeline: a rule matches end to end against a synthetic PE") {
 
     const bool matched = caps->all_matches.count("write file synthetic") == 1;
     CHECK(matched);
+}
+
+TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {
+    papa_tests::PeBuilder b;
+    b.imports = {{"kernel32.dll", {"ExitProcess"}}};
+    // 0x00 xor eax,eax | 0x02 ret | 0x03 int3 | 0x04 jmp [rip+X]
+    b.code            = {0x33, 0xC0, 0xC3, 0xCC, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+    b.pdata_functions = {{0x00, 0x03}, {0x04, 0x0A}};
+    const std::uint64_t text  = b.base() + papa_tests::PeBuilder::kTextRva;
+    auto                probe = papa::pe::PeParser::parse(b.build());
+    REQUIRE(probe.has_value());
+    REQUIRE(probe->imports().size() == 1);
+    papa_tests::detail::poke(
+        b.code, 6, static_cast<std::int32_t>(probe->imports().front().iat_va - (text + 0x0A)));
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    REQUIRE(backend.has_value());
+    const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
+
+    namespace pf  = papa::features;
+    const auto at = [text](std::uint64_t off) {
+        return pf::Address{pf::AbsoluteVirtualAddress{text + off}};
+    };
+    CHECK(extractor.is_library_function(at(0x04)));
+    CHECK_FALSE(extractor.is_library_function(at(0x00)));
+    CHECK_FALSE(extractor.is_library_function(at(0x02)));
+    CHECK_FALSE(extractor.is_library_function(pf::Address{pf::NoAddress{}}));
 }
