@@ -7,8 +7,11 @@
 
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_image.h"
+
+namespace papa::features::extractors::papa_native::flirt {
+class FlirtSignatureSet;
+}
 
 namespace papa::features::extractors::papa_native::viv {
 

@@ -3,7 +3,6 @@
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/pe/pe_image.h"
 
@@ -13,6 +12,10 @@
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
+
+namespace flirt {
+class FlirtSignatureSet;
+}
 
 class PapaNativeBackend {
 public:

@@ -2,7 +2,6 @@
 
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_image.h"
 
 #include <cstddef>
@@ -15,6 +14,10 @@
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
+
+namespace flirt {
+class FlirtSignatureSet;
+}
 
 // How vivisect's .pdata walk treats one RUNTIME_FUNCTION (parsers/pe.py)
 enum class PdataEntryKind {
