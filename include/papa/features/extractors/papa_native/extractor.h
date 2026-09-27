@@ -6,6 +6,7 @@
 #include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
 #include "papa/features/extractors/papa_native/library_signatures.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -80,6 +81,8 @@ public:
 private:
     PapaNativeBackend                              backend_;
     std::unordered_map<std::uint64_t, std::string> function_names_;
+    // Position of each recovered function by entry VA, for the per-function library check
+    std::unordered_map<std::uint64_t, std::size_t> function_index_{};
 };
 
 }  // namespace papa::features::extractors::papa_native
