@@ -29,6 +29,7 @@ using features::FeatureTag;
         case FeatureTag::kRegex:
         case FeatureTag::kBytes:
         case FeatureTag::kOs:
+        // A global feature that is not selective, which capa does not index either
         case FeatureTag::kArch:
         // Injected during the match cycle, after select has already picked the candidates
         case FeatureTag::kMatchedRule:
