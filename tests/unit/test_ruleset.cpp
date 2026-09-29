@@ -336,3 +336,36 @@ TEST_CASE("ruleset: match runs every rule at the requested scope") {
     CHECK(matches.count("hits-foo") == 1);
     CHECK(matches.count("hits-bar") == 0);
 }
+
+TEST_CASE("ruleset: match sees a same-scope match reference under an or") {
+    std::vector<std::unique_ptr<Rule>> rules;
+    rules.push_back(make_rule(
+        "rule:\n"
+        "  meta:\n"
+        "    name: rule-a\n"
+        "    scope: function\n"
+        "  features:\n"
+        "    - api: foo\n"));
+    rules.push_back(make_rule(
+        "rule:\n"
+        "  meta:\n"
+        "    name: rule-b\n"
+        "    scope: function\n"
+        "  features:\n"
+        "    - or:\n"
+        "      - match: rule-a\n"
+        "      - api: bar\n"));
+
+    auto rs = RuleSet::from_rules(std::move(rules));
+    REQUIRE(rs);
+
+    // rule-a's match is injected mid-cycle, after the index picked candidates from foo alone
+    FeatureSet fs;
+    fs.add(std::make_shared<const Api>(std::string("foo")),
+           Address{AbsoluteVirtualAddress{0x1000}});
+
+    auto [_fs, matches] = rs->match(Scope::kFunction, std::move(fs),
+                                    Address{AbsoluteVirtualAddress{0x1000}});
+    CHECK(matches.count("rule-a") == 1);
+    CHECK(matches.count("rule-b") == 1);
+}

@@ -6,6 +6,7 @@
 #include "papa/features/address.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/pefile_extractor.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
@@ -22,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <ostream>
@@ -192,6 +194,13 @@ int run(const Args& args) {
                   << '\n';
         return kExitInvalidRule;
     }
+
+    // The FLIRT packs decode on a background thread while the rules load and the file
+    // pass runs. The backend build is the only consumer and waits for the result
+    auto flirt_sigs = std::async(
+        std::launch::async,
+        &features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded);
+
     auto ruleset = rules::RuleSet::from_directory(args.rules_dir);
     if (!ruleset) {
         std::cerr << "error: failed to load rules: "
@@ -256,8 +265,10 @@ int run(const Args& args) {
         }
     }
 
-    // Full code pipeline
-    auto backend = features::extractors::papa_native::PapaNativeBackend::build(*image);
+    // Full code pipeline. The FLIRT signatures are needed only during discovery, so the
+    // decoded set is a temporary that is freed as soon as the backend is built
+    auto backend = features::extractors::papa_native::PapaNativeBackend::build(
+        *image, flirt_sigs.get());
     if (!backend) {
         std::cerr << "error: backend build failed: "
                   << backend.error().detail << '\n';

@@ -74,7 +74,12 @@ insn_from_handle(const base::InsnHandle& ih) {
 }  // namespace
 
 PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
-    : backend_(std::move(backend)) {}
+    : backend_(std::move(backend)) {
+    const auto& fns = backend_.functions();
+    function_index_.reserve(fns.size());
+    // Discovery drops repeat entries, so each entry VA is unique and maps to one position
+    for (std::size_t i = 0; i < fns.size(); ++i) { function_index_.emplace(fns[i].va, i); }
+}
 
 features::Address PapaNativeStaticExtractor::get_base_address() const {
     return va_addr(backend_.image().image_base());
@@ -248,17 +253,15 @@ bool PapaNativeStaticExtractor::is_library_function(
     if (!va.has_value()) { return false; }
 
     // Locate the function carrying that VA
-    const Function* fn = nullptr;
-    for (const auto& f : backend_.functions()) {
-        if (f.va == *va) { fn = &f; break; }
-    }
-    if (fn == nullptr) { return false; }
+    const auto it = function_index_.find(*va);
+    if (it == function_index_.end()) { return false; }
+    const Function& fn = backend_.functions()[it->second];
 
     // CFG-derived hint takes precedence when the recovery layer set it
-    if (fn->likely_library) { return true; }
+    if (fn.likely_library) { return true; }
 
     // Structural thunks are library code regardless of any signature
-    if (LibrarySignatureSet::is_thunk(*fn)) { return true; }
+    if (LibrarySignatureSet::is_thunk(fn)) { return true; }
 
     // FLIRT identified the library functions during analysis, so this is a lookup into
     // that result rather than a second matching pass

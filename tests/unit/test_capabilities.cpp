@@ -11,6 +11,7 @@
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/pefile_extractor.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -132,7 +133,8 @@ TEST_CASE("capabilities: find_static_capabilities runs end-to-end on notepad") {
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
 
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(*img);
+    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
+        *img, papa::features::extractors::papa_native::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend);
     papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
@@ -169,7 +171,8 @@ TEST_CASE("capabilities: per-scope helpers compose correctly on a tiny synthetic
     }
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(*img);
+    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
+        *img, papa::features::extractors::papa_native::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend);
     papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));

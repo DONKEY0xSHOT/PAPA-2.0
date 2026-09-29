@@ -25,6 +25,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_rules_parser.cpp
     test_ruleset.cpp
     test_optimizer.cpp
+    test_feature_index.cpp
     test_com_lookup.cpp
     test_string_utils.cpp
     test_extractor_helpers.cpp
@@ -37,6 +38,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_capabilities.cpp
     test_hash.cpp
     test_json_writer.cpp
+    test_regex_prefilter.cpp
     test_render.cpp
     test_render_table.cpp
     test_library_signatures.cpp

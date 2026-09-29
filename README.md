@@ -14,7 +14,7 @@ PAPA keeps CAPA's rule semantics and report format, but it's much faster!
   CAPA reports works unchanged.
 - **No runtime** - a single native executable that imports only `kernel32.dll`,
   so it runs on a clean machine with no Visual C++ redistributable installed!
-- **Much faster : )** - 9x to 75x, and the gap widens as the binary grows.
+- **Much faster : )** - 14x to 115x, and the gap widens as the binary grows.
 - **Minimal dependencies** - only Zydis for disassembly, miniz for zlib
   decompression (needed for FLIRT) & doctest for unit testing.
 
@@ -25,10 +25,10 @@ the same machine (`--json`, output redirected), on a 4-core i5-7500.
 
 | Sample          |    Size | CAPA     | PAPA    | Speedup  |
 |-----------------|--------:|---------:|--------:|--------: |
-| calc            |   27 KB |   11.5 s |   1.1 s |    ~10x  |
-| notepad         |  196 KB |   49.4 s |   1.9 s |    ~26x  |
-| 7z              |  549 KB |  215.6 s |   3.2 s |    ~67x  |
-| msedge          |  4.92 MB| 1283.5 s |  21.4 s |    ~60x  |
+| calc            |   27 KB |   11.5 s |   0.8 s |    ~14x  |
+| notepad         |  196 KB |   49.4 s |   1.2 s |    ~43x  |
+| 7z              |  549 KB |  215.6 s |   1.9 s |   ~115x  |
+| msedge          |  4.92 MB| 1283.5 s |  11.2 s |   ~114x  |
 
 Smaller binaries are dominated by a fixed startup cost (loading and compiling the rule corpus), 
 while larger binaries need more time for actual code analysis, making the speedup increasingly significant!
@@ -41,3 +41,8 @@ known false positives or false negatives on tested samples.
 
 Perfect match-set parity on an *arbitrary* binary is currently not promised, so an unseen sample can still diverge a bit. 
 In practice, precision and recall should stay ~100%.
+
+## License
+
+PAPA is licensed under the GNU AGPL-3.0-only (see `LICENSE`). Third-party credits
+and licenses are in `NOTICE`.

@@ -7,6 +7,7 @@
 #include "papa/features/insn.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -239,7 +240,8 @@ TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
     }
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(*img);
+    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
+        *img, papa::features::extractors::papa_native::flirt::FlirtSignatureSet::embedded());
     REQUIRE(backend);
     papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));

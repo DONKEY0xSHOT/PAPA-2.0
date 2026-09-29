@@ -2,11 +2,13 @@
 
 #include "papa/engine.h"
 #include "papa/util/hashing.h"
+#include "papa/util/regex_prefilter.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -45,9 +47,15 @@ RegexLiteral parse_regex_literal(std::string_view lit) {
     return RegexLiteral{std::string(lit), false};
 }
 
-// "any" wildcard used by Os and Arch evaluate paths
+// "any" wildcard used by the Os evaluate paths
 // Kept local so the constants module does not need to leak in through the header
 constexpr std::string_view kAnyWildcard = "any";
+
+// The set-side wildcard, found by lookup instead of a scan of the whole set
+[[nodiscard]] const FeaturePtr& any_os() {
+    static const FeaturePtr any = std::make_shared<const Os>(std::string(kAnyWildcard));
+    return any;
+}
 
 }  // namespace
 
@@ -128,6 +136,7 @@ Regex::Regex(std::string literal, std::string desc)
     } catch (const std::regex_error&) {
         compiled_ok_  = false;
     }
+    required_ = util::required_literal(pattern_, case_insensitive_);
 }
 
 engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
@@ -137,6 +146,7 @@ engine::Result Regex::evaluate(const FeatureSet& fs, bool sc) const {
     if (!compiled_ok_) { return r; }
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
+        if (!util::contains_literal(s.value(), required_, case_insensitive_)) { continue; }
         if (std::regex_search(s.value(), compiled_)) {
             r.success = true;
             const auto it = fs.find(f);
@@ -153,6 +163,7 @@ bool Regex::matches(const FeatureSet& fs) const {
     if (!compiled_ok_) { return false; }
     for (const auto& f : fs.strings()) {
         const auto& s = static_cast<const String&>(*f);
+        if (!util::contains_literal(s.value(), required_, case_insensitive_)) { continue; }
         if (std::regex_search(s.value(), compiled_)) { return true; }
     }
     return false;
@@ -368,33 +379,31 @@ Os::Os(std::string v, std::string desc)
       value_(std::move(v)) {}
 
 engine::Result Os::evaluate(const FeatureSet& fs, bool sc) const {
-    // Exact-structural path first to handle the common case without scanning
     auto r = Feature::evaluate(fs, sc);
     if (r.success) { return r; }
-
-    // Wildcard pass: rule side "any" matches any concrete Os in the set and
-    // set side "any" matches any concrete rule
-    r.node = this;
-    const bool self_any = (value_ == kAnyWildcard);
+    if (value_ != kAnyWildcard) {
+        // Set side any matches every concrete rule value
+        if (const auto it = fs.find(any_os()); it != fs.end()) {
+            r.success = true;
+            r.locations.insert(it->second.begin(), it->second.end());
+        }
+        return r;
+    }
+    // Rule side any matches every Os in the set
     for (const auto& [f, locs] : fs) {
         if (!f || f->tag() != FeatureTag::kOs) { continue; }
-        const auto& other = static_cast<const Os&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) {
-            r.success = true;
-            r.locations.insert(locs.begin(), locs.end());
-            if (sc) { return r; }
-        }
+        r.success = true;
+        r.locations.insert(locs.begin(), locs.end());
+        if (sc) { return r; }
     }
     return r;
 }
 
 bool Os::matches(const FeatureSet& fs) const {
     if (Feature::matches(fs)) { return true; }
-    const bool self_any = (value_ == kAnyWildcard);
-    for (const auto& [f, locs] : fs) {
-        if (!f || f->tag() != FeatureTag::kOs) { continue; }
-        const auto& other = static_cast<const Os&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) { return true; }
+    if (value_ != kAnyWildcard) { return fs.find(any_os()) != fs.end(); }
+    for (const auto& entry : fs) {
+        if (entry.first && entry.first->tag() == FeatureTag::kOs) { return true; }
     }
     return false;
 }
@@ -417,35 +426,6 @@ std::string Os::to_string() const {
 Arch::Arch(std::string v, std::string desc)
     : Feature(FeatureTag::kArch, "arch", std::move(desc)),
       value_(std::move(v)) {}
-
-engine::Result Arch::evaluate(const FeatureSet& fs, bool sc) const {
-    auto r = Feature::evaluate(fs, sc);
-    if (r.success) { return r; }
-
-    r.node = this;
-    const bool self_any = (value_ == kAnyWildcard);
-    for (const auto& [f, locs] : fs) {
-        if (!f || f->tag() != FeatureTag::kArch) { continue; }
-        const auto& other = static_cast<const Arch&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) {
-            r.success = true;
-            r.locations.insert(locs.begin(), locs.end());
-            if (sc) { return r; }
-        }
-    }
-    return r;
-}
-
-bool Arch::matches(const FeatureSet& fs) const {
-    if (Feature::matches(fs)) { return true; }
-    const bool self_any = (value_ == kAnyWildcard);
-    for (const auto& [f, locs] : fs) {
-        if (!f || f->tag() != FeatureTag::kArch) { continue; }
-        const auto& other = static_cast<const Arch&>(*f);
-        if (self_any || other.value_ == kAnyWildcard) { return true; }
-    }
-    return false;
-}
 
 std::size_t Arch::hash() const noexcept {
     return mix_tag(tag_, std::hash<std::string>{}(value_));

@@ -66,6 +66,7 @@ set(PAPA_LIB_SOURCES
     util/yaml.cpp
     util/hash.cpp
     util/json_writer.cpp
+    util/regex_prefilter.cpp
     util/string_utils.cpp
     rules/feature_index.cpp
     rules/optimizer.cpp

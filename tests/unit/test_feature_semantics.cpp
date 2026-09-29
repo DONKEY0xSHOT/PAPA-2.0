@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -133,6 +134,15 @@ TEST_CASE("Regex literal forms parse slashes and case-insensitive suffix") {
     CHECK(r_anch.locations.count(va(0x2)) == 1);
 }
 
+TEST_CASE("Regex: a required literal never hides a case-insensitive match") {
+    FeatureSet fs;
+    fs.add(make<String>(std::string("C:\\Program Files\\VirtualBox Guest Additions")), va(0x1000));
+    CHECK(Regex("/virtualbox guest/i").matches(fs));
+    CHECK(Regex("/virtualbox guest/i").evaluate(fs, false).locations.count(va(0x1000)) == 1);
+    CHECK(Regex("/VirtualBox/").matches(fs));
+    CHECK_FALSE(Regex("/vmware tools/i").matches(fs));
+}
+
 TEST_CASE("Bytes matches when self is a prefix of a candidate") {
     FeatureSet fs;
     fs.add(make<Bytes>(bytes_of({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE})), va(0x100));
@@ -193,16 +203,58 @@ TEST_CASE("Os fs side any matches any concrete rule") {
     CHECK(r.success);
 }
 
-TEST_CASE("Arch wildcard behaves like Os wildcard") {
+TEST_CASE("Arch has no wildcard, so any matches only a literal any") {
     FeatureSet fs;
     fs.add(make<Arch>(std::string("amd64")), va(0x0));
 
     Arch any_rule{"any"};
-    auto r = any_rule.evaluate(fs, false);
-    CHECK(r.success);
+    CHECK_FALSE(any_rule.evaluate(fs, false).success);
+
+    Arch exact{"amd64"};
+    CHECK(exact.evaluate(fs, false).success);
 
     Arch mismatch{"i386"};
     CHECK_FALSE(mismatch.evaluate(fs, false).success);
+
+    FeatureSet literal_any;
+    literal_any.add(make<Arch>(std::string("any")), va(0x0));
+    CHECK(any_rule.evaluate(literal_any, false).success);
+}
+
+TEST_CASE("Os and Arch: only os treats any as a wildcard, in both directions") {
+    const Address a = va(0x1000);
+
+    FeatureSet any_os;
+    any_os.add(make<Os>(std::string("any")), a);
+    CHECK(Os("windows").matches(any_os));
+    const auto r = Os("windows").evaluate(any_os, false);
+    CHECK(r.success);
+    CHECK(r.locations.size() == 1U);
+
+    FeatureSet windows;
+    windows.add(make<Os>(std::string("windows")), a);
+    CHECK(Os("any").matches(windows));
+    CHECK_FALSE(Os("linux").matches(windows));
+
+    FeatureSet i386;
+    i386.add(make<Arch>(std::string("i386")), a);
+    CHECK_FALSE(Arch("amd64").matches(i386));
+    CHECK_FALSE(Arch("any").matches(i386));
+    FeatureSet any_arch;
+    any_arch.add(make<Arch>(std::string("any")), a);
+    CHECK_FALSE(Arch("amd64").matches(any_arch));
+}
+
+TEST_CASE("Os: only the set side any contributes locations to a concrete rule") {
+    const Address a = va(0x1000);
+    const Address b = va(0x2000);
+    FeatureSet    fs;
+    fs.add(make<Os>(std::string("windows")), a);
+    fs.add(make<Os>(std::string("any")), b);
+
+    const auto r = Os("linux").evaluate(fs, false);
+    CHECK(r.success);
+    CHECK(r.locations == std::unordered_set<Address>{b});
 }
 
 TEST_CASE("Property equality requires both name and access to match") {

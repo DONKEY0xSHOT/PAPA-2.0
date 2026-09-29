@@ -204,4 +204,4 @@ jobs:
             --title "$tag" \
             --target "${{ github.sha }}" \
             --generate-notes \
-            dist/papa.exe
+            dist/papa.exe LICENSE NOTICE

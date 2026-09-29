@@ -198,10 +198,17 @@ TEST_CASE("flirt_signature_set: embedded registry loads every bundled sig") {
         CHECK(e.data != nullptr);
         CHECK(e.size > 100U);
     }
-    auto set = flirt::FlirtSignatureSet::make_embedded();
+    const auto& set = flirt::FlirtSignatureSet::embedded();
     CHECK(set.tree_count() == reg.size());  // all 3 parse with zero drops
 #else
     MESSAGE("FLIRT embedding is MSVC-only; registry is empty off MSVC");
     CHECK(flirt::embedded::registry().empty());
 #endif
+}
+
+TEST_CASE("flirt_signature_set: the embedded set is decoded once and shared") {
+    const auto& first  = flirt::FlirtSignatureSet::embedded();
+    const auto& second = flirt::FlirtSignatureSet::embedded();
+    CHECK(&first == &second);
+    CHECK(first.tree_count() == flirt::embedded::registry().size());
 }

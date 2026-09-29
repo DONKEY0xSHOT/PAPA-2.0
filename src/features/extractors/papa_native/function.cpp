@@ -6,12 +6,10 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -36,50 +34,27 @@ make_characteristic(const char* name, std::uint64_t va) {
              va_addr(va) };
 }
 
-// State for one Tarjan-SCC iteration over a function's BB graph
-struct TarjanState {
-    std::vector<int>          index_of;            // -1 means unvisited
-    std::vector<int>          lowlink;
-    std::vector<bool>         on_stack;
-    std::stack<std::size_t>   work_stack;
-    int                       next_index{0};
-    bool                      found_cycle{false};
-};
-
-// Recursive Tarjan strongconnect. Depth is bounded by the number of basic blocks in fn,
-// which is itself capped by kMaxFunctionsPerImage during CFG recovery
-void strongconnect(std::size_t                                                v,
-                   const std::vector<std::vector<std::size_t>>&               succ,
-                   TarjanState&                                                state) {
-    if (state.found_cycle) { return; }
-    state.index_of[v] = state.next_index;
-    state.lowlink[v]  = state.next_index;
-    ++state.next_index;
-    state.work_stack.push(v);
-    state.on_stack[v] = true;
-
-    for (const std::size_t w : succ[v]) {
-        if (state.index_of[w] == -1) {
-            strongconnect(w, succ, state);
-            state.lowlink[v] = std::min(state.lowlink[v], state.lowlink[w]);
-        } else if (state.on_stack[w]) {
-            state.lowlink[v] = std::min(state.lowlink[v], state.index_of[w]);
+// True when the block graph has a cycle, which is capa's loop test once self-loops are dropped
+// Kahn's peel is iterative, so a crafted chain of blocks cannot exhaust the native stack
+[[nodiscard]] bool has_cycle(const std::vector<std::vector<std::size_t>>& succ) {
+    std::vector<std::size_t> in_degree(succ.size(), 0);
+    for (const auto& targets : succ) {
+        for (const std::size_t w : targets) { ++in_degree[w]; }
+    }
+    std::vector<std::size_t> ready;
+    for (std::size_t v = 0; v < succ.size(); ++v) {
+        if (in_degree[v] == 0) { ready.push_back(v); }
+    }
+    std::size_t peeled = 0;
+    while (!ready.empty()) {
+        const std::size_t v = ready.back();
+        ready.pop_back();
+        ++peeled;
+        for (const std::size_t w : succ[v]) {
+            if (--in_degree[w] == 0) { ready.push_back(w); }
         }
     }
-
-    if (state.lowlink[v] == state.index_of[v]) {
-        // Pop the entire SCC
-        // Non-trivial means size >= 2 in CAPA's loop characteristic
-        std::size_t component_size = 0;
-        while (!state.work_stack.empty()) {
-            const std::size_t w = state.work_stack.top();
-            state.work_stack.pop();
-            state.on_stack[w] = false;
-            ++component_size;
-            if (w == v) { break; }
-        }
-        if (component_size >= 2) { state.found_cycle = true; }
-    }
+    return peeled != succ.size();
 }
 
 }  // namespace
@@ -100,20 +75,13 @@ extract_loop(const Function& fn) {
     for (std::size_t i = 0; i < n; ++i) {
         for (const std::uint64_t s : fn.basic_blocks[i].successors) {
             const auto it = bb_index.find(s);
-            if (it == bb_index.end()) { continue; }
+            // A self-loop alone is a size-one component, which capa does not count
+            if (it == bb_index.end() || it->second == i) { continue; }
             succ[i].push_back(it->second);
         }
     }
 
-    TarjanState state;
-    state.index_of.assign(n, -1);
-    state.lowlink.assign(n, -1);
-    state.on_stack.assign(n, false);
-
-    for (std::size_t i = 0; i < n && !state.found_cycle; ++i) {
-        if (state.index_of[i] == -1) { strongconnect(i, succ, state); }
-    }
-    if (!state.found_cycle) { return std::nullopt; }
+    if (!has_cycle(succ)) { return std::nullopt; }
     return make_characteristic(kCharLoop, fn.va);
 }
 

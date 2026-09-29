@@ -41,7 +41,7 @@ public:
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
 };
 
-// Regex scans every String feature in fs via std::regex_search
+// Regex runs std::regex_search on every String feature that holds its required literal
 class Regex : public String {
 public:
     explicit Regex(std::string literal, std::string desc = {});
@@ -58,6 +58,8 @@ private:
     // CAPA rules are linted against Python's re module which supports a few constructs
     // std::regex does not (named groups, inline flags, possessive quantifiers)
     bool        compiled_ok_{true};
+    // A literal every match contains, lowercased when case-insensitive, or empty
+    std::string required_;
 };
 
 // Bytes matches when self.value is a prefix of any Bytes feature's value
@@ -171,8 +173,7 @@ private:
     std::string value_;
 };
 
-// Os, Arch, and Format support "any" as a wildcard in either the rule
-// or the feature set, mirroring CAPA's bidirectional wildcard semantics
+// Os treats "any" as a wildcard in either the rule or the feature set, as capa does
 class Os : public Feature {
 public:
     explicit Os(std::string v, std::string desc = {});
@@ -188,13 +189,12 @@ private:
     std::string value_;
 };
 
+// Arch matches only an equal value, so arch: any matches only a literal any, as in capa
 class Arch : public Feature {
 public:
     explicit Arch(std::string v, std::string desc = {});
     [[nodiscard]] const std::string& value() const noexcept { return value_; }
 
-    [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
-    [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
     [[nodiscard]] std::string    to_string() const override;
