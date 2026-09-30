@@ -49,11 +49,6 @@ public:
     /// True when function_bytes match any loaded tree
     [[nodiscard]] bool classify(std::span<const std::uint8_t> function_bytes) const noexcept;
 
-    /// Every leaf module across all loaded trees that matches function_bytes by pattern
-    /// and tail CRC
-    [[nodiscard]] std::vector<const FlirtModule*>
-    match(std::span<const std::uint8_t> function_bytes) const;
-
     /// The number of parsed trees currently held
     [[nodiscard]] std::size_t tree_count() const noexcept { return trees_.size(); }
 

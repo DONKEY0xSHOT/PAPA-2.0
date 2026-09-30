@@ -285,8 +285,4 @@ PapaNativeStaticExtractor::get_function_name(const features::Address& addr) cons
     return it->second;
 }
 
-void PapaNativeStaticExtractor::set_function_name(std::uint64_t va, std::string name) {
-    function_names_.insert_or_assign(va, std::move(name));
-}
-
 }  // namespace papa::features::extractors::papa_native

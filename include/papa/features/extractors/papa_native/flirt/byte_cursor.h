@@ -133,15 +133,6 @@ public:
         return true;
     }
 
-    /// Advance the cursor by `n` bytes without reading them
-    [[nodiscard]] bool skip(std::size_t n) noexcept {
-        if (!remaining(n)) {
-            return false;
-        }
-        pos_ += n;
-        return true;
-    }
-
 private:
     std::span<const std::uint8_t> buf_;
     std::size_t                   pos_;
