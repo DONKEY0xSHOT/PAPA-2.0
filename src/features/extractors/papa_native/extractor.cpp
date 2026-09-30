@@ -3,13 +3,13 @@
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
+#include "papa/features/extractors/global_.h"
 #include "papa/features/extractors/pefile.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/basic_block.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/function.h"
-#include "papa/features/extractors/papa_native/global_.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/features/extractors/papa_native/library_signatures.h"
 
@@ -84,7 +84,7 @@ features::Address PapaNativeStaticExtractor::get_base_address() const {
 
 std::vector<base::FeatureWithAddress>
 PapaNativeStaticExtractor::extract_global_features() const {
-    auto src = ::papa::features::extractors::papa_native::extract_global_features(
+    auto src = ::papa::features::extractors::extract_global_features(
         backend_.image());
     std::vector<base::FeatureWithAddress> out;
     out.reserve(src.size());

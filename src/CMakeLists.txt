@@ -17,6 +17,7 @@ set(PAPA_LIB_SOURCES
     features/extractors/helpers.cpp
     features/extractors/strings.cpp
     features/extractors/pefile.cpp
+    features/extractors/global_.cpp
     features/extractors/papa_native/disassembler.cpp
     features/extractors/papa_native/cfg.cpp
     features/extractors/papa_native/viv/location_db.cpp
@@ -27,7 +28,6 @@ set(PAPA_LIB_SOURCES
     features/extractors/papa_native/viv/discovery_passes.cpp
     features/extractors/papa_native/viv/flirt_analysis.cpp
     features/extractors/papa_native/viv/engine.cpp
-    features/extractors/papa_native/global_.cpp
     features/extractors/papa_native/insn.cpp
     features/extractors/papa_native/indirect_calls.cpp
     features/extractors/papa_native/jump_tables.cpp

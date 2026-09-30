@@ -2,8 +2,8 @@
 
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
+#include "papa/features/extractors/global_.h"
 #include "papa/features/extractors/pefile.h"
-#include "papa/features/extractors/papa_native/global_.h"
 #include "papa/pe/pe_image.h"
 
 #include <utility>
@@ -28,7 +28,7 @@ PefileFeatureExtractor::extract_global_features() const {
     std::vector<FeatureWithAddress> out;
     if (image_ == nullptr) { return out; }
     auto globals =
-        ::papa::features::extractors::papa_native::extract_global_features(*image_);
+        ::papa::features::extractors::extract_global_features(*image_);
     out.reserve(globals.size());
     for (auto& fa : globals) { out.push_back(std::move(fa)); }
     return out;

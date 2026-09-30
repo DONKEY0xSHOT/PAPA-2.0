@@ -1,4 +1,4 @@
-#include "papa/features/extractors/papa_native/global_.h"
+#include "papa/features/extractors/global_.h"
 
 #include "papa/constants.h"
 #include "papa/features/address.h"
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace papa::features::extractors::papa_native {
+namespace papa::features::extractors {
 
 namespace {
 
@@ -53,4 +53,4 @@ extract_global_features(const ::papa::pe::PeImage& image) {
     return out;
 }
 
-}  // namespace papa::features::extractors::papa_native
+}  // namespace papa::features::extractors

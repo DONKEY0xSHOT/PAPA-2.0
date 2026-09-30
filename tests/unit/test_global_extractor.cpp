@@ -2,7 +2,7 @@
 
 #include "doctest.h"
 
-#include "papa/features/extractors/papa_native/global_.h"
+#include "papa/features/extractors/global_.h"
 
 #include "papa/features/address.h"
 #include "papa/features/common.h"
@@ -21,8 +21,8 @@ using papa::features::FeatureTag;
 using papa::features::Format;
 using papa::features::NoAddress;
 using papa::features::Os;
-using papa::features::extractors::papa_native::FeatureWithAddress;
-using papa::features::extractors::papa_native::extract_global_features;
+using papa::features::extractors::FeatureWithAddress;
+using papa::features::extractors::extract_global_features;
 
 namespace {
 
