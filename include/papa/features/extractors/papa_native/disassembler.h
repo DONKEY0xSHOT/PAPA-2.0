@@ -81,10 +81,6 @@ public:
     [[nodiscard]] static std::string_view
         mnemonic_to_string(ZydisMnemonic m) noexcept;
 
-    // ESP/EBP or RSP/RBP per width
-    [[nodiscard]] std::span<const ZydisRegister>
-        stack_registers() const noexcept;
-
 private:
     ZydisDecoder decoder_ {};
     bool         is_64bit_ { false };

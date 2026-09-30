@@ -319,20 +319,6 @@ TEST_CASE("decode detects gs segment prefix for x64 PEB access") {
     CHECK_FALSE(r->has_prefix_fs);
 }
 
-TEST_CASE("stack_registers returns width-appropriate set") {
-    Disassembler d64(true);
-    const auto regs64 = d64.stack_registers();
-    REQUIRE(regs64.size() == 2);
-    CHECK(regs64[0] == ZYDIS_REGISTER_RSP);
-    CHECK(regs64[1] == ZYDIS_REGISTER_RBP);
-
-    Disassembler d32(false);
-    const auto regs32 = d32.stack_registers();
-    REQUIRE(regs32.size() == 2);
-    CHECK(regs32[0] == ZYDIS_REGISTER_ESP);
-    CHECK(regs32[1] == ZYDIS_REGISTER_EBP);
-}
-
 TEST_CASE("decode does not over-read past buffer end") {
     Disassembler d(true);
     // E8 needs 4 more bytes

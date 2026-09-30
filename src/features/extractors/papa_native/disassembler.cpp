@@ -9,14 +9,6 @@ namespace papa::features::extractors::papa_native {
 
 namespace {
 
-// The stack and frame pointer registers stack_registers() returns for each width
-constexpr std::array<ZydisRegister, 2> kStackRegs32 {
-    ZYDIS_REGISTER_ESP, ZYDIS_REGISTER_EBP,
-};
-constexpr std::array<ZydisRegister, 2> kStackRegs64 {
-    ZYDIS_REGISTER_RSP, ZYDIS_REGISTER_RBP,
-};
-
 [[nodiscard]] bool is_ip_register(ZydisRegister r) noexcept {
     return r == ZYDIS_REGISTER_RIP || r == ZYDIS_REGISTER_EIP || r == ZYDIS_REGISTER_IP;
 }
@@ -36,12 +28,6 @@ Disassembler::Disassembler(bool is_64bit) : is_64bit_(is_64bit) {
         // Treat any failure as a programmer error
         throw PapaInvariantError("ZydisDecoderInit failed");
     }
-}
-
-std::span<const ZydisRegister> Disassembler::stack_registers() const noexcept {
-    return is_64bit_
-        ? std::span<const ZydisRegister>(kStackRegs64.data(), kStackRegs64.size())
-        : std::span<const ZydisRegister>(kStackRegs32.data(), kStackRegs32.size());
 }
 
 std::string_view Disassembler::mnemonic_to_string(ZydisMnemonic m) noexcept {
