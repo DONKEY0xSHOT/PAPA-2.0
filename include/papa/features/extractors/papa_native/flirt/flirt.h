@@ -25,8 +25,8 @@ struct EmbeddedSig {
 
 }  // namespace embedded
 
-/// A collection of parsed FLIRT trees. make_embedded() returns a fresh set the caller owns,
-/// embedded() returns a process-wide shared set and add_from_buffer exists for tests
+/// A collection of parsed FLIRT trees. make_embedded() returns a fresh set the caller owns
+/// and add_from_buffer exists for tests
 class FlirtSignatureSet {
 public:
     FlirtSignatureSet()                                        = default;
@@ -37,10 +37,6 @@ public:
 
     /// Build a set from the compile-time embedded signature registry
     [[nodiscard]] static FlirtSignatureSet make_embedded();
-
-    /// The embedded packs decoded once and resident until the process exits, shared by code
-    /// that analyzes many images in one process such as the unit tests
-    [[nodiscard]] static const FlirtSignatureSet& embedded();
 
     /// Parse one raw .sig buffer and append its tree. Returns false and logs
     /// once to stderr on any parse failure. Never throws

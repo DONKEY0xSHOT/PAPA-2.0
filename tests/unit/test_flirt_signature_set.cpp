@@ -6,6 +6,8 @@
 #include "papa/features/extractors/papa_native/flirt/flirt_crc16.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_format.h"
 
+#include "test_support.h"
+
 #include <array>
 #include <cstdint>
 #include <span>
@@ -198,17 +200,10 @@ TEST_CASE("flirt_signature_set: embedded registry loads every bundled sig") {
         CHECK(e.data != nullptr);
         CHECK(e.size > 100U);
     }
-    const auto& set = flirt::FlirtSignatureSet::embedded();
+    const auto& set = papa_tests::shared_flirt_sigs();
     CHECK(set.tree_count() == reg.size());  // all 3 parse with zero drops
 #else
     MESSAGE("FLIRT embedding is MSVC-only; registry is empty off MSVC");
     CHECK(flirt::embedded::registry().empty());
 #endif
-}
-
-TEST_CASE("flirt_signature_set: the embedded set is decoded once and shared") {
-    const auto& first  = flirt::FlirtSignatureSet::embedded();
-    const auto& second = flirt::FlirtSignatureSet::embedded();
-    CHECK(&first == &second);
-    CHECK(first.tree_count() == flirt::embedded::registry().size());
 }

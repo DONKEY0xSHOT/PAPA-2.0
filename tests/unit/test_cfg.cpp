@@ -5,7 +5,6 @@
 
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
 
@@ -18,12 +17,12 @@
 #include <span>
 #include <vector>
 #include "fixture_paths.h"
+#include "test_support.h"
 
 namespace cfg = papa::features::extractors::papa_native::cfg;
 
 using papa::features::extractors::papa_native::Disassembler;
 using papa::features::extractors::papa_native::Function;
-using papa::features::extractors::papa_native::flirt::FlirtSignatureSet;
 using papa::features::extractors::papa_native::PdataEntryKind;
 
 namespace {
@@ -95,7 +94,7 @@ TEST_CASE("recover on notepad.exe seeds at least the entry point and several exp
     REQUIRE(res.has_value());
     Disassembler d(res->is_64bit());
 
-    const auto rec = cfg::recover(*res, d, FlirtSignatureSet::embedded());
+    const auto rec = cfg::recover(*res, d, papa_tests::shared_flirt_sigs());
     REQUIRE(rec.has_value());
     const std::vector<Function>& funcs = rec->functions;
 

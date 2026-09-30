@@ -3,12 +3,12 @@
 #include "doctest.h"
 
 #include "papa/features/extractors/papa_native/backend.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/indirect_calls.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/pe/pe_parser.h"
 
 #include "fixture_paths.h"
+#include "test_support.h"
 
 #include <cstdint>
 #include <optional>
@@ -54,7 +54,7 @@ TEST_CASE("api: chrome resolves thunked and register-indirect imports") {
     }
     auto img = papa::pe::PeParser::parse_file(chrome);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
 
     // jmp [rip+slot] import thunks. MiniDumpWriteDump is called at 0x140213915, which

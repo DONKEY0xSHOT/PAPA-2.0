@@ -5,7 +5,6 @@
 #include "papa/features/extractors/papa_native/backend.h"
 
 #include "papa/features/extractors/papa_native/cfg.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/insn.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -14,9 +13,9 @@
 #include <string_view>
 #include <utility>
 #include "fixture_paths.h"
+#include "test_support.h"
 
 using papa::features::extractors::papa_native::PapaNativeBackend;
-using papa::features::extractors::papa_native::flirt::FlirtSignatureSet;
 
 namespace {
 
@@ -32,7 +31,7 @@ TEST_CASE("backend: build returns a populated aggregate for a real PE") {
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
 
-    auto backend = PapaNativeBackend::build(*img, FlirtSignatureSet::embedded());
+    auto backend = PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
     CHECK(&backend->image() == &*img);
     CHECK_FALSE(backend->functions().empty());
@@ -47,7 +46,7 @@ TEST_CASE("backend: imports are indexed by IAT VA matching the image's row") {
     }
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
-    auto backend = PapaNativeBackend::build(*img, FlirtSignatureSet::embedded());
+    auto backend = PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
 
     for (const auto& [va, row] : backend->imports().by_iat_va) {
@@ -63,7 +62,7 @@ TEST_CASE("backend: backend is move-constructible") {
     }
     auto img = papa::pe::PeParser::parse_file(kNotepad);
     REQUIRE(img.has_value());
-    auto backend = PapaNativeBackend::build(*img, FlirtSignatureSet::embedded());
+    auto backend = PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
 
     PapaNativeBackend moved = std::move(*backend);

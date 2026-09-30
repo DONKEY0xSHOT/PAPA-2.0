@@ -10,6 +10,7 @@
 #include "papa/pe/pe_parser.h"
 
 #include "fixture_paths.h"
+#include "test_support.h"
 
 #include <array>
 #include <cstddef>
@@ -17,7 +18,6 @@
 #include <utility>
 #include <vector>
 
-namespace flirt = papa::features::extractors::papa_native::flirt;
 namespace pn = papa::features::extractors::papa_native;
 
 // End-to-end check that the embedded FLIRT signatures match real library functions in a
@@ -30,7 +30,7 @@ TEST_CASE("flirt: embedded signatures classify real library functions") {
     }
     auto img = papa::pe::PeParser::parse_file(chrome);
     REQUIRE(img.has_value());
-    const auto& sigs = flirt::FlirtSignatureSet::embedded();
+    const auto& sigs = papa_tests::shared_flirt_sigs();
     // The packs are embedded as a Windows resource, so the registry is empty on any
     // other toolchain and there is nothing to classify against
     if (sigs.tree_count() == 0U) {
@@ -63,7 +63,7 @@ TEST_CASE("flirt: per-tree priming marks certutil mainCRTStartup library") {
     }
     auto img = papa::pe::PeParser::parse_file(certutil);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img, flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend);
     const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 

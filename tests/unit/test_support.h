@@ -1,6 +1,7 @@
 #pragma once
 
 #include "papa/engine.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
@@ -23,6 +24,14 @@ make_rule(std::string                               name,
     meta.namespace_          = std::move(ns);
     meta.scopes.static_scope = scope;
     return std::make_unique<papa::rules::Rule>(std::move(meta), std::move(stmt), std::string{});
+}
+
+/// The embedded FLIRT signatures, decoded once per test process and shared
+[[nodiscard]] inline const papa::features::extractors::papa_native::flirt::FlirtSignatureSet&
+shared_flirt_sigs() {
+    static const auto set =
+        papa::features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded();
+    return set;
 }
 
 }  // namespace papa_tests
