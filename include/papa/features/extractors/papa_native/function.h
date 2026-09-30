@@ -1,17 +1,13 @@
 #pragma once
 
-#include "papa/features/address.h"
-#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native::function_ {
-
-using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Detect any non-trivial cycle in the function's CFG via Tarjan's SCC
 // Returns at most one feature even when the function contains many loops

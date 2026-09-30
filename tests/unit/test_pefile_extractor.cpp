@@ -29,7 +29,7 @@ using papa::features::Import;
 using papa::features::NoAddress;
 using papa::features::Section;
 using papa::features::String;
-using papa::features::extractors::pefile::FeatureWithAddress;
+using papa::features::extractors::FeatureWithAddress;
 
 namespace {
 

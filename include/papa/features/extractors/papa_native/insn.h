@@ -1,7 +1,6 @@
 #pragma once
 
-#include "papa/features/address.h"
-#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/pe/pe_image.h"
@@ -11,7 +10,6 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -29,10 +27,6 @@ build_import_table(const ::papa::pe::PeImage& image);
 }  // namespace papa::features::extractors::papa_native
 
 namespace papa::features::extractors::papa_native::insn {
-
-// Pair returned by every extractor, the feature and its location. Every location is
-// the absolute virtual address of the originating instruction
-using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Always emit one Mnemonic feature per instruction. Throws nothing
 [[nodiscard]] std::optional<FeatureWithAddress>

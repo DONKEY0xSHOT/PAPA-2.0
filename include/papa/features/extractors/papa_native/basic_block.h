@@ -1,16 +1,12 @@
 #pragma once
 
-#include "papa/features/address.h"
-#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 
 #include <optional>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native::basic_block {
-
-using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Detect a tight self-loop: any successor equals the basic block's own VA
 [[nodiscard]] std::optional<FeatureWithAddress>
