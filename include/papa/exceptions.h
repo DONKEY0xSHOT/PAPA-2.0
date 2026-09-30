@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 namespace papa {
 
@@ -17,13 +16,8 @@ enum class ErrorKind : std::uint8_t {
     kOutOfBounds,
     kDisassemblyFailed,
     kInvalidRule,
-    kRuleParseError,
-    kMissingDependency,
     kCycle,
-    kLimitation,
-    kUnsupportedFormat,
     kYamlParseError,
-    kInternalInvariant,
     kFlirtBadCompressedStream,
     kFlirtBadMagic,
     kFlirtUnsupportedVersion,
@@ -31,8 +25,6 @@ enum class ErrorKind : std::uint8_t {
     kFlirtBadNode,
     kFlirtTooDeep,
 };
-
-[[nodiscard]] std::string_view to_string(ErrorKind kind) noexcept;
 
 struct PapaError {
     ErrorKind   kind { ErrorKind::kOk };

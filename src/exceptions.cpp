@@ -4,32 +4,6 @@
 
 namespace papa {
 
-std::string_view to_string(ErrorKind kind) noexcept {
-    switch (kind) {
-        case ErrorKind::kOk:                 return "ok";
-        case ErrorKind::kIoError:            return "io-error";
-        case ErrorKind::kNotPe:              return "not-pe";
-        case ErrorKind::kBadPe:              return "bad-pe";
-        case ErrorKind::kOutOfBounds:        return "out-of-bounds";
-        case ErrorKind::kDisassemblyFailed:  return "disassembly-failed";
-        case ErrorKind::kInvalidRule:        return "invalid-rule";
-        case ErrorKind::kRuleParseError:     return "rule-parse-error";
-        case ErrorKind::kMissingDependency:  return "missing-dependency";
-        case ErrorKind::kCycle:              return "cycle";
-        case ErrorKind::kLimitation:         return "limitation";
-        case ErrorKind::kUnsupportedFormat:  return "unsupported-format";
-        case ErrorKind::kYamlParseError:     return "yaml-parse-error";
-        case ErrorKind::kInternalInvariant:  return "internal-invariant";
-        case ErrorKind::kFlirtBadCompressedStream: return "flirt-bad-compressed-stream";
-        case ErrorKind::kFlirtBadMagic:      return "flirt-bad-magic";
-        case ErrorKind::kFlirtUnsupportedVersion:  return "flirt-unsupported-version";
-        case ErrorKind::kFlirtTruncated:     return "flirt-truncated";
-        case ErrorKind::kFlirtBadNode:       return "flirt-bad-node";
-        case ErrorKind::kFlirtTooDeep:       return "flirt-too-deep";
-    }
-    return "unknown";
-}
-
 PapaError make_error(ErrorKind kind, std::string detail) {
     return PapaError{kind, std::move(detail)};
 }
