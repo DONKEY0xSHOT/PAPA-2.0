@@ -3,7 +3,6 @@
 #include "papa/engine.h"
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
-#include "papa/features/common.h"
 #include "papa/features/feature.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/rules/rule.h"
@@ -34,32 +33,6 @@ namespace_starts_with(std::string_view ns, std::string_view prefix) noexcept {
     return ns.size() == prefix.size() || ns[prefix.size()] == '/';
 }
 
-// Every rule name or namespace a statement tree references through match:. Unlike the
-// feature index this walks every branch, since a negated reference matters too
-void collect_match_refs(const ::papa::engine::Statement* s,
-                        std::vector<std::string>&        out) {
-    if (s == nullptr) { return; }
-
-    const auto note = [&out](const features::FeaturePtr& f) {
-        if (f && f->tag() == features::FeatureTag::kMatchedRule) {
-            out.emplace_back(
-                static_cast<const features::MatchedRule*>(f.get())->rule_name());
-        }
-    };
-
-    if (s->kind() == ::papa::engine::StatementKind::kFeature) {
-        note(static_cast<const ::papa::engine::FeatureStatement*>(s)->feature());
-        return;
-    }
-    if (s->kind() == ::papa::engine::StatementKind::kRange) {
-        note(static_cast<const ::papa::engine::Range*>(s)->feature());
-        return;
-    }
-    for (const auto& child : s->children()) {
-        collect_match_refs(child.get(), out);
-    }
-}
-
 }  // namespace
 
 std::vector<const ::papa::rules::Rule*>
@@ -84,7 +57,7 @@ limitation_gate_rules(const ::papa::rules::RuleSet& rules) {
         if (!closure.insert(r).second) { continue; }
 
         refs.clear();
-        collect_match_refs(&r->statement(), refs);
+        ::papa::engine::collect_match_refs(r->statement(), refs);
         for (const auto& ref : refs) {
             if (const auto* by_name = rules.find(ref); by_name != nullptr) {
                 work.push_back(by_name);

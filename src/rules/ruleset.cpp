@@ -80,30 +80,6 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
     }
 }
 
-// Collect every MatchedRule name referenced anywhere in the statement tree
-// Both leaf FeatureStatement nodes and Range nodes can wrap a MatchedRule
-void collect_match_names(const engine::Statement& s, std::vector<std::string>& out) {
-    if (s.kind() == engine::StatementKind::kFeature) {
-        const auto& feat = static_cast<const engine::FeatureStatement&>(s).feature();
-        if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
-            const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
-            out.emplace_back(mr->rule_name());
-        }
-    }
-    if (s.kind() == engine::StatementKind::kRange) {
-        const auto& feat = static_cast<const engine::Range&>(s).feature();
-        if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
-            const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
-            out.emplace_back(mr->rule_name());
-        }
-    }
-    for (const auto& child : s.children()) {
-        if (child) {
-            collect_match_names(*child, out);
-        }
-    }
-}
-
 // Parse each (path, text) rule file and build the set from the result
 template <typename RuleFiles>
 [[nodiscard]] Expected<RuleSet> parse_rule_files(const RuleFiles& files) {
@@ -247,7 +223,7 @@ Expected<void> RuleSet::validate_dependencies() {
     for (auto& r : rules_) {
         if (r == nullptr) { continue; }
         std::vector<std::string> refs;
-        collect_match_names(r->statement(), refs);
+        engine::collect_match_refs(r->statement(), refs);
         bool ok = true;
         for (const auto& ref : refs) {
             if (by_name_.find(ref) != by_name_.end())      { continue; }
@@ -287,7 +263,7 @@ Expected<void> RuleSet::topologically_sort() {
 
         for (const Rule* r : group) {
             std::vector<std::string> refs;
-            collect_match_names(r->statement(), refs);
+            engine::collect_match_refs(r->statement(), refs);
 
             std::unordered_set<const Rule*> deps_for_r;
             for (const auto& ref : refs) {

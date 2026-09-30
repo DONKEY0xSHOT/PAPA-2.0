@@ -207,6 +207,34 @@ void index_rule_matches(features::FeatureSet& fs,
     }
 }
 
+void collect_match_refs(const Statement& s, std::vector<std::string>& out) {
+    const auto note = [&out](const features::FeaturePtr& f) {
+        if (f && f->tag() == features::FeatureTag::kMatchedRule) {
+            out.emplace_back(static_cast<const features::MatchedRule&>(*f).rule_name());
+        }
+    };
+
+    // Both leaf kinds can wrap a MatchedRule, and neither has children
+    switch (s.kind()) {
+        case StatementKind::kFeature:
+            note(static_cast<const FeatureStatement&>(s).feature());
+            return;
+        case StatementKind::kRange:
+            note(static_cast<const Range&>(s).feature());
+            return;
+        case StatementKind::kAnd:
+        case StatementKind::kOr:
+        case StatementKind::kNot:
+        case StatementKind::kSome:
+        case StatementKind::kOptional:
+        case StatementKind::kSubscope:
+            break;
+    }
+    for (const auto& child : s.children()) {
+        if (child) { collect_match_refs(*child, out); }
+    }
+}
+
 // evaluate_quick fast paths. These avoid every Result/vector allocation that the full
 // evaluate() builds for the renderer. The probe pass in match() only needs a boolean
 

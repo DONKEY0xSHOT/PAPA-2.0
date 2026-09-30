@@ -199,4 +199,8 @@ void index_rule_matches(features::FeatureSet& fs,
                         const rules::Rule& rule,
                         std::span<const features::Address> addresses);
 
+/// Append every rule name or namespace the tree references through match:, in pre-order
+/// Unlike the feature index it walks every branch, since a negated reference matters too
+void collect_match_refs(const Statement& s, std::vector<std::string>& out);
+
 }  // namespace papa::engine
