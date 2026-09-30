@@ -103,11 +103,12 @@ ParseResult parse_args(int argc, const char* const* argv) {
     ParseResult res;
     Args& a = res.args;
 
+    // Keep every argument verbatim, option values included, so the report can echo
+    // the command line the way capa does
+    if (argc > 0) { a.argv.assign(argv, argv + argc); }
+
     for (int i = 0; i < argc; ++i) {
         const std::string_view arg{argv[i]};
-
-        // Keep every argument verbatim so the report can echo the command line
-        a.argv.emplace_back(arg);
 
         if (arg == "--help" || arg == "-h") { a.show_help = true; continue; }
         if (arg == "--version")             { a.show_version = true; continue; }
