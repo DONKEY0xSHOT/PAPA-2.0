@@ -7,7 +7,7 @@
 
 namespace papa::util {
 
-// Lowercase ASCII letters in place
+// Return a copy of s with its ASCII letters lowercased
 // Bytes outside the A-Z range pass through unchanged so UTF-8 sequences are safe
 [[nodiscard]] std::string to_lower_ascii(std::string_view s);
 
