@@ -472,82 +472,118 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return std::string(api);
 }
 
-// Parse a leaf feature from its key, already split off the YAML mapping, and raw value.
-// description, when non-empty, comes from inline "= ..." or a sibling description key
-[[nodiscard]] Expected<FeaturePtr>
-build_feature_leaf(std::string_view key,
-                   std::string_view raw_value,
-                   std::string description,
-                   std::size_t line,
-                   std::size_t column) {
-    auto err = [&](std::string msg) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule, std::move(msg), line, column)};
-    };
+// An invalid-rule error reported at a leaf's position
+[[nodiscard]] Unexpected<PapaError> leaf_error(std::string detail,
+                                               std::size_t line,
+                                               std::size_t column) {
+    return Unexpected{rule_error(ErrorKind::kInvalidRule, std::move(detail), line, column)};
+}
 
-    auto split_for_desc = [&](std::string_view text) -> std::pair<std::string_view, std::string> {
-        std::string desc(description);
-        const auto pos = find_inline_desc_sep(text);
-        std::string_view value = text;
-        if (pos.has_value()) {
-            value = trim(text.substr(0, *pos));
-            std::string_view tail = text.substr(*pos + kInlineDescSep.size());
-            if (desc.empty()) { desc.assign(trim(tail)); }
-        } else {
-            value = trim(text);
-        }
-        return {value, std::move(desc)};
-    };
+// Split an inline " = description" off a leaf value. A sibling description key wins
+[[nodiscard]] std::pair<std::string_view, std::string>
+split_leaf_description(std::string_view text, std::string description) {
+    const auto [value, inline_desc] = ::papa::rules::RuleParser::split_inline_description(text);
+    if (description.empty() && inline_desc.has_value()) { description.assign(*inline_desc); }
+    return {value, std::move(description)};
+}
 
-    // operand[i].number / operand[i].offset
-    if (key.starts_with("operand[")) {
-        const auto bracket_close = key.find(']');
-        if (bracket_close == std::string_view::npos) {
-            return err(std::string{"malformed operand key: "}.append(key));
-        }
-        const auto idx_str = key.substr(8, bracket_close - 8);
-        const auto idx = parse_size_t(idx_str);
-        if (!idx.has_value() || *idx > 4) {
-            return err(std::string{"operand index out of range: "}.append(key));
-        }
-        const auto kind = key.substr(bracket_close + 1);
-        if (kind == ".number") {
-            auto [v, desc] = split_for_desc(raw_value);
-            auto num = parse_number(v);
-            if (!num) { return Unexpected{num.error()}; }
-            return std::make_shared<const OperandNumber>(*idx, *num, std::move(desc));
-        }
-        if (kind == ".offset") {
-            auto [v, desc] = split_for_desc(raw_value);
-            auto num = parse_number(v);
-            if (!num) { return Unexpected{num.error()}; }
-            std::int64_t off = 0;
-            if (std::holds_alternative<std::int64_t>(*num)) {
-                off = std::get<std::int64_t>(*num);
-            } else if (std::holds_alternative<std::uint64_t>(*num)) {
-                off = static_cast<std::int64_t>(std::get<std::uint64_t>(*num));
-            } else {
-                return err("operand offset cannot be floating point");
-            }
-            return std::make_shared<const OperandOffset>(*idx, off, std::move(desc));
-        }
-        return err(std::string{"unknown operand suffix: "}.append(key));
+// A number as a signed offset, or nullopt when it is floating point
+[[nodiscard]] std::optional<std::int64_t> as_offset(const NumberValue& num) noexcept {
+    if (const auto* i = std::get_if<std::int64_t>(&num)) { return *i; }
+    if (const auto* u = std::get_if<std::uint64_t>(&num)) {
+        return static_cast<std::int64_t>(*u);
     }
+    return std::nullopt;
+}
 
-    // property/read and property/write
-    if (key.starts_with("property/")) {
-        Property::Access acc = Property::Access::kNone;
-        const auto suffix = key.substr(std::string_view{"property/"}.size());
-        if      (suffix == "read")  { acc = Property::Access::kRead; }
-        else if (suffix == "write") { acc = Property::Access::kWrite; }
-        else {
-            return err(std::string{"unknown property access: "}.append(key));
-        }
-        auto [v, desc] = split_for_desc(raw_value);
-        return std::make_shared<const Property>(std::string(v), acc, std::move(desc));
+// operand[i].number and operand[i].offset, for an operand index up to 4
+[[nodiscard]] Expected<FeaturePtr> operand_leaf(std::string_view key,
+                                                std::string_view value,
+                                                std::string      desc,
+                                                std::size_t      line,
+                                                std::size_t      column) {
+    const auto bracket_close = key.find(']');
+    if (bracket_close == std::string_view::npos) {
+        return leaf_error(std::string{"malformed operand key: "}.append(key), line, column);
     }
+    const auto idx_str = key.substr(8, bracket_close - 8);
+    const auto idx = parse_size_t(idx_str);
+    if (!idx.has_value() || *idx > 4) {
+        return leaf_error(std::string{"operand index out of range: "}.append(key), line, column);
+    }
+    const auto kind = key.substr(bracket_close + 1);
+    if (kind != ".number" && kind != ".offset") {
+        return leaf_error(std::string{"unknown operand suffix: "}.append(key), line, column);
+    }
+    auto num = parse_number(value);
+    if (!num) { return Unexpected{num.error()}; }
+    if (kind == ".number") {
+        return std::make_shared<const OperandNumber>(*idx, *num, std::move(desc));
+    }
+    const auto off = as_offset(*num);
+    if (!off.has_value()) {
+        return leaf_error("operand offset cannot be floating point", line, column);
+    }
+    return std::make_shared<const OperandOffset>(*idx, *off, std::move(desc));
+}
 
-    auto [value, desc] = split_for_desc(raw_value);
+// property/read and property/write
+[[nodiscard]] Expected<FeaturePtr> property_leaf(std::string_view key,
+                                                 std::string_view value,
+                                                 std::string      desc,
+                                                 std::size_t      line,
+                                                 std::size_t      column) {
+    Property::Access acc = Property::Access::kNone;
+    const auto suffix = key.substr(std::string_view{"property/"}.size());
+    if      (suffix == "read")  { acc = Property::Access::kRead; }
+    else if (suffix == "write") { acc = Property::Access::kWrite; }
+    else {
+        return leaf_error(std::string{"unknown property access: "}.append(key), line, column);
+    }
+    return std::make_shared<const Property>(std::string(value), acc, std::move(desc));
+}
 
+// number and offset, where an offset must be integral
+[[nodiscard]] Expected<FeaturePtr> number_leaf(std::string_view key,
+                                               std::string_view value,
+                                               std::string      desc,
+                                               std::size_t      line,
+                                               std::size_t      column) {
+    auto num = parse_number(value);
+    if (!num) { return Unexpected{num.error()}; }
+    if (key == "number") {
+        return std::make_shared<const Number>(*num, std::move(desc));
+    }
+    const auto off = as_offset(*num);
+    if (!off.has_value()) {
+        return leaf_error("offset cannot be floating point", line, column);
+    }
+    return std::make_shared<const Offset>(*off, std::move(desc));
+}
+
+// bytes, a hex literal without wildcards
+[[nodiscard]] Expected<FeaturePtr> bytes_leaf(std::string_view value,
+                                              std::string      desc,
+                                              std::size_t      line,
+                                              std::size_t      column) {
+    auto bl = ::papa::rules::RuleParser::parse_bytes_literal(value);
+    if (!bl) { return Unexpected{bl.error()}; }
+    if (bl->has_wildcards) {
+        return leaf_error("bytes wildcards are not yet supported in v1", line, column);
+    }
+    std::vector<std::byte> bytes;
+    bytes.reserve(bl->pattern.size());
+    for (const auto& opt : bl->pattern) {
+        // pattern entries are non-null when has_wildcards is false
+        bytes.push_back(*opt);
+    }
+    return std::make_shared<const Bytes>(std::move(bytes), std::move(desc));
+}
+
+// The one-string feature a key names, or nullptr when the key names another kind
+[[nodiscard]] FeaturePtr value_leaf(std::string_view key,
+                                    std::string_view value,
+                                    std::string      desc) {
     if (key == "api") {
         return std::make_shared<const Api>(trim_dll_part(value), std::move(desc));
     }
@@ -587,24 +623,6 @@ build_feature_leaf(std::string_view key,
     if (key == "match") {
         return std::make_shared<const MatchedRule>(std::string(value), std::move(desc));
     }
-    if (key == "number") {
-        auto num = parse_number(value);
-        if (!num) { return Unexpected{num.error()}; }
-        return std::make_shared<const Number>(*num, std::move(desc));
-    }
-    if (key == "offset") {
-        auto num = parse_number(value);
-        if (!num) { return Unexpected{num.error()}; }
-        std::int64_t off = 0;
-        if (std::holds_alternative<std::int64_t>(*num)) {
-            off = std::get<std::int64_t>(*num);
-        } else if (std::holds_alternative<std::uint64_t>(*num)) {
-            off = static_cast<std::int64_t>(std::get<std::uint64_t>(*num));
-        } else {
-            return err("offset cannot be floating point");
-        }
-        return std::make_shared<const Offset>(off, std::move(desc));
-    }
     if (key == "string") {
         // /pattern/ or /pattern/i is a regex literal
         if (value.size() >= 2 && value.front() == '/' &&
@@ -616,22 +634,33 @@ build_feature_leaf(std::string_view key,
     if (key == "substring") {
         return std::make_shared<const Substring>(std::string(value), std::move(desc));
     }
-    if (key == "bytes") {
-        auto bl = ::papa::rules::RuleParser::parse_bytes_literal(value);
-        if (!bl) { return Unexpected{bl.error()}; }
-        if (bl->has_wildcards) {
-            return err("bytes wildcards are not yet supported in v1");
-        }
-        std::vector<std::byte> bytes;
-        bytes.reserve(bl->pattern.size());
-        for (const auto& opt : bl->pattern) {
-            // pattern entries are non-null when has_wildcards is false
-            bytes.push_back(*opt);
-        }
-        return std::make_shared<const Bytes>(std::move(bytes), std::move(desc));
-    }
+    return nullptr;
+}
 
-    return err(std::string{"unknown feature key: "}.append(key));
+// Parse a leaf feature from its key, already split off the YAML mapping, and raw value.
+// description, when non-empty, comes from inline "= ..." or a sibling description key
+[[nodiscard]] Expected<FeaturePtr>
+build_feature_leaf(std::string_view key,
+                   std::string_view raw_value,
+                   std::string description,
+                   std::size_t line,
+                   std::size_t column) {
+    auto [value, desc] = split_leaf_description(raw_value, std::move(description));
+
+    if (key.starts_with("operand[")) {
+        return operand_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key.starts_with("property/")) {
+        return property_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key == "number" || key == "offset") {
+        return number_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key == "bytes") {
+        return bytes_leaf(value, std::move(desc), line, column);
+    }
+    if (auto feat = value_leaf(key, value, std::move(desc))) { return feat; }
+    return leaf_error(std::string{"unknown feature key: "}.append(key), line, column);
 }
 
 // Parse a count(...) feature key
