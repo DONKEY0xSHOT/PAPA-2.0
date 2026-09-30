@@ -34,11 +34,6 @@ namespace papa::rules {
 
 namespace {
 
-// The single-argument Expected the helpers return, restated here although papa::rules
-// already finds ::papa::Expected by ordinary lookup
-template <typename T>
-using Expected = ::papa::Expected<T>;
-
 using ::papa::ErrorKind;
 using ::papa::PapaError;
 using ::papa::Unexpected;

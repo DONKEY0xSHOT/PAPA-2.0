@@ -33,8 +33,6 @@ namespace papa::rules {
 
 namespace {
 
-template <typename T>
-using Expected = ::papa::Expected<T>;
 using ::papa::ErrorKind;
 using ::papa::Unexpected;
 

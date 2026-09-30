@@ -30,24 +30,25 @@ public:
     [[nodiscard]] const char* what() const noexcept override { return "bad Expected access"; }
 };
 
+/// A value or an error. Code names it through papa::Expected<T>, which fixes E to PapaError
 template <typename T, typename E>
-class Expected {
+class BasicExpected {
     static_assert(!std::is_same_v<T, E>, "T and E must differ");
 
 public:
-    constexpr Expected() noexcept(std::is_nothrow_default_constructible_v<T>)
+    constexpr BasicExpected() noexcept(std::is_nothrow_default_constructible_v<T>)
         requires(std::is_default_constructible_v<T>)
         : storage_(std::in_place_index<0>, T{}) {}
 
     template <typename U = T>
         requires(std::is_constructible_v<T, U&&> &&
-                 !std::is_same_v<std::remove_cvref_t<U>, Expected> &&
+                 !std::is_same_v<std::remove_cvref_t<U>, BasicExpected> &&
                  !std::is_same_v<std::remove_cvref_t<U>, Unexpected<E>>)
-    constexpr Expected(U&& v) noexcept(std::is_nothrow_constructible_v<T, U&&>)
+    constexpr BasicExpected(U&& v) noexcept(std::is_nothrow_constructible_v<T, U&&>)
         : storage_(std::in_place_index<0>, std::forward<U>(v)) {}
 
     template <typename G = E>
-    constexpr Expected(Unexpected<G> u) noexcept(std::is_nothrow_constructible_v<E, G&&>)
+    constexpr BasicExpected(Unexpected<G> u) noexcept(std::is_nothrow_constructible_v<E, G&&>)
         : storage_(std::in_place_index<1>, std::move(u).error()) {}
 
     [[nodiscard]] constexpr bool has_value() const noexcept { return storage_.index() == 0; }
@@ -85,14 +86,14 @@ private:
     std::variant<T, E> storage_;
 };
 
-// Specialization for Expected<void, E>: success carries no payload
+// Specialization for BasicExpected<void, E>: success carries no payload
 template <typename E>
-class Expected<void, E> {
+class BasicExpected<void, E> {
 public:
-    constexpr Expected() noexcept : has_value_(true), error_{} {}
+    constexpr BasicExpected() noexcept : has_value_(true), error_{} {}
 
     template <typename G = E>
-    constexpr Expected(Unexpected<G> u) noexcept(std::is_nothrow_constructible_v<E, G&&>)
+    constexpr BasicExpected(Unexpected<G> u) noexcept(std::is_nothrow_constructible_v<E, G&&>)
         : has_value_(false), error_(std::move(u).error()) {}
 
     [[nodiscard]] constexpr bool has_value() const noexcept { return has_value_; }

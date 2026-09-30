@@ -34,7 +34,7 @@ struct PapaError {
 [[nodiscard]] PapaError make_error(ErrorKind kind, std::string detail);
 
 template <typename T>
-using Expected = ::papa::util::Expected<T, PapaError>;
+using Expected = ::papa::util::BasicExpected<T, PapaError>;
 
 using ::papa::util::BadExpectedAccess;
 using ::papa::util::Unexpected;

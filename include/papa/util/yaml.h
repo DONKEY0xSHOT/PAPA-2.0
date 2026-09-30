@@ -12,11 +12,6 @@
 
 namespace papa::util::yaml {
 
-// Pull the single-argument Expected alias into this nested namespace
-// The two-argument primary template would otherwise shadow the alias
-template <typename T>
-using Expected = ::papa::Expected<T>;
-
 enum class NodeKind : std::uint8_t {
     kScalar,
     kSequence,
