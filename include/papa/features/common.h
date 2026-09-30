@@ -80,9 +80,7 @@ public:
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
 
-protected:
-    Number(FeatureTag t, Value v, std::string desc);
-
+private:
     Value value_;
 };
 
@@ -96,9 +94,7 @@ public:
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
 
-protected:
-    Offset(FeatureTag t, std::int64_t v, std::string desc);
-
+private:
     std::int64_t value_;
 };
 

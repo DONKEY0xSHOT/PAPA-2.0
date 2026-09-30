@@ -182,10 +182,6 @@ Number::Number(Value v, std::string desc)
     : Feature(FeatureTag::kNumber, std::move(desc)),
       value_(std::move(v)) {}
 
-Number::Number(FeatureTag t, Value v, std::string desc)
-    : Feature(t, std::move(desc)),
-      value_(std::move(v)) {}
-
 std::size_t Number::hash() const noexcept {
     // Treat the double alternative bitwise so NaN values hash stably and
     // the distinct variant alternatives 1u64 vs 1i64 vs 1.0 mix to different seeds
@@ -211,10 +207,6 @@ bool Number::equals(const Feature& o) const noexcept {
 // Offset
 Offset::Offset(std::int64_t v, std::string desc)
     : Feature(FeatureTag::kOffset, std::move(desc)),
-      value_(v) {}
-
-Offset::Offset(FeatureTag t, std::int64_t v, std::string desc)
-    : Feature(t, std::move(desc)),
       value_(v) {}
 
 std::size_t Offset::hash() const noexcept {
