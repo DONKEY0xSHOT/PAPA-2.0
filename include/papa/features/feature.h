@@ -46,8 +46,6 @@ enum class FeatureTag : std::uint8_t {
     kBasicBlock,
 };
 
-[[nodiscard]] std::string_view to_string(FeatureTag t) noexcept;
-
 // Forward declarations so FeatureSet can be defined before Feature
 class Feature;
 using FeaturePtr = std::shared_ptr<const Feature>;

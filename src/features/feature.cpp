@@ -3,38 +3,8 @@
 #include "papa/engine.h"
 
 #include <memory>
-#include <string_view>
 
 namespace papa::features {
-
-std::string_view to_string(FeatureTag t) noexcept {
-    switch (t) {
-        case FeatureTag::kString:         return "string";
-        case FeatureTag::kSubstring:      return "substring";
-        case FeatureTag::kRegex:          return "regex";
-        case FeatureTag::kBytes:          return "bytes";
-        case FeatureTag::kNumber:         return "number";
-        case FeatureTag::kOffset:         return "offset";
-        case FeatureTag::kMnemonic:       return "mnemonic";
-        case FeatureTag::kApi:            return "api";
-        case FeatureTag::kImport:         return "import";
-        case FeatureTag::kExport:         return "export";
-        case FeatureTag::kSection:        return "section";
-        case FeatureTag::kFunctionName:   return "function-name";
-        case FeatureTag::kClass:          return "class";
-        case FeatureTag::kNamespace:      return "namespace";
-        case FeatureTag::kProperty:       return "property";
-        case FeatureTag::kCharacteristic: return "characteristic";
-        case FeatureTag::kMatchedRule:    return "match";
-        case FeatureTag::kOs:             return "os";
-        case FeatureTag::kArch:           return "arch";
-        case FeatureTag::kFormat:         return "format";
-        case FeatureTag::kOperandNumber:  return "operand.number";
-        case FeatureTag::kOperandOffset:  return "operand.offset";
-        case FeatureTag::kBasicBlock:     return "basic block";
-    }
-    return "unknown";
-}
 
 std::size_t FeatureHashKey::operator()(const FeaturePtr& p) const noexcept {
     return p ? p->hash() : 0;
