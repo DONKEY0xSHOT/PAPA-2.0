@@ -2,6 +2,7 @@
 
 #include "doctest.h"
 
+#include "papa/exceptions.h"
 #include "papa/rules/com_lookup.h"
 #include "papa/util/hash.h"
 
@@ -124,4 +125,23 @@ TEST_CASE("com_lookup: every entry has a 16-byte GUID and brace-wrapped string")
     };
     validate(com_class_table());
     validate(com_interface_table());
+}
+
+TEST_CASE("com_lookup: bytes_le reads either hex case and rejects malformed strings") {
+    using papa::rules::bytes_le;
+    static_assert(bytes_le("{00000000-0000-0000-c000-000000000046}")[8] == std::byte{0xC0});
+    CHECK(bytes_le("{DC12A687-737F-11CF-884D-00AA004B2E24}") ==
+          bytes_le("{dc12a687-737f-11cf-884d-00aa004b2e24}"));
+
+    constexpr std::array<const char*, 5> kMalformed = {{
+        "dc12a687-737f-11cf-884d-00aa004b2e24",
+        "(dc12a687-737f-11cf-884d-00aa004b2e24)",
+        "{dc12a687-737f-11cf-884d-00aa004b2e2}",
+        "{dc12a687+737f-11cf-884d-00aa004b2e24}",
+        "{dc12a687-737f-11cf-884d-00aa004b2e2g}",
+    }};
+    for (const char* guid : kMalformed) {
+        CAPTURE(guid);
+        CHECK_THROWS_AS((void)bytes_le(guid), papa::PapaInvariantError);
+    }
 }
