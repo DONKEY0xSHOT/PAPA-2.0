@@ -27,7 +27,7 @@ TEST_CASE("Concrete addresses compare by payload") {
 
 TEST_CASE("Different variant alternatives are not equal even when payload matches") {
     // AbsoluteVirtualAddress{0x10} vs FileOffsetAddress{0x10} share a payload but live
-    // in different variant slots. Std::variant operator== is index-aware
+    // in different variant slots, and std::variant operator== is index-aware
     Address a = AbsoluteVirtualAddress{0x10};
     Address b = FileOffsetAddress{0x10};
     CHECK_FALSE(a == b);

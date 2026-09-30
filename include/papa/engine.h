@@ -63,7 +63,7 @@ public:
         return children_;
     }
 
-    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into.
+    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into
     // MatchedRule leaves at corpus build time
     [[nodiscard]] std::span<std::unique_ptr<Statement>> children_for_rewrite() noexcept {
         return children_;

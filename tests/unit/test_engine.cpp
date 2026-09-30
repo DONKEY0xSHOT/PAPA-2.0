@@ -175,7 +175,7 @@ TEST_CASE("Some: count == 2 requires at least two true children") {
 }
 
 TEST_CASE("Range: min == 0 absent feature is vacuously true with empty locations") {
-    // Critical CAPA edge case from plan section 13.2
+    // Critical CAPA edge case, a zero minimum count holds when the feature is absent
     auto fp = make_feat<Api>(std::string("never-seen"));
     Range r{fp, /*min=*/0, /*max=*/0xFFFF};
 

@@ -1,4 +1,4 @@
-# papa_lib -- core static library; phases append to PAPA_LIB_SOURCES
+# papa_lib, the core static library built from PAPA_LIB_SOURCES
 
 set(PAPA_LIB_SOURCES
     version.cpp

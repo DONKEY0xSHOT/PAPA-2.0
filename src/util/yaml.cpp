@@ -79,8 +79,8 @@ struct Pos {
     std::size_t column { 1 };
 };
 
-// One physical line, pre-stripped of trailing CR indent is the column of the first non-
-// space byte payload is the substring from indent to end excluding trailing CR
+// One physical line without its trailing CR. indent is the column of the first
+// non-space byte, and payload is the rest of the line from indent onward
 struct Line {
     std::size_t       line_no { 0 };
     std::size_t       indent  { 0 };

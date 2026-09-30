@@ -30,8 +30,8 @@ build_import_table(const ::papa::pe::PeImage& image);
 
 namespace papa::features::extractors::papa_native::insn {
 
-// Pair returned by every extractor, the feature and the location it applies to. All
-// are addressed by the absolute virtual address of the originating instruction
+// Pair returned by every extractor, the feature and its location. Every location is
+// the absolute virtual address of the originating instruction
 using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Always emit one Mnemonic feature per instruction. Throws nothing

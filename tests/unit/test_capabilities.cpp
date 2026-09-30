@@ -204,7 +204,7 @@ TEST_CASE("capabilities: per-scope helpers compose correctly on a tiny synthetic
 
 namespace {
 
-// Minimal extractor that yields exactly the file features a test asks for. The gate
+// Minimal extractor that yields exactly the file features a test requests. The gate
 // only reads globals and file features, so the per-function half is empty
 class FakeFileExtractor final : public papa::features::extractors::StaticFeatureExtractor {
 public:

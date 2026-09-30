@@ -181,8 +181,8 @@ std::vector<std::byte> plant_pe(std::size_t size, std::size_t pos,
 }  // namespace
 
 TEST_CASE("helpers: carve_pe_files finds a plain and an XOR-encoded PE") {
-    // key 0 is the unencoded case, and every other key exercises the derived-key
-    // path that replaced the old sweep over all 256 keys
+    // key 0 is the unencoded case, and every other key exercises the path that derives
+    // the key from the first byte instead of trying all 256
     for (const std::uint8_t key : {std::uint8_t{0x00}, std::uint8_t{0x01},
                                    std::uint8_t{0x4D}, std::uint8_t{0xFF}}) {
         CAPTURE(key);

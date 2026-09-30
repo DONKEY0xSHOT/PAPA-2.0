@@ -153,8 +153,8 @@ carve_pe_files(std::span<const std::byte> buf) {
         }
     }
 
-    // Positions are produced in ascending order and at most once each, so the
-    // sort and de-duplicate the per-key sweep needed are no longer required
+    // Positions are produced in ascending order and at most once each, so no sort or
+    // de-duplication is needed
     return out;
 }
 

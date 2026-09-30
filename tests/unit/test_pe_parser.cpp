@@ -318,7 +318,7 @@ TEST_CASE("a crafted export count cannot drive a huge allocation") {
     REQUIRE(base.has_value());
     const std::size_t honest_exports = base->exports().size();
 
-    // Locate the export directory by walking the headers, then overwrite.
+    // Locate the export directory by walking the headers, then overwrite
     // NumberOfFunctions and NumberOfNames with 0xFFFFFFFF
     const auto src = base->raw_buffer();
     const auto read_u32_at = [&src](std::size_t off) -> std::uint32_t {

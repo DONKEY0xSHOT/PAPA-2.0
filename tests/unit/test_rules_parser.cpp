@@ -85,7 +85,7 @@ const T& must_be(const Statement& s) {
 
 }  // namespace
 
-// --- helper functions ---------------------------------------------------
+// Helper functions
 
 TEST_CASE("rules: split_inline_description splits on unquoted ' = '") {
     const auto [v, d] = RuleParser::split_inline_description("0x10 = MAGIC_CONST");
@@ -174,7 +174,7 @@ TEST_CASE("rules: parse_bytes_literal with wildcards") {
     CHECK_FALSE(r->pattern[2].has_value());
 }
 
-// --- whole-rule parsing -------------------------------------------------
+// Whole-rule parsing
 
 TEST_CASE("rules: minimal rule with single api leaf parses") {
     constexpr std::string_view text =

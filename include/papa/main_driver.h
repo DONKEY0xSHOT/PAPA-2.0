@@ -46,8 +46,8 @@ struct ParseResult {
     int          exit_code{kExitOk};
 };
 
-// Parse argv and produce a ParseResult argv0 is excluded. Callers should pass (argv+1,
-// argc-1) from main
+// Parse argv and produce a ParseResult. argv0 is excluded, so main passes
+// (argc-1, argv+1)
 [[nodiscard]] ParseResult
 parse_args(int argc, const char* const* argv);
 

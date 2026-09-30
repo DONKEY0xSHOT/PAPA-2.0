@@ -40,7 +40,7 @@ private:
     std::string value_;
 };
 
-// Managed-language property access kind kNone is reserved for implementations that
+// Managed-language property access kind. kNone is reserved for implementations that
 // cannot distinguish read from write and therefore must match both
 class Property : public Feature {
 public:

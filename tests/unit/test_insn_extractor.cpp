@@ -470,7 +470,7 @@ TEST_CASE("insn: extract_offset keeps a SIB-encoded stack-base offset") {
         MESSAGE("notepad.exe fixture missing, skipping");
         return;
     }
-    // capa excludes the stack/frame base only for a plain [reg+disp] without a. SIB
+    // capa excludes the stack/frame base only for a plain [reg+disp] without a SIB
     // byte
     DecodedInsn ins = make_insn(0x401000, "mov");
     ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;

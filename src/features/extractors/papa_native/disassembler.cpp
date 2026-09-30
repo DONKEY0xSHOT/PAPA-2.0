@@ -9,7 +9,7 @@ namespace papa::features::extractors::papa_native {
 
 namespace {
 
-// Stack registers used to suppress is_security_cookie and Number/Offset false positives
+// The stack and frame pointer registers stack_registers() returns for each width
 constexpr std::array<ZydisRegister, 2> kStackRegs32 {
     ZYDIS_REGISTER_ESP, ZYDIS_REGISTER_EBP,
 };

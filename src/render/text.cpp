@@ -221,8 +221,8 @@ void emit_header(const ResultDocument& doc, std::ostream& out) {
     out << '\n';
 }
 
-// Group rules by their (possibly empty) namespace std::map sort makes the namespace
-// listing alphabetical, matching CAPA's default output ordering
+// Group rules by their (possibly empty) namespace. The std::map sort makes the
+// namespace listing alphabetical, matching CAPA's default output ordering
 [[nodiscard]] std::map<std::string, std::vector<const RuleReport*>>
 group_by_namespace(const ResultDocument& doc) {
     std::map<std::string, std::vector<const RuleReport*>> groups;

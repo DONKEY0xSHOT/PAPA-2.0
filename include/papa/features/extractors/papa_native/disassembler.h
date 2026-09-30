@@ -83,7 +83,6 @@ public:
         mnemonic_to_string(ZydisMnemonic m) noexcept;
 
     // ESP/EBP or RSP/RBP per width
-    // Used to suppress stack-frame false positives in feature extraction
     [[nodiscard]] std::span<const ZydisRegister>
         stack_registers() const noexcept;
 

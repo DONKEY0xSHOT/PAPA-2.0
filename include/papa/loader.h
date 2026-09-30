@@ -53,7 +53,7 @@ struct StaticAnalysisMeta {
     std::vector<LibraryFunction>                        library_functions;
 };
 
-// Top-level report header argv preserves the command-line arguments so users can
+// Top-level report header. argv preserves the command-line arguments so users can
 // reproduce a run from the report alone (CAPA does the same)
 struct Metadata {
     std::string               timestamp;     // ISO-8601 UTC

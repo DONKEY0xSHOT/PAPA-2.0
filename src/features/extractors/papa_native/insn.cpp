@@ -115,7 +115,7 @@ operand_target_va(const DecodedInsn& ins, const DecodedOperand& op) noexcept {
     return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
 }
 
-// True when the instruction is "add esp, k" -- the single stack-management form. CAPA
+// True when the instruction is "add esp, k", the single stack-management form CAPA
 // suppresses as a Number-feature source
 [[nodiscard]] bool
 is_add_esp(const DecodedInsn& ins) noexcept {

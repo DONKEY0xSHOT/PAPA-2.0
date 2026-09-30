@@ -42,7 +42,7 @@ public:
     }
 
     /// Install the FLIRT analysis fmod, run at the end of each function's analysis
-    /// (after codeblocks and noret, the order vivisect registers the. FLIRT analyzers)
+    /// (after codeblocks and noret, as vivisect registers the FLIRT analyzers)
     void set_flirt_fmod(std::function<void(std::uint64_t va)> fmod) {
         flirt_fmod_ = std::move(fmod);
     }

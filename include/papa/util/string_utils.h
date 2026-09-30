@@ -14,7 +14,7 @@ namespace papa::util {
 [[nodiscard]] std::string to_lower_ascii(std::string_view s);
 
 // Return the prefix of s up to (but not including) the first NUL byte
-// Used to slice fixed-width PE name fields without copying
+// The result is a view into s, so nothing is copied
 [[nodiscard]] std::string_view trim_nul(std::string_view s) noexcept;
 
 // Suffix and prefix tests

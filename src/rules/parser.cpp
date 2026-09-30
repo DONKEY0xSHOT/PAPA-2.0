@@ -34,8 +34,8 @@ namespace papa::rules {
 
 namespace {
 
-// Reusable pull of the Expected alias that the helper functions return
-// papa::util::Expected is a 2-arg template so the bare alias would shadow papa::Expected
+// The single-argument Expected the helpers return, restated here although papa::rules
+// already finds ::papa::Expected by ordinary lookup
 template <typename T>
 using Expected = ::papa::Expected<T>;
 
@@ -474,7 +474,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return {};
 }
 
-// feature parsing. Parse a leaf "feature: value [= description]" into a FeaturePtr
+// Strip the "dll." prefix from an api value with exactly one dot, keeping ordinals whole
 [[nodiscard]] std::string trim_dll_part(std::string_view api) {
     if (api.find(".#") != std::string_view::npos) { return std::string(api); }
     std::size_t dots = 0;
@@ -487,7 +487,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return std::string(api);
 }
 
-// key has already been split off the YAML mapping value is the raw YAML scalar
+// Parse a leaf feature from its key, already split off the YAML mapping, and raw value.
 // description, when non-empty, comes from inline "= ..." or a sibling description key
 [[nodiscard]] Expected<FeaturePtr>
 build_feature_leaf(std::string_view key,

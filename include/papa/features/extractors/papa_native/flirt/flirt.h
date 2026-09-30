@@ -12,8 +12,8 @@ namespace papa::features::extractors::papa_native::flirt {
 
 namespace embedded {
 
-/// One compile-time-embedded signature blob. Defined by the generated
-/// embedded_sigs.cpp (added in the sig-embedding task)
+/// One signature blob embedded in the binary. registry() in embedded_sigs.cpp reads
+/// them from the executable's resources on MSVC builds
 struct EmbeddedSig {
     std::string_view    name;
     const std::uint8_t* data;

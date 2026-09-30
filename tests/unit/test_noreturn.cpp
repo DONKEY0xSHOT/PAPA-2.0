@@ -161,7 +161,7 @@ TEST_CASE("function_is_noreturn: every leaf a no-return call makes it no-return"
 TEST_CASE("function_is_noreturn: an ordinary (returning) call leaf does not "
           "by itself prove no-return but yields no ret either") {
     // A leaf ending in a call the oracle does not flag contributes no ret and no
-    // branch, mirroring noret.py where a bare call is neither IF_RET nor. IF_BRANCH
+    // branch, mirroring noret.py where a bare call is neither IF_RET nor IF_BRANCH
     pn::Function fn;
     fn.va = 0x6000;
     pn::NoReturnOracle never = [](const pn::DecodedInsn&) { return false; };

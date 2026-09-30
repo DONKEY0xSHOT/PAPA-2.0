@@ -36,7 +36,7 @@ extract_recursive_call(const Function& fn);
 [[nodiscard]] std::optional<FeatureWithAddress>
 extract_function_name(const Function& fn, std::string_view symbol);
 
-// Aggregate every function-scope feature for one function symbol may be empty when no
+// Aggregate every function-scope feature for one function. symbol may be empty when no
 // name is known
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_function_features(const Function& fn, std::string_view symbol);
