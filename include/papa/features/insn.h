@@ -5,36 +5,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <variant>
 
 namespace papa::features {
 
 // API call or reference
-class Api : public Feature {
+class Api : public ValueFeature {
 public:
-    explicit Api(std::string value, std::string desc = {});
-
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Api(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kApi, std::move(value), std::move(desc)) {}
 };
 
 // Decoded instruction mnemonic stored as its lowercase spelling
-class Mnemonic : public Feature {
+class Mnemonic : public ValueFeature {
 public:
-    explicit Mnemonic(std::string value, std::string desc = {});
-
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Mnemonic(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kMnemonic, std::move(value), std::move(desc)) {}
 };
 
 // Managed-language property access kind. kNone is reserved for implementations that

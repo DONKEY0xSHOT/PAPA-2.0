@@ -14,11 +14,6 @@ namespace papa::features {
 
 namespace {
 
-// Shared tag-mix used by every hash() override in this translation unit
-std::size_t mix_tag(FeatureTag t, std::size_t h) noexcept {
-    return util::hashing::hash_combine(static_cast<std::size_t>(t), h);
-}
-
 // Hash an OperandNumber::Value variant and fold in its active alternative
 // index so the distinct zero values 0u64, 0i64, and 0.0 hash apart
 std::size_t hash_number_variant(const OperandNumber::Value& v) noexcept {
@@ -34,36 +29,6 @@ std::size_t hash_number_variant(const OperandNumber::Value& v) noexcept {
 }
 
 }  // namespace
-
-// Api
-Api::Api(std::string value, std::string desc)
-    : Feature(FeatureTag::kApi, std::move(desc)),
-      value_(std::move(value)) {}
-
-std::size_t Api::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Api::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kApi) { return false; }
-    const auto& rhs = static_cast<const Api&>(o);
-    return value_ == rhs.value_;
-}
-
-// Mnemonic
-Mnemonic::Mnemonic(std::string value, std::string desc)
-    : Feature(FeatureTag::kMnemonic, std::move(desc)),
-      value_(std::move(value)) {}
-
-std::size_t Mnemonic::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Mnemonic::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kMnemonic) { return false; }
-    const auto& rhs = static_cast<const Mnemonic&>(o);
-    return value_ == rhs.value_;
-}
 
 // Property
 Property::Property(std::string value, Access access, std::string desc)

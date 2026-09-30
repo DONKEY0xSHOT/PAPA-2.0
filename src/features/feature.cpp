@@ -2,7 +2,10 @@
 
 #include "papa/engine.h"
 
+#include <cstddef>
+#include <functional>
 #include <memory>
+#include <string>
 
 namespace papa::features {
 
@@ -33,6 +36,15 @@ engine::Result Feature::evaluate(const FeatureSet& fs, bool /*short_circuit*/) c
 bool Feature::matches(const FeatureSet& fs) const {
     const FeaturePtr probe(std::shared_ptr<const Feature>{}, this);
     return fs.find(probe) != fs.end();
+}
+
+std::size_t ValueFeature::hash() const noexcept {
+    return mix_tag(tag_, std::hash<std::string>{}(value_));
+}
+
+bool ValueFeature::equals(const Feature& o) const noexcept {
+    // A matching tag implies the same concrete type, and every such type is a ValueFeature
+    return o.tag() == tag_ && value_ == static_cast<const ValueFeature&>(o).value_;
 }
 
 void FeatureSet::add(FeaturePtr f, const Address& a) {

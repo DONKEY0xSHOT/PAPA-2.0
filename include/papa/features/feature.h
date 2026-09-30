@@ -1,6 +1,7 @@
 #pragma once
 
 #include "papa/features/address.h"
+#include "papa/util/hashing.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Forward-declare engine::Result to break the cycle with engine.h
@@ -117,8 +119,29 @@ public:
 protected:
     Feature(FeatureTag t, std::string desc) : tag_(t), description_(std::move(desc)) {}
 
+    // Fold the tag into a payload hash so kinds with identical payloads hash apart
+    [[nodiscard]] static constexpr std::size_t mix_tag(FeatureTag  t,
+                                                       std::size_t h) noexcept {
+        return util::hashing::hash_combine(static_cast<std::size_t>(t), h);
+    }
+
     FeatureTag  tag_;
     std::string description_;
+};
+
+/// A feature whose payload is one string, equal when both tag and value match
+class ValueFeature : public Feature {
+public:
+    [[nodiscard]] const std::string& value() const noexcept { return value_; }
+
+    [[nodiscard]] std::size_t hash()   const noexcept override;
+    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
+
+protected:
+    ValueFeature(FeatureTag t, std::string value, std::string desc)
+        : Feature(t, std::move(desc)), value_(std::move(value)) {}
+
+    std::string value_;
 };
 
 }  // namespace papa::features

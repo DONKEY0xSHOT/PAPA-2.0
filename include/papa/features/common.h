@@ -7,6 +7,7 @@
 #include <regex>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -14,33 +15,23 @@ namespace papa::features {
 
 // Plain string match
 // The default evaluate does direct FeatureSet lookup by structural equality
-class String : public Feature {
+class String : public ValueFeature {
 public:
-    explicit String(std::string value, std::string desc = {});
-
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-protected:
-    // Constructor used by Substring and Regex so subclasses share value_
-    // without redeclaring the same field in every derived class
-    String(FeatureTag t, std::string value, std::string desc);
-
-    std::string value_;
+    explicit String(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kString, std::move(value), std::move(desc)) {}
 };
 
 // Substring scans every String feature in fs and tests find()
-class Substring : public String {
+class Substring : public ValueFeature {
 public:
-    explicit Substring(std::string value, std::string desc = {});
+    explicit Substring(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kSubstring, std::move(value), std::move(desc)) {}
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
 };
 
 // Regex runs std::regex_search on every String feature that holds its required literal
-class Regex : public String {
+class Regex : public ValueFeature {
 public:
     explicit Regex(std::string literal, std::string desc = {});
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
@@ -113,95 +104,54 @@ protected:
 
 // MatchedRule is injected into FeatureSet after a rule matches
 // The default evaluate suffices because later rules reference the name directly
-class MatchedRule : public Feature {
+class MatchedRule : public ValueFeature {
 public:
-    explicit MatchedRule(std::string name, std::string desc = {});
-    [[nodiscard]] const std::string& rule_name() const noexcept { return name_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string name_;
+    explicit MatchedRule(std::string name, std::string desc = {})
+        : ValueFeature(FeatureTag::kMatchedRule, std::move(name), std::move(desc)) {}
+    [[nodiscard]] const std::string& rule_name() const noexcept { return value(); }
 };
 
 // Characteristic is a named string tag such as "loop" or "stack string"
-class Characteristic : public Feature {
+class Characteristic : public ValueFeature {
 public:
-    explicit Characteristic(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Characteristic(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kCharacteristic, std::move(v), std::move(desc)) {}
 };
 
 // Class and Namespace are value-typed like Characteristic
 // Default evaluate suffices because the extractor emits the exact rule spelling
-class Class : public Feature {
+class Class : public ValueFeature {
 public:
-    explicit Class(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Class(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kClass, std::move(v), std::move(desc)) {}
 };
 
-class Namespace : public Feature {
+class Namespace : public ValueFeature {
 public:
-    explicit Namespace(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Namespace(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kNamespace, std::move(v), std::move(desc)) {}
 };
 
 // Os treats "any" as a wildcard in either the rule or the feature set, as capa does
-class Os : public Feature {
+class Os : public ValueFeature {
 public:
-    explicit Os(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
+    explicit Os(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kOs, std::move(v), std::move(desc)) {}
     [[nodiscard]] engine::Result evaluate(const FeatureSet& fs, bool sc) const override;
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
-    [[nodiscard]] std::size_t    hash()   const noexcept override;
-    [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
 };
 
 // Arch matches only an equal value, so arch: any matches only a literal any, as in capa
-class Arch : public Feature {
+class Arch : public ValueFeature {
 public:
-    explicit Arch(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t    hash()   const noexcept override;
-    [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Arch(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kArch, std::move(v), std::move(desc)) {}
 };
 
-class Format : public Feature {
+class Format : public ValueFeature {
 public:
-    explicit Format(std::string v, std::string desc = {});
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-
-private:
-    std::string value_;
+    explicit Format(std::string v, std::string desc = {})
+        : ValueFeature(FeatureTag::kFormat, std::move(v), std::move(desc)) {}
 };
 
 }  // namespace papa::features

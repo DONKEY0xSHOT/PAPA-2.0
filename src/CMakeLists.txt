@@ -12,7 +12,6 @@ set(PAPA_LIB_SOURCES
     features/address.cpp
     features/feature.cpp
     features/common.cpp
-    features/file.cpp
     features/insn.cpp
     features/basic_block.cpp
     features/extractors/helpers.cpp

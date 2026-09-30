@@ -21,12 +21,6 @@ namespace papa::features {
 
 namespace {
 
-// Fold the feature tag into the payload hash so different kinds with identical payload
-// bytes never collide in a FeatureSet bucket
-std::size_t mix_tag(FeatureTag t, std::size_t h) noexcept {
-    return util::hashing::hash_combine(static_cast<std::size_t>(t), h);
-}
-
 // Accept "/pattern/" or "/pattern/i" and fall back to treating the whole
 // literal as the pattern so construction never throws on rule-side typos
 struct RegexLiteral {
@@ -58,31 +52,7 @@ constexpr std::string_view kAnyWildcard = "any";
 
 }  // namespace
 
-// String
-String::String(std::string value, std::string desc)
-    : Feature(FeatureTag::kString, std::move(desc)),
-      value_(std::move(value)) {}
-
-String::String(FeatureTag t, std::string value, std::string desc)
-    : Feature(t, std::move(desc)),
-      value_(std::move(value)) {}
-
-std::size_t String::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool String::equals(const Feature& o) const noexcept {
-    if (o.tag() != tag_) { return false; }
-    // Safe within the String hierarchy: a matching tag implies the dynamic type
-    // is String or a subclass whose storage layout begins with String
-    const auto& rhs = static_cast<const String&>(o);
-    return value_ == rhs.value_;
-}
-
 // Substring
-Substring::Substring(std::string value, std::string desc)
-    : String(FeatureTag::kSubstring, std::move(value), std::move(desc)) {}
-
 engine::Result Substring::evaluate(const FeatureSet& fs, bool sc) const {
     engine::Result r;
     r.node = this;
@@ -111,7 +81,7 @@ bool Substring::matches(const FeatureSet& fs) const {
 
 // Regex
 Regex::Regex(std::string literal, std::string desc)
-    : String(FeatureTag::kRegex, std::move(literal), std::move(desc)) {
+    : ValueFeature(FeatureTag::kRegex, std::move(literal), std::move(desc)) {
     auto parsed = parse_regex_literal(value_);
     pattern_          = std::move(parsed.pattern);
     case_insensitive_ = parsed.case_insensitive;
@@ -257,71 +227,7 @@ bool Offset::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-// MatchedRule
-MatchedRule::MatchedRule(std::string name, std::string desc)
-    : Feature(FeatureTag::kMatchedRule, std::move(desc)),
-      name_(std::move(name)) {}
-
-std::size_t MatchedRule::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(name_));
-}
-
-bool MatchedRule::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kMatchedRule) { return false; }
-    const auto& rhs = static_cast<const MatchedRule&>(o);
-    return name_ == rhs.name_;
-}
-
-// Characteristic
-Characteristic::Characteristic(std::string v, std::string desc)
-    : Feature(FeatureTag::kCharacteristic, std::move(desc)),
-      value_(std::move(v)) {}
-
-std::size_t Characteristic::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Characteristic::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kCharacteristic) { return false; }
-    const auto& rhs = static_cast<const Characteristic&>(o);
-    return value_ == rhs.value_;
-}
-
-// Class
-Class::Class(std::string v, std::string desc)
-    : Feature(FeatureTag::kClass, std::move(desc)),
-      value_(std::move(v)) {}
-
-std::size_t Class::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Class::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kClass) { return false; }
-    const auto& rhs = static_cast<const Class&>(o);
-    return value_ == rhs.value_;
-}
-
-// Namespace
-Namespace::Namespace(std::string v, std::string desc)
-    : Feature(FeatureTag::kNamespace, std::move(desc)),
-      value_(std::move(v)) {}
-
-std::size_t Namespace::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Namespace::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kNamespace) { return false; }
-    const auto& rhs = static_cast<const Namespace&>(o);
-    return value_ == rhs.value_;
-}
-
 // Os
-Os::Os(std::string v, std::string desc)
-    : Feature(FeatureTag::kOs, std::move(desc)),
-      value_(std::move(v)) {}
-
 engine::Result Os::evaluate(const FeatureSet& fs, bool sc) const {
     auto r = Feature::evaluate(fs, sc);
     if (r.success) { return r; }
@@ -350,46 +256,6 @@ bool Os::matches(const FeatureSet& fs) const {
         if (entry.first && entry.first->tag() == FeatureTag::kOs) { return true; }
     }
     return false;
-}
-
-std::size_t Os::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Os::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kOs) { return false; }
-    const auto& rhs = static_cast<const Os&>(o);
-    return value_ == rhs.value_;
-}
-
-// Arch
-Arch::Arch(std::string v, std::string desc)
-    : Feature(FeatureTag::kArch, std::move(desc)),
-      value_(std::move(v)) {}
-
-std::size_t Arch::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Arch::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kArch) { return false; }
-    const auto& rhs = static_cast<const Arch&>(o);
-    return value_ == rhs.value_;
-}
-
-// Format
-Format::Format(std::string v, std::string desc)
-    : Feature(FeatureTag::kFormat, std::move(desc)),
-      value_(std::move(v)) {}
-
-std::size_t Format::hash() const noexcept {
-    return mix_tag(tag_, std::hash<std::string>{}(value_));
-}
-
-bool Format::equals(const Feature& o) const noexcept {
-    if (o.tag() != FeatureTag::kFormat) { return false; }
-    const auto& rhs = static_cast<const Format&>(o);
-    return value_ == rhs.value_;
 }
 
 }  // namespace papa::features
