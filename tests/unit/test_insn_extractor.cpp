@@ -814,7 +814,7 @@ TEST_CASE("insn: extract_api_features ignores non-call instructions") {
     Function fn = make_function_with_block({ins});
 
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, fn.basic_blocks[0], ins, *img, table, disasm);
+        fn, ins, *img, table, disasm);
     CHECK(out.empty());
 }
 
@@ -841,7 +841,7 @@ TEST_CASE("insn: extract_api_features yields names when target hits the IAT") {
 
     Function fn = make_function_with_block({ins});
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, fn.basic_blocks[0], ins, *img, table, disasm);
+        fn, ins, *img, table, disasm);
     CHECK_FALSE(out.empty());
     for (const auto& [feat, _addr] : out) {
         CHECK(feat->tag() == FeatureTag::kApi);
@@ -867,6 +867,6 @@ TEST_CASE("insn: extract_api_features returns nothing when no IAT match found") 
 
     Function fn = make_function_with_block({ins});
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, fn.basic_blocks[0], ins, *img, table, disasm);
+        fn, ins, *img, table, disasm);
     CHECK(out.empty());
 }

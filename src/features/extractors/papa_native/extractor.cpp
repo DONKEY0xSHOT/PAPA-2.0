@@ -234,7 +234,7 @@ PapaNativeStaticExtractor::extract_insn_features(
     }
     {
         auto apis = ::papa::features::extractors::papa_native::insn::extract_api_features(
-            fn, bb, ins, backend_.image(), backend_.imports(), backend_.disassembler());
+            fn, ins, backend_.image(), backend_.imports(), backend_.disassembler());
         for (auto& fa : apis) { out.push_back(std::move(fa)); }
     }
     {

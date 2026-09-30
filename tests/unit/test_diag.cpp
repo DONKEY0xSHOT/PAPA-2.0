@@ -30,7 +30,7 @@ namespace {
         for (const auto& bb : f.basic_blocks) {
             for (const auto& ins : bb.instructions) {
                 for (const auto& fa : pn::insn::extract_api_features(
-                         f, bb, ins, backend.image(), imports, disasm)) {
+                         f, ins, backend.image(), imports, disasm)) {
                     if (fa.first->to_string().find(needle) != std::string::npos) {
                         return true;
                     }

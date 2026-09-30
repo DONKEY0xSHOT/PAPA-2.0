@@ -110,7 +110,6 @@ resolve_direct_call_import(const DecodedInsn&         ins,
 /// Every API name a call or thunk-style jump implies
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_api_features(const Function&            fn,
-                     const BasicBlock&          bb,
                      const DecodedInsn&         ins,
                      const ::papa::pe::PeImage& image,
                      const ImportTable&         imports,

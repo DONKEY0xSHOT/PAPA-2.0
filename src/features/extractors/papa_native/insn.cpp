@@ -743,13 +743,10 @@ resolve_direct_call_import(const DecodedInsn&         ins,
 
 std::vector<FeatureWithAddress>
 extract_api_features(const Function&            fn,
-                     const BasicBlock&          bb,
                      const DecodedInsn&         ins,
                      const ::papa::pe::PeImage& image,
                      const ImportTable&         imports,
                      const Disassembler&        disasm) {
-    (void)fn;
-    (void)bb;
     std::vector<FeatureWithAddress> out;
 
     // CAPA extracts API features from call and unconditional jmp instructions. A tail-
