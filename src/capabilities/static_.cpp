@@ -167,9 +167,7 @@ find_basic_block_capabilities_inner(
     for (const auto& ih : extractor.get_instructions(fh, bbh)) {
         auto insn_caps = find_instruction_capabilities_inner(
             rules, extractor, fh, bbh, ih, globals);
-        for (const auto& [feat, addrs] : insn_caps.features) {
-            for (const auto& a : addrs) { bb_fs.add(feat, a); }
-        }
+        bb_fs.merge_in(insn_caps.features);
         merge_into(insn_matches_acc, std::move(insn_caps.matches));
     }
 
@@ -198,9 +196,7 @@ find_code_capabilities_inner(
     for (const auto& bbh : extractor.get_basic_blocks(fh)) {
         auto bb_caps = find_basic_block_capabilities_inner(
             rules, extractor, fh, bbh, globals);
-        for (const auto& [feat, addrs] : bb_caps.features) {
-            for (const auto& a : addrs) { fn_fs.add(feat, a); }
-        }
+        fn_fs.merge_in(bb_caps.features);
         merge_into(bb_matches_acc,   std::move(bb_caps.matches));
         merge_into(insn_matches_acc, std::move(bb_caps.insn_matches));
     }
