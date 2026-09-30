@@ -8,16 +8,13 @@
 #include "papa/features/extractors/papa_native/basic_block.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
 #include "papa/features/extractors/papa_native/function.h"
 #include "papa/features/extractors/papa_native/global_.h"
 #include "papa/features/extractors/papa_native/insn.h"
+#include "papa/features/extractors/papa_native/library_signatures.h"
 
 #include <cstdint>
-#include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <utility>
 #include <variant>
@@ -261,7 +258,7 @@ bool PapaNativeStaticExtractor::is_library_function(
     if (fn.likely_library) { return true; }
 
     // Structural thunks are library code regardless of any signature
-    if (LibrarySignatureSet::is_thunk(fn)) { return true; }
+    if (is_thunk(fn)) { return true; }
 
     // FLIRT identified the library functions during analysis, so this is a lookup into
     // that result rather than a second matching pass

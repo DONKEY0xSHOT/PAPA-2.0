@@ -9,13 +9,12 @@
 #include <Zydis/Zydis.h>
 
 #include <cstdint>
-#include <span>
 
 using papa::features::extractors::papa_native::BasicBlock;
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::DecodedOperand;
 using papa::features::extractors::papa_native::Function;
-using papa::features::extractors::papa_native::LibrarySignatureSet;
+using papa::features::extractors::papa_native::is_thunk;
 using papa::features::extractors::papa_native::OperandKind;
 
 namespace {
@@ -48,7 +47,7 @@ namespace {
 
 TEST_CASE("library_signatures: is_thunk flags single-block jmp [iat] functions") {
     const auto fn = make_single_insn_function(make_jmp_iat(0x1000));
-    CHECK(LibrarySignatureSet::is_thunk(fn));
+    CHECK(is_thunk(fn));
 }
 
 TEST_CASE("library_signatures: is_thunk rejects multi-block functions") {
@@ -56,7 +55,7 @@ TEST_CASE("library_signatures: is_thunk rejects multi-block functions") {
     BasicBlock bb2;
     bb2.va = 0x2000;
     fn.basic_blocks.push_back(std::move(bb2));
-    CHECK_FALSE(LibrarySignatureSet::is_thunk(fn));
+    CHECK_FALSE(is_thunk(fn));
 }
 
 TEST_CASE("library_signatures: is_thunk rejects multi-instruction blocks") {
@@ -65,7 +64,7 @@ TEST_CASE("library_signatures: is_thunk rejects multi-instruction blocks") {
     extra.length = 1;
     auto fn = make_single_insn_function(make_jmp_iat(0x1000));
     fn.basic_blocks.front().instructions.push_back(std::move(extra));
-    CHECK_FALSE(LibrarySignatureSet::is_thunk(fn));
+    CHECK_FALSE(is_thunk(fn));
 }
 
 TEST_CASE("library_signatures: is_thunk rejects conditional jumps and register operands") {
@@ -73,19 +72,12 @@ TEST_CASE("library_signatures: is_thunk rejects conditional jumps and register o
         auto cond = make_jmp_iat(0x1000);
         cond.is_conditional = true;
         const auto fn = make_single_insn_function(std::move(cond));
-        CHECK_FALSE(LibrarySignatureSet::is_thunk(fn));
+        CHECK_FALSE(is_thunk(fn));
     }
     {
         auto reg = make_jmp_iat(0x1000);
         reg.operands[0].kind = OperandKind::kReg;
         const auto fn = make_single_insn_function(std::move(reg));
-        CHECK_FALSE(LibrarySignatureSet::is_thunk(fn));
+        CHECK_FALSE(is_thunk(fn));
     }
-}
-
-TEST_CASE("library_signatures: classify_as_library flags a thunk regardless of bytes") {
-    const LibrarySignatureSet set{};
-    const auto fn = make_single_insn_function(make_jmp_iat(0x1000));
-    // A thunk is library code by structure alone, so FLIRT is never consulted
-    CHECK(set.classify_as_library(fn, std::span<const std::uint8_t>{}));
 }

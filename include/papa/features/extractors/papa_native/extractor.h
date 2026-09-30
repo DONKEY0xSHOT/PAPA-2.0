@@ -3,15 +3,12 @@
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/backend.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
-#include "papa/features/extractors/papa_native/library_signatures.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
