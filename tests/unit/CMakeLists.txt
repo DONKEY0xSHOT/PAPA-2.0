@@ -27,6 +27,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_optimizer.cpp
     test_feature_index.cpp
     test_com_lookup.cpp
+    test_embedded_rules.cpp
     test_string_utils.cpp
     test_extractor_helpers.cpp
     test_strings_extractor.cpp
@@ -85,7 +86,9 @@ if(MSVC)
         "/I${CMAKE_SOURCE_DIR}/third_party/flirt_sigs")
 endif()
 
-add_test(NAME papa_unit_tests COMMAND papa_unit_tests)
+# Run from the source root so tests can read the vendored files by relative path
+add_test(NAME papa_unit_tests COMMAND papa_unit_tests
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Phase 1 acceptance: `papa --version` prints a non-empty banner
 add_test(

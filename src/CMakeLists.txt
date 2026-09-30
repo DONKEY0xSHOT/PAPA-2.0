@@ -77,6 +77,46 @@ set(PAPA_LIB_SOURCES
     rules/com_interfaces.cpp
 )
 
+# The vendored capa-rules, compiled in as generated source. Hidden entries are
+# left out, the same as the rule loader does
+set(PAPA_RULES_DIR "${CMAKE_SOURCE_DIR}/third_party/capa-rules")
+file(GLOB_RECURSE PAPA_RULE_GLOB CONFIGURE_DEPENDS "${PAPA_RULES_DIR}/*.yml")
+set(PAPA_RULE_FILES "")
+set(PAPA_RULE_PATHS "")
+foreach(rule_file IN LISTS PAPA_RULE_GLOB)
+    file(RELATIVE_PATH rule_path "${PAPA_RULES_DIR}" "${rule_file}")
+    if(NOT rule_path MATCHES "(^|/)\\.")
+        list(APPEND PAPA_RULE_FILES "${rule_file}")
+        list(APPEND PAPA_RULE_PATHS "${rule_path}")
+    endif()
+endforeach()
+list(SORT PAPA_RULE_PATHS)
+
+# The paths reach the generator through a file, as a thousand of them would overflow
+# a Windows command line. It is replaced only on change, so a reconfigure alone is free
+set(PAPA_RULE_LIST "${CMAKE_BINARY_DIR}/generated/embedded_rules.list")
+file(WRITE "${PAPA_RULE_LIST}.tmp" "${PAPA_RULE_PATHS}")
+file(COPY_FILE "${PAPA_RULE_LIST}.tmp" "${PAPA_RULE_LIST}" ONLY_IF_DIFFERENT)
+file(REMOVE "${PAPA_RULE_LIST}.tmp")
+
+set(PAPA_EMBEDDED_RULES "${CMAKE_BINARY_DIR}/generated/embedded_rules.cpp")
+add_custom_command(
+    OUTPUT "${PAPA_EMBEDDED_RULES}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DBASE_DIR=${PAPA_RULES_DIR}"
+        "-DFILE_LIST=${PAPA_RULE_LIST}"
+        "-DOUTPUT=${PAPA_EMBEDDED_RULES}"
+        -DHEADER=papa/rules/embedded.h
+        -DNAMESPACE=papa::rules
+        -DTYPE=EmbeddedRule
+        -DFUNCTION=embedded_rules
+        -P "${CMAKE_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+    DEPENDS ${PAPA_RULE_FILES} "${PAPA_RULE_LIST}" "${CMAKE_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+    COMMENT "Embedding the vendored capa-rules"
+    VERBATIM
+)
+list(APPEND PAPA_LIB_SOURCES "${PAPA_EMBEDDED_RULES}")
+
 add_library(papa_lib STATIC ${PAPA_LIB_SOURCES})
 add_library(papa::lib ALIAS papa_lib)
 
