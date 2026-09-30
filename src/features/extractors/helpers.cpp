@@ -50,7 +50,7 @@ constexpr std::uint8_t kAsciiZ       = 'Z';
 std::string normalize_dll_name(std::string_view dll) {
     std::string lower = ::papa::util::to_lower_ascii(dll);
     for (const auto ext : ::papa::constants::kDllExtensions) {
-        if (::papa::util::ends_with(lower, ext)) {
+        if (lower.ends_with(ext)) {
             lower.resize(lower.size() - ext.size());
             return lower;
         }

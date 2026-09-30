@@ -99,16 +99,6 @@ constexpr std::string_view kInlineDescSep = " = ";
     return rtrim(ltrim(s));
 }
 
-[[nodiscard]] bool starts_with(std::string_view s, std::string_view prefix) noexcept {
-    return s.size() >= prefix.size() &&
-           s.substr(0, prefix.size()) == prefix;
-}
-
-[[nodiscard]] bool ends_with(std::string_view s, std::string_view suffix) noexcept {
-    return s.size() >= suffix.size() &&
-           s.substr(s.size() - suffix.size()) == suffix;
-}
-
 [[nodiscard]] PapaError rule_error(ErrorKind kind, std::string detail,
                                    std::size_t line, std::size_t column) {
     std::string out;
@@ -295,7 +285,7 @@ constexpr std::string_view kInlineDescSep = " = ";
     }
 
     int base = 10;
-    if (starts_with(body, "0x") || starts_with(body, "0X")) {
+    if (body.starts_with("0x") || body.starts_with("0X")) {
         base = 16;
         body.remove_prefix(2);
     }
@@ -330,7 +320,7 @@ constexpr std::string_view kInlineDescSep = " = ";
     s = trim(s);
     if (s.empty()) { return std::nullopt; }
     int base = 10;
-    if (starts_with(s, "0x") || starts_with(s, "0X")) {
+    if (s.starts_with("0x") || s.starts_with("0X")) {
         base = 16;
         s.remove_prefix(2);
         if (s.empty()) { return std::nullopt; }
@@ -514,7 +504,7 @@ build_feature_leaf(std::string_view key,
     };
 
     // operand[i].number / operand[i].offset
-    if (starts_with(key, "operand[")) {
+    if (key.starts_with("operand[")) {
         const auto bracket_close = key.find(']');
         if (bracket_close == std::string_view::npos) {
             return err(std::string{"malformed operand key: "}.append(key));
@@ -549,7 +539,7 @@ build_feature_leaf(std::string_view key,
     }
 
     // property/read and property/write
-    if (starts_with(key, "property/")) {
+    if (key.starts_with("property/")) {
         Property::Access acc = Property::Access::kNone;
         const auto suffix = key.substr(std::string_view{"property/"}.size());
         if      (suffix == "read")  { acc = Property::Access::kRead; }
@@ -623,7 +613,7 @@ build_feature_leaf(std::string_view key,
     if (key == "string") {
         // /pattern/ or /pattern/i is a regex literal
         if (value.size() >= 2 && value.front() == '/' &&
-            (ends_with(value, "/") || ends_with(value, "/i"))) {
+            (value.ends_with("/") || value.ends_with("/i"))) {
             return std::make_shared<const Regex>(std::string(value), std::move(desc));
         }
         return std::make_shared<const String>(std::string(value), std::move(desc));
@@ -654,13 +644,13 @@ build_feature_leaf(std::string_view key,
 [[nodiscard]] std::optional<std::pair<std::string_view, std::string_view>>
 split_count_call(std::string_view key) noexcept {
     constexpr std::string_view kPrefix = "count(";
-    if (!starts_with(key, kPrefix)) { return std::nullopt; }
-    if (!ends_with(key, ")"))       { return std::nullopt; }
+    if (!key.starts_with(kPrefix)) { return std::nullopt; }
+    if (!key.ends_with(")"))       { return std::nullopt; }
     auto inner = key.substr(kPrefix.size(), key.size() - kPrefix.size() - 1);
     // inner should look like "api(name)" or "characteristic(loop)" etc
     const auto open = inner.find('(');
     if (open == std::string_view::npos) { return std::nullopt; }
-    if (!ends_with(inner, ")")) { return std::nullopt; }
+    if (!inner.ends_with(")")) { return std::nullopt; }
     auto inner_key   = inner.substr(0, open);
     auto inner_value = inner.substr(open + 1, inner.size() - open - 2);
     return std::make_pair(inner_key, inner_value);
@@ -1051,7 +1041,7 @@ RuleParser::parse_count_range(std::string_view text) {
     }
 
     // "N or more"
-    if (ends_with(t, " or more")) {
+    if (t.ends_with(" or more")) {
         const auto head = t.substr(0, t.size() - std::string_view{" or more"}.size());
         const auto n = parse_size_t(head);
         if (!n.has_value()) {
@@ -1061,7 +1051,7 @@ RuleParser::parse_count_range(std::string_view text) {
     }
 
     // "N or fewer" is the inclusive upper-bound dual of "N or more"
-    if (ends_with(t, " or fewer")) {
+    if (t.ends_with(" or fewer")) {
         const auto head = t.substr(0, t.size() - std::string_view{" or fewer"}.size());
         const auto n = parse_size_t(head);
         if (!n.has_value()) {
