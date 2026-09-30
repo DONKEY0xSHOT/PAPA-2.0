@@ -75,13 +75,13 @@ SampleHashes compute_sample_hashes(std::span<const std::byte> data) {
 }
 
 Metadata
-collect_metadata(std::span<const std::byte>                                 sample_buf,
-                 std::filesystem::path                                      sample_path,
+collect_metadata(std::filesystem::path                                      sample_path,
                  std::vector<std::string>                                   argv,
                  std::vector<std::string>                                   rules_paths,
                  const pe::PeImage&                                         image,
-                 const capabilities::static_::StaticCapabilities&           caps,
-                 const features::extractors::StaticFeatureExtractor&        extractor) {
+                 const capabilities::static_::StaticCapabilities&           caps) {
+    const std::span<const std::byte> sample_buf = image.raw_buffer();
+
     Metadata m;
     m.timestamp         = utc_iso8601_now();
     m.version           = std::string(version::kCapaVersion);
@@ -106,7 +106,6 @@ collect_metadata(std::span<const std::byte>                                 samp
 
     m.analysis.feature_count_file        = caps.feature_count;
     m.analysis.feature_counts_functions  = caps.per_function_feature_counts;
-    (void)extractor;
     return m;
 }
 

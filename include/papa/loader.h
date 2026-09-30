@@ -72,13 +72,11 @@ struct Metadata {
 // Build a Metadata from the analysis output and a few caller-supplied values
 // argv and rules_paths are moved in to avoid copying the caller's lists
 [[nodiscard]] Metadata
-collect_metadata(std::span<const std::byte>                                 sample_buf,
-                 std::filesystem::path                                      sample_path,
+collect_metadata(std::filesystem::path                                      sample_path,
                  std::vector<std::string>                                   argv,
                  std::vector<std::string>                                   rules_paths,
                  const pe::PeImage&                                         image,
-                 const capabilities::static_::StaticCapabilities&           caps,
-                 const features::extractors::StaticFeatureExtractor&        extractor);
+                 const capabilities::static_::StaticCapabilities&           caps);
 
 // Link each matched basic block to its function, mirroring capa's
 // compute_static_layout

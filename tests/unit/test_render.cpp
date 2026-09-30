@@ -8,7 +8,6 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
-#include "papa/features/extractors/pefile_extractor.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -20,16 +19,11 @@
 #include "papa/rules/ruleset.h"
 #include "papa/version.h"
 
-#include <cstddef>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <ios>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 #include "fixture_paths.h"
@@ -263,28 +257,12 @@ TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
     auto caps = papa::capabilities::static_::find_static_capabilities(*rs, extractor);
     REQUIRE(caps);
 
-    // Slurp the sample bytes manually because PeParser only exposes parse_file
-    std::vector<std::byte> raw_bytes;
-    {
-        std::error_code ec;
-        const auto sz = std::filesystem::file_size(kNotepad, ec);
-        REQUIRE_FALSE(ec);
-        raw_bytes.resize(static_cast<std::size_t>(sz));
-        std::ifstream ifs(std::filesystem::path(kNotepad), std::ios::binary);
-        REQUIRE(ifs);
-        ifs.read(reinterpret_cast<char*>(raw_bytes.data()),
-                 static_cast<std::streamsize>(raw_bytes.size()));
-        REQUIRE(ifs.gcount() == static_cast<std::streamsize>(raw_bytes.size()));
-    }
-
     auto meta = papa::collect_metadata(
-        std::span<const std::byte>(raw_bytes),
         kNotepad,
         std::vector<std::string>{"papa.exe", "notepad.exe"},
         std::vector<std::string>{},
         *img,
-        *caps,
-        extractor);
+        *caps);
 
     auto doc = papa::render::build_document(std::move(meta), *rs, caps->all_matches);
     const auto json_out = papa::render::json::render_to_string(doc, /*pretty=*/false);
@@ -297,11 +275,9 @@ TEST_CASE("collect_metadata: the report version is capa's release so the JSON ca
     b.code = {0xC3};
     auto img = papa::pe::PeParser::parse(b.build());
     REQUIRE(img.has_value());
-    const papa::features::extractors::PefileFeatureExtractor extractor(*img);
 
     const auto meta = papa::collect_metadata(
-        img->raw_buffer(), "x.exe", {}, {}, *img,
-        papa::capabilities::static_::StaticCapabilities{}, extractor);
+        "x.exe", {}, {}, *img, papa::capabilities::static_::StaticCapabilities{});
     CHECK(meta.version == "9.4.0");
 }
 

@@ -201,7 +201,6 @@ int run(const Args& args) {
                   << image.error().detail << '\n';
         return kExitInvalidFileType;
     }
-    const std::span<const std::byte> sample_buf = image->raw_buffer();
 
     if (args.rules_dir && !std::filesystem::exists(*args.rules_dir)) {
         std::cerr << "error: rules directory not found: " << *args.rules_dir
@@ -260,13 +259,11 @@ int run(const Args& args) {
             // The user still gets a report containing the limitation hit
             // but the code-extractor pass is skipped because results would be misleading
             auto meta = collect_metadata(
-                std::span<const std::byte>(sample_buf),
                 args.sample_path,
                 args.argv,
                 report_rules_paths(args),
                 *image,
-                capabilities::static_::StaticCapabilities{},
-                pe_only);
+                capabilities::static_::StaticCapabilities{});
             auto doc = render::build_document(std::move(meta), *ruleset, file_caps->matches);
             if (args.output == OutputMode::kJson) {
                 // capa emits compact JSON (model_dump_json) then a trailing newline
@@ -301,13 +298,11 @@ int run(const Args& args) {
     }
 
     auto meta = collect_metadata(
-        std::span<const std::byte>(sample_buf),
         args.sample_path,
         args.argv,
         report_rules_paths(args),
         *image,
-        *caps,
-        extractor);
+        *caps);
 
     // Enrich the metadata with the two pieces only the full pipeline can supply:
     // capa's basic-block layout and the FLIRT name of each library function
