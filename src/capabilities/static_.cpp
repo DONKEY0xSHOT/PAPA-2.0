@@ -131,12 +131,7 @@ void inject_match_features(features::FeatureSet&                fs,
     }
 }
 
-}  // namespace
-
-/// Internal find_* overloads that take pre-extracted globals. The public
-/// wrappers below extract globals once and forward
-namespace {
-
+// Per-scope passes. Each takes the globals find_static_capabilities extracted once
 InstructionCapabilities
 find_instruction_capabilities_inner(
     const ::papa::rules::RuleSet&                  rules,
@@ -216,36 +211,6 @@ find_code_capabilities_inner(
 }
 
 }  // namespace
-
-InstructionCapabilities
-find_instruction_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh,
-    const base::BBHandle&                bbh,
-    const base::InsnHandle&              ih) {
-    return find_instruction_capabilities_inner(
-        rules, extractor, fh, bbh, ih, extractor.extract_global_features());
-}
-
-BasicBlockCapabilities
-find_basic_block_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh,
-    const base::BBHandle&                bbh) {
-    return find_basic_block_capabilities_inner(
-        rules, extractor, fh, bbh, extractor.extract_global_features());
-}
-
-CodeCapabilities
-find_code_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh) {
-    return find_code_capabilities_inner(
-        rules, extractor, fh, extractor.extract_global_features());
-}
 
 ::papa::Expected<StaticCapabilities>
 find_static_capabilities(

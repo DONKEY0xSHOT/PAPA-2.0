@@ -49,27 +49,6 @@ struct StaticCapabilities {
     std::vector<FunctionFeatureCount>       per_function_feature_counts;
 };
 
-[[nodiscard]] InstructionCapabilities
-find_instruction_capabilities(
-    const ::papa::rules::RuleSet&                              rules,
-    const ::papa::features::extractors::StaticFeatureExtractor& extractor,
-    const ::papa::features::extractors::FunctionHandle&        fh,
-    const ::papa::features::extractors::BBHandle&              bbh,
-    const ::papa::features::extractors::InsnHandle&            ih);
-
-[[nodiscard]] BasicBlockCapabilities
-find_basic_block_capabilities(
-    const ::papa::rules::RuleSet&                              rules,
-    const ::papa::features::extractors::StaticFeatureExtractor& extractor,
-    const ::papa::features::extractors::FunctionHandle&        fh,
-    const ::papa::features::extractors::BBHandle&              bbh);
-
-[[nodiscard]] CodeCapabilities
-find_code_capabilities(
-    const ::papa::rules::RuleSet&                              rules,
-    const ::papa::features::extractors::StaticFeatureExtractor& extractor,
-    const ::papa::features::extractors::FunctionHandle&        fh);
-
 // Top-level entry: walk every function and roll matches up to file scope. Per-function
 // analysis is independent, so it runs across threads
 [[nodiscard]] Expected<StaticCapabilities>

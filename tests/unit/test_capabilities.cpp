@@ -164,44 +164,6 @@ TEST_CASE("capabilities: find_static_capabilities runs end-to-end on notepad") {
     CHECK(caps->feature_count > 0U);
 }
 
-TEST_CASE("capabilities: per-scope helpers compose correctly on a tiny synthetic input") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(img.has_value());
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
-        *img, papa::features::extractors::papa_native::flirt::FlirtSignatureSet::embedded());
-    REQUIRE(backend);
-    papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
-        std::move(*backend));
-
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
-        "rule:\n"
-        "  meta:\n"
-        "    name: any-mnemonic\n"
-        "    scope: instruction\n"
-        "  features:\n"
-        "    - mnemonic: mov\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-
-    auto fns = extractor.get_functions();
-    REQUIRE_FALSE(fns.empty());
-    auto bbs = extractor.get_basic_blocks(fns[0]);
-    REQUIRE_FALSE(bbs.empty());
-    auto insns = extractor.get_instructions(fns[0], bbs[0]);
-    REQUIRE_FALSE(insns.empty());
-
-    auto insn_caps = papa::capabilities::static_::find_instruction_capabilities(
-        *rs, extractor, fns[0], bbs[0], insns[0]);
-    // With our trivial rule, the first MOV-class instruction in .text usually matches.
-    // If not, the per-instruction features still propagate
-    CHECK(insn_caps.features.size() > 0U);
-}
-
 namespace {
 
 // Minimal extractor that yields exactly the file features a test requests. The gate
