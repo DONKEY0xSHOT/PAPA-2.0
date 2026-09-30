@@ -6,22 +6,21 @@
 #include "papa/features/feature.h"
 #include "papa/pe/pe_image.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace papa::features::extractors {
 
-namespace {
-
-// CAPA spelling for the OS, arch, and format values
-constexpr const char* kOsWindowsValue = "windows";
-constexpr const char* kFormatPeValue  = "pe";
-constexpr const char* kArchI386Value  = "i386";
-constexpr const char* kArchAmd64Value = "amd64";
-
-}  // namespace
+std::optional<std::string_view> pe_arch(std::uint16_t machine) noexcept {
+    if (machine == constants::kImageFileMachineI386)  { return constants::arch_value::kI386; }
+    if (machine == constants::kImageFileMachineAmd64) { return constants::arch_value::kAmd64; }
+    return std::nullopt;
+}
 
 std::vector<FeatureWithAddress>
 extract_global_features(const ::papa::pe::PeImage& image) {
@@ -30,24 +29,17 @@ extract_global_features(const ::papa::pe::PeImage& image) {
 
     // Os and Format are unconditional for PE inputs in v1
     out.emplace_back(
-        std::make_shared<const features::Os>(std::string(kOsWindowsValue)),
+        std::make_shared<const features::Os>(std::string(constants::os_value::kWindows)),
         features::Address{features::NoAddress{}});
     out.emplace_back(
-        std::make_shared<const features::Format>(std::string(kFormatPeValue)),
+        std::make_shared<const features::Format>(std::string(constants::format_value::kPe)),
         features::Address{features::NoAddress{}});
 
     // Arch depends on the machine field, and an unsupported machine emits none, as in capa
     // In capa arch: any matches only a literal Arch("any"), which a PE never produces
-    const auto machine = image.machine();
-    const char* arch_value = nullptr;
-    if (machine == ::papa::constants::kImageFileMachineI386) {
-        arch_value = kArchI386Value;
-    } else if (machine == ::papa::constants::kImageFileMachineAmd64) {
-        arch_value = kArchAmd64Value;
-    }
-    if (arch_value != nullptr) {
+    if (const auto arch = pe_arch(image.machine())) {
         out.emplace_back(
-            std::make_shared<const features::Arch>(std::string(arch_value)),
+            std::make_shared<const features::Arch>(std::string(*arch)),
             features::Address{features::NoAddress{}});
     }
     return out;

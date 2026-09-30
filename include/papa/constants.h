@@ -104,8 +104,8 @@ inline constexpr std::size_t   kEndbranchSkipLen        = 4;
 // RUNTIME_FUNCTION record size (x64 .pdata entry)
 inline constexpr std::size_t   kRuntimeFunctionSize  = 12;
 
-// String constants used by the renderer to label per-image platform. CAPA's report
-// schema uses these literal lowercase tags
+// CAPA's lowercase spellings of the os, arch and format values, shared by the feature
+// extractors and the report metadata
 namespace os_value {
 inline constexpr std::string_view kWindows = "windows";
 }  // namespace os_value

@@ -19,7 +19,6 @@ namespace papa::features::extractors::pefile {
 
 namespace {
 
-constexpr const char* kFormatPeValue            = "pe";
 constexpr const char* kEmbeddedPeCharacteristic = "embedded pe";
 constexpr const char* kForwardedExportChar      = "forwarded export";
 
@@ -40,8 +39,9 @@ constexpr const char* kForwardedExportChar      = "forwarded export";
 std::vector<FeatureWithAddress>
 extract_file_format(const ::papa::pe::PeImage& /*image*/) {
     std::vector<FeatureWithAddress> out;
-    out.emplace_back(std::make_shared<const features::Format>(std::string(kFormatPeValue)),
-                     no_addr());
+    out.emplace_back(
+        std::make_shared<const features::Format>(std::string(constants::format_value::kPe)),
+        no_addr());
     return out;
 }
 

@@ -5,6 +5,7 @@
 #include "papa/engine.h"
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
+#include "papa/features/extractors/global_.h"
 #include "papa/pe/pe_image.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
@@ -55,10 +56,9 @@ namespace {
 
 [[nodiscard]] std::string arch_for_machine(std::uint16_t machine) noexcept {
     using namespace ::papa::constants;
-    if (machine == kImageFileMachineI386)  { return std::string(arch_value::kI386);  }
-    if (machine == kImageFileMachineAmd64) { return std::string(arch_value::kAmd64); }
-    if (machine == kImageFileMachineArm64) { return std::string(arch_value::kAarch64); }
-    return std::string("unknown");
+    const std::string_view fallback =
+        machine == kImageFileMachineArm64 ? arch_value::kAarch64 : std::string_view{"unknown"};
+    return std::string(features::extractors::pe_arch(machine).value_or(fallback));
 }
 
 }  // namespace

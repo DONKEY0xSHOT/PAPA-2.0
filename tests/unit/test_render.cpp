@@ -18,6 +18,8 @@
 #include "papa/rules/ruleset.h"
 #include "papa/version.h"
 
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -279,6 +281,32 @@ TEST_CASE("collect_metadata: the report version is capa's release so the JSON ca
     const auto meta = papa::collect_metadata(
         "x.exe", {}, {}, *img, papa::capabilities::static_::StaticCapabilities{});
     CHECK(meta.version == "9.4.0");
+}
+
+TEST_CASE("collect_metadata: the arch names i386 and amd64 and falls back to aarch64 or unknown") {
+    struct Row {
+        std::uint16_t machine;
+        const char*   arch;
+    };
+    constexpr std::array<Row, 4> kRows = {{
+        {0x014C, "i386"}, {0x8664, "amd64"}, {0xAA64, "aarch64"}, {0x01C4, "unknown"},
+    }};
+    for (const Row& row : kRows) {
+        CAPTURE(row.arch);
+        papa_tests::PeBuilder b;
+        b.code = {0xC3};
+        auto bytes = b.build();
+        // The COFF Machine field follows the four byte PE signature that e_lfanew points at
+        std::uint32_t lfanew = 0;
+        std::memcpy(&lfanew, bytes.data() + 0x3C, sizeof lfanew);
+        std::memcpy(bytes.data() + lfanew + 4U, &row.machine, sizeof row.machine);
+        auto img = papa::pe::PeParser::parse(bytes);
+        REQUIRE(img.has_value());
+
+        const auto meta = papa::collect_metadata(
+            "x.exe", {}, {}, *img, papa::capabilities::static_::StaticCapabilities{});
+        CHECK(meta.analysis.arch == row.arch);
+    }
 }
 
 TEST_CASE("render: the verbose header names PAPA's own version rather than the report's") {

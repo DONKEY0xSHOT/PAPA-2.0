@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 #include "fixture_paths.h"
 
@@ -63,6 +64,14 @@ TEST_CASE("global_: notepad.exe yields os=windows, format=pe, arch=amd64") {
     // notepad on a modern Windows install is amd64. Tolerate i386 in case the fixture
     // is from a 32-bit machine
     CHECK((av == "amd64" || av == "i386"));
+}
+
+TEST_CASE("global_: pe_arch names only the i386 and amd64 machines") {
+    using papa::features::extractors::pe_arch;
+    CHECK(pe_arch(0x014C) == std::optional<std::string_view>{"i386"});
+    CHECK(pe_arch(0x8664) == std::optional<std::string_view>{"amd64"});
+    CHECK_FALSE(pe_arch(0xAA64).has_value());
+    CHECK_FALSE(pe_arch(0x0000).has_value());
 }
 
 TEST_CASE("global_: chrome.exe also yields the standard triple") {
