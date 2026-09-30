@@ -39,7 +39,6 @@ struct RuleMeta {
     std::optional<std::string>  description;
     bool                        lib{false};
     bool                        is_subscope_rule{false};
-    bool                        is_nursery{false};
     std::optional<std::string>  parent;           // present on synthetic subscope rules
     std::string                 source_path;
 };
