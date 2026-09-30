@@ -44,12 +44,6 @@ void collect_matched_rules(const engine::Result&  result,
     }
 }
 
-// True when a rule is a user-facing capability rather than a building block
-[[nodiscard]] bool is_capability_rule(const rules::RuleMeta& m) {
-    if (m.lib || m.is_subscope_rule) { return false; }
-    return !(m.namespace_.has_value() && m.namespace_->starts_with("internal/"));
-}
-
 // Sort match locations so PAPA's report is deterministic across runs
 void sort_addresses(std::vector<features::Address>& addrs) {
     std::sort(addrs.begin(), addrs.end(),
@@ -171,6 +165,11 @@ constexpr int kMaxMatchDepth = 256;
 }
 
 }  // namespace
+
+bool is_capability_rule(const rules::RuleMeta& m) {
+    if (m.lib || m.is_subscope_rule) { return false; }
+    return !(m.namespace_.has_value() && m.namespace_->starts_with("internal/"));
+}
 
 ResultDocument
 build_document(Metadata                                   metadata,

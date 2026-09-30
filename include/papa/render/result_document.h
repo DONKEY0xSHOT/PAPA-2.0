@@ -51,6 +51,10 @@ struct ResultDocument {
     std::set<std::string>               matched_subrules;
 };
 
+/// True when a rule is a user-facing capability rather than a library, subscope or
+/// internal building block
+[[nodiscard]] bool is_capability_rule(const rules::RuleMeta& m);
+
 // Build a renderer-friendly document from raw analysis output
 [[nodiscard]] ResultDocument
 build_document(Metadata                                   metadata,

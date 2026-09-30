@@ -93,12 +93,7 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
 capability_rules(const ResultDocument& doc) {
     std::vector<const RuleReport*> out;
     for (const auto& [_name, rep] : doc.rules) {
-        const auto& m = rep.meta;
-        if (m.lib || m.is_subscope_rule) { continue; }
-        if (m.namespace_.has_value() && m.namespace_->starts_with("internal/")) {
-            continue;
-        }
-        out.push_back(&rep);
+        if (is_capability_rule(rep.meta)) { out.push_back(&rep); }
     }
     std::sort(out.begin(), out.end(), [](const RuleReport* a, const RuleReport* b) {
         const std::string na = a->meta.namespace_.value_or(std::string{});
