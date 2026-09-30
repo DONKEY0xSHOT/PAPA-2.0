@@ -40,7 +40,6 @@ struct Function {
     std::vector<BasicBlock>    basic_blocks;
     std::vector<std::uint64_t> callers;
     std::vector<std::uint64_t> callees;
-    bool                       likely_library{false};
 };
 
 // What one analysis run recovers: the functions, plus the library functions FLIRT

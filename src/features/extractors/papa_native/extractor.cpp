@@ -254,9 +254,6 @@ bool PapaNativeStaticExtractor::is_library_function(
     if (it == function_index_.end()) { return false; }
     const Function& fn = backend_.functions()[it->second];
 
-    // CFG-derived hint takes precedence when the recovery layer set it
-    if (fn.likely_library) { return true; }
-
     // Structural thunks are library code regardless of any signature
     if (is_thunk(fn)) { return true; }
 
