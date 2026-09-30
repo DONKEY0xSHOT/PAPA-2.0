@@ -18,7 +18,6 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
-#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -163,21 +162,6 @@ TEST_CASE("emu discovery: riprel_lea_target ignores a lea with a register base")
     REQUIRE(lea.has_value());
     CHECK_FALSE(emu::riprel_lea_target(*lea).has_value());
 }
-
-namespace {
-[[nodiscard]] std::vector<std::uint64_t> probe_hex_csv(const std::string& s) {
-    std::vector<std::uint64_t> out;
-    std::size_t i = 0;
-    while (i < s.size()) {
-        std::size_t j = s.find(',', i);
-        if (j == std::string::npos) { j = s.size(); }
-        const std::string tok = s.substr(i, j - i);
-        if (!tok.empty()) { out.push_back(std::stoull(tok, nullptr, 16)); }
-        i = j + 1;
-    }
-    return out;
-}
-}  // namespace
 
 TEST_CASE("emu discovery: x64 lea-referenced function is recovered (certutil adler32)") {
     const auto path = papa_tests::fixture_path("corpus/certutil_x64.exe");
