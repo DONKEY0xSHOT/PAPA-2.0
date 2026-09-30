@@ -209,7 +209,7 @@ void emit_default(const ResultDocument& doc, std::ostream& out, bool color) {
 // Plain header used by the verbose modes, which keep PAPA's own layout.
 // It names PAPA's version, as the report's version field is capa's
 void emit_header(const ResultDocument& doc, std::ostream& out) {
-    out << "PAPA " << version::kVersionString << '\n';
+    out << "PAPA " << version::version() << '\n';
     out << "sample: " << doc.meta.sample_path.string() << '\n';
     out << "size:   " << doc.meta.sample_size_bytes << " bytes\n";
     out << "md5:    " << doc.meta.hashes.md5    << '\n';

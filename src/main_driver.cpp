@@ -97,6 +97,13 @@ read_entire_file(const std::filesystem::path& path) {
     return {args.rules_dir->string()};
 }
 
+// "<prog> <version>", where prog is the file name of argv[0] as in argparse
+[[nodiscard]] std::string version_line(const Args& args) {
+    std::string prog = std::filesystem::path(args.argv0).filename().string();
+    if (prog.empty()) { prog = "papa"; }
+    return prog.append(" ").append(version::version());
+}
+
 }  // namespace
 
 ParseResult parse_args(int argc, const char* const* argv) {
@@ -158,11 +165,11 @@ ParseResult parse_args(int argc, const char* const* argv) {
 
 int run(const Args& args) {
     if (args.show_version) {
-        std::cout << version::banner() << '\n';
+        std::cout << version_line(args) << '\n';
         return kExitOk;
     }
     if (args.show_help) {
-        std::cout << version::banner() << "\n\n" << kUsage;
+        std::cout << version_line(args) << "\n\n" << kUsage;
         return kExitOk;
     }
 

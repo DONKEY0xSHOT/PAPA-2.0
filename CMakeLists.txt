@@ -10,7 +10,6 @@ else()
 endif()
 
 project(papa
-    VERSION 0.1.0
     DESCRIPTION "C++ port of CAPA static PE capability detector"
     # C as well as C++, because Zydis and miniz are C libraries. Visual Studio's
     # generator tolerates the omission, so only Makefile and Ninja builds failed
@@ -37,6 +36,9 @@ option(PAPA_BUILD_TESTS         "Build unit and integration tests"       ON)
 option(PAPA_ENABLE_SANITIZERS   "Enable ASan/UBSan in Debug builds"      OFF)
 option(PAPA_WARNINGS_AS_ERRORS  "Treat compiler warnings as errors"      ON)
 option(PAPA_ENABLE_HARDENING    "Enable hardening compiler/linker flags" ON)
+
+# PAPA's release version, stamped into the binary. CI sets it to the release tag
+set(PAPA_VERSION "0.1.0-dev" CACHE STRING "PAPA release version")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
@@ -76,7 +78,7 @@ endif()
 
 message(STATUS "")
 message(STATUS "PAPA configuration:")
-message(STATUS "  Version            : ${PROJECT_VERSION}")
+message(STATUS "  Version            : ${PAPA_VERSION}")
 message(STATUS "  C++ standard       : ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build type         : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Compiler           : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

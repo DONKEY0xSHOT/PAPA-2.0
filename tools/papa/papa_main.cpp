@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
             std::cerr << "error: " << parse.error << '\n';
             return parse.exit_code;
         }
+        if (argc > 0) { parse.args.argv0 = argv[0]; }
         return papa::cli::run(parse.args);
     } catch (const papa::PapaInvariantError& e) {
         // Programmer-visible bug

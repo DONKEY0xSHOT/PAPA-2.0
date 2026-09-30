@@ -120,6 +120,10 @@ list(APPEND PAPA_LIB_SOURCES "${PAPA_EMBEDDED_RULES}")
 add_library(papa_lib STATIC ${PAPA_LIB_SOURCES})
 add_library(papa::lib ALIAS papa_lib)
 
+# Only version.cpp sees the release version, so a new version rebuilds that one file
+set_source_files_properties(version.cpp PROPERTIES
+    COMPILE_DEFINITIONS "PAPA_VERSION=\"${PAPA_VERSION}\"")
+
 target_include_directories(papa_lib
     PUBLIC
         "${CMAKE_SOURCE_DIR}/include"

@@ -91,11 +91,11 @@ endif()
 add_test(NAME papa_unit_tests COMMAND papa_unit_tests
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-# Phase 1 acceptance: `papa --version` prints a non-empty banner
+# `papa --version` prints the program file name and the release version, like argparse
 add_test(
     NAME papa_cli_version
     COMMAND papa_cli --version
 )
 set_tests_properties(papa_cli_version PROPERTIES
-    PASS_REGULAR_EXPRESSION "PAPA [0-9]+\\.[0-9]+\\.[0-9]+"
+    PASS_REGULAR_EXPRESSION "^papa(\\.exe)? [0-9]+\\.[0-9]+\\.[0-9]+"
 )

@@ -22,6 +22,7 @@ struct Args {
     std::optional<std::filesystem::path>  rules_dir{};       // empty means the embedded rules
     std::filesystem::path                 output_path;       // empty means stdout
     std::vector<std::string>              argv;              // the raw arguments, for the report
+    std::string                           argv0;             // the program path, empty means papa
     OutputMode                            output{OutputMode::kDefault};
     bool                                  quiet{false};
     bool                                  show_help{false};

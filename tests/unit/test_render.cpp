@@ -311,7 +311,7 @@ TEST_CASE("render: the verbose header names PAPA's own version rather than the r
     const auto out = papa::render::text::render_to_string(
         doc, papa::render::text::Verbosity::kVerbose);
     const std::string first_line =
-        "PAPA " + std::string(papa::version::kVersionString) + "\n";
+        "PAPA " + std::string(papa::version::version()) + "\n";
     CHECK(out.rfind(first_line, 0) == 0);
     CHECK(out.find("9.4.0") == std::string::npos);
 }
