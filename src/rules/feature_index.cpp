@@ -169,7 +169,6 @@ void RuleFeatureIndex::build(std::span<const Rule* const> rules) {
     order_.assign(rules.begin(), rules.end());
     always_run_.assign(order_.size(), 1U);
     by_feature_.clear();
-    indexed_count_ = 0;
 
     for (std::size_t i = 0; i < order_.size(); ++i) {
         const Need n = need(&order_[i]->statement());
@@ -177,7 +176,6 @@ void RuleFeatureIndex::build(std::span<const Rule* const> rules) {
         if (n.feats.empty()) { continue; }
 
         always_run_[i] = 0U;
-        ++indexed_count_;
         const auto idx = static_cast<std::uint32_t>(i);
         for (const auto& f : n.feats) { by_feature_[f].push_back(idx); }
     }

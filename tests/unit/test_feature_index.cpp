@@ -174,9 +174,6 @@ TEST_CASE("feature_index: prunes by each rule's most selective required feature"
     index.build(order);
     std::vector<const rules::Rule*> selected;
 
-    // 11 of the 15 rules are indexed, all but or-regex-api, or-not, not-root and and-os-not
-    CHECK(index.indexed_count() == 11U);
-
     index.select(only(u.mov), selected);
     CHECK_FALSE(selects(selected, "and-api-mnemonic"));   // api A is required too
     CHECK_FALSE(selects(selected, "or-apis"));            // neither api is present
@@ -196,7 +193,10 @@ TEST_CASE("feature_index: prunes by each rule's most selective required feature"
 
     const features::FeatureSet empty;
     index.select(empty, selected);
+    // Only the four always-run rules survive an empty set, so the other 11 are indexed
+    CHECK(selected.size() == 4U);
     CHECK(selects(selected, "or-regex-api"));   // a scanning branch keeps the rule always-run
     CHECK(selects(selected, "or-not"));         // so does a branch that requires nothing
     CHECK(selects(selected, "not-root"));
+    CHECK(selects(selected, "and-os-not"));     // os is a wildcard, so it is never indexed
 }
