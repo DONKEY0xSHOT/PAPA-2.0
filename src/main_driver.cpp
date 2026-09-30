@@ -48,7 +48,7 @@ constexpr std::string_view kUsage =
     "Usage: papa [OPTIONS] <sample>\n"
     "\n"
     "Options:\n"
-    "  -r, --rules <dir>   Rule directory (default: data/rules)\n"
+    "  -r, --rules <dir>   Rule directory, use embedded rules by default\n"
     "  -j, --json          Emit JSON output\n"
     "  -v, --verbose       Verbose text output\n"
     "      --vverbose      Most verbose text output, includes rule sources\n"
@@ -58,8 +58,8 @@ constexpr std::string_view kUsage =
     "      --version       Print version information and exit\n"
     "\n"
     "Examples:\n"
-    "  papa sample.exe -r capa-rules-9.4.0\n"
-    "  papa sample.exe -j -o report.json -r capa-rules-9.4.0\n";
+    "  papa sample.exe\n"
+    "  papa sample.exe -j -r my-rules\n";
 
 // Slurp the whole file into an owned buffer. Returns an empty optional on any IO
 // failure. Specific errors are surfaced separately by the caller via stderr
@@ -89,6 +89,12 @@ read_entire_file(const std::filesystem::path& path) {
 #else
     return false;
 #endif
+}
+
+// The rules path the report records. capa names its embedded set this way
+[[nodiscard]] std::vector<std::string> report_rules_paths(const Args& args) {
+    if (!args.rules_dir) { return {"(embedded rules)"}; }
+    return {args.rules_dir->string()};
 }
 
 }  // namespace
@@ -189,8 +195,8 @@ int run(const Args& args) {
     }
     const std::span<const std::byte> sample_buf = image->raw_buffer();
 
-    if (!std::filesystem::exists(args.rules_dir)) {
-        std::cerr << "error: rules directory not found: " << args.rules_dir
+    if (args.rules_dir && !std::filesystem::exists(*args.rules_dir)) {
+        std::cerr << "error: rules directory not found: " << *args.rules_dir
                   << '\n';
         return kExitInvalidRule;
     }
@@ -201,7 +207,8 @@ int run(const Args& args) {
         std::launch::async,
         &features::extractors::papa_native::flirt::FlirtSignatureSet::make_embedded);
 
-    auto ruleset = rules::RuleSet::from_directory(args.rules_dir);
+    auto ruleset = args.rules_dir ? rules::RuleSet::from_directory(*args.rules_dir)
+                                  : rules::RuleSet::from_embedded();
     if (!ruleset) {
         std::cerr << "error: failed to load rules: "
                   << ruleset.error().detail << '\n';
@@ -244,12 +251,11 @@ int run(const Args& args) {
             }
             // The user still gets a report containing the limitation hit
             // but the code-extractor pass is skipped because results would be misleading
-            std::vector<std::string> rules_paths{args.rules_dir.string()};
             auto meta = collect_metadata(
                 std::span<const std::byte>(sample_buf),
                 args.sample_path,
                 args.argv,
-                std::move(rules_paths),
+                report_rules_paths(args),
                 *image,
                 capabilities::static_::StaticCapabilities{},
                 pe_only);
@@ -286,12 +292,11 @@ int run(const Args& args) {
         return kExitUnexpectedFailure;
     }
 
-    std::vector<std::string> rules_paths{args.rules_dir.string()};
     auto meta = collect_metadata(
         std::span<const std::byte>(sample_buf),
         args.sample_path,
         args.argv,
-        std::move(rules_paths),
+        report_rules_paths(args),
         *image,
         *caps,
         extractor);

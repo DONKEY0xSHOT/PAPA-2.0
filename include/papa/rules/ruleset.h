@@ -29,6 +29,9 @@ public:
     [[nodiscard]] static Expected<RuleSet>
     from_directory(const std::filesystem::path& dir);
 
+    /// Build from the capa-rules corpus compiled into the binary, the default rule set
+    [[nodiscard]] static Expected<RuleSet> from_embedded();
+
     // Build from an explicit list of already-parsed rules
     // Performs subscope extraction, dependency validation, and topological sort
     [[nodiscard]] static Expected<RuleSet>

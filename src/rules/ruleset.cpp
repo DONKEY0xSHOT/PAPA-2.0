@@ -5,6 +5,7 @@
 #include "papa/features/address.h"
 #include "papa/features/common.h"
 #include "papa/features/feature.h"
+#include "papa/rules/embedded.h"
 #include "papa/rules/optimizer.h"
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
@@ -100,6 +101,24 @@ void collect_match_names(const engine::Statement& s, std::vector<std::string>& o
             collect_match_names(*child, out);
         }
     }
+}
+
+// Parse each (path, text) rule file and build the set from the result
+template <typename RuleFiles>
+[[nodiscard]] Expected<RuleSet> parse_rule_files(const RuleFiles& files) {
+    std::vector<std::unique_ptr<Rule>> parsed;
+    for (const auto& [path, text] : files) {
+        auto r = RuleParser::parse(text, path);
+        if (!r) {
+            // Tolerate per-file parse failures so a single malformed rule does not
+            // block the whole corpus from loading
+            std::cerr << "warning: skipping rule " << path
+                      << ": " << r.error().detail << '\n';
+            continue;
+        }
+        parsed.push_back(std::move(*r));
+    }
+    return RuleSet::from_rules(std::move(parsed));
 }
 
 }  // namespace
@@ -331,7 +350,7 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
             std::string{"rules path is not a directory: "}.append(dir.string()))};
     }
 
-    std::vector<std::unique_ptr<Rule>> parsed;
+    std::vector<std::pair<std::string, std::string>> files;
 
     fs::recursive_directory_iterator it(dir, ec);
     if (ec) {
@@ -360,20 +379,15 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
         }
         std::stringstream buf;
         buf << ifs.rdbuf();
-        const std::string content = buf.str();
-
-        auto r = RuleParser::parse(content, entry.path().string());
-        if (!r) {
-            // Tolerate per-file parse failures so a single malformed rule does not
-            // block the whole corpus from loading
-            std::cerr << "warning: skipping rule " << entry.path().string()
-                      << ": " << r.error().detail << '\n';
-            continue;
-        }
-        parsed.push_back(std::move(*r));
+        files.emplace_back(entry.path().string(), buf.str());
     }
 
-    return from_rules(std::move(parsed));
+    return parse_rule_files(files);
+}
+
+// compiled-in entry point
+Expected<RuleSet> RuleSet::from_embedded() {
+    return parse_rule_files(embedded_rules());
 }
 
 }  // namespace papa::rules

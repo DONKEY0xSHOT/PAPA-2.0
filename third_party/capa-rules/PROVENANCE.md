@@ -33,3 +33,8 @@ new tag, left out as below, then convert each of them from LF to CRLF.
 - `.gitattributes`: the upstream line-ending setting, replaced by the one here.
 - `README.md`, `doc/format.md` and `internal/limitation/static/README.md`:
   documentation, not rules.
+
+## Embedding
+
+`cmake/EmbedFiles.cmake` compiles the rule files into papa, and they are the
+rule set papa uses when `-r` is not given.
