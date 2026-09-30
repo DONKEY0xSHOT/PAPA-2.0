@@ -4,8 +4,8 @@
 
 #include "papa/features/address.h"
 
-#include <string>
 #include <unordered_set>
+#include <variant>
 
 using namespace papa::features;
 
@@ -48,12 +48,12 @@ TEST_CASE("linearize yields distinct values for distinct tag and payload") {
     CHECK(rva_1 != file_1);
 }
 
-TEST_CASE("to_string returns a readable form for each variant") {
-    CHECK(to_string(Address{NoAddress{}}).find("none") != std::string::npos);
-    CHECK(to_string(Address{AbsoluteVirtualAddress{0x401000}}) .find("401000") != std::string::npos);
-    CHECK(to_string(Address{RelativeVirtualAddress{0x1000}})   .find("1000")   != std::string::npos);
-    CHECK(to_string(Address{FileOffsetAddress{0x200}})         .find("200")    != std::string::npos);
-    CHECK(to_string(Address{DnTokenAddress{0x06000001}})       .find("6000001")!= std::string::npos);
+TEST_CASE("Each variant alternative keeps its payload") {
+    CHECK(std::holds_alternative<NoAddress>(Address{NoAddress{}}));
+    CHECK(std::get<AbsoluteVirtualAddress>(Address{AbsoluteVirtualAddress{0x401000}}).v == 0x401000U);
+    CHECK(std::get<RelativeVirtualAddress>(Address{RelativeVirtualAddress{0x1000}}).v == 0x1000U);
+    CHECK(std::get<FileOffsetAddress>(Address{FileOffsetAddress{0x200}}).v == 0x200U);
+    CHECK(std::get<DnTokenAddress>(Address{DnTokenAddress{0x06000001}}).token == 0x06000001U);
 }
 
 TEST_CASE("Address can be stored in std::unordered_set") {

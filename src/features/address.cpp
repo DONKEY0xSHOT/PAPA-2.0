@@ -3,8 +3,6 @@
 #include "papa/util/hashing.h"
 
 #include <cstdint>
-#include <sstream>
-#include <string>
 #include <variant>
 
 namespace papa::features {
@@ -18,29 +16,6 @@ constexpr std::size_t tag_of(const Address& a) noexcept {
 }
 
 }  // namespace
-
-std::string to_string(const Address& a) {
-    std::ostringstream os;
-    std::visit(
-        [&os](const auto& v) {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, NoAddress>) {
-                os << "none";
-            } else if constexpr (std::is_same_v<T, AbsoluteVirtualAddress>) {
-                os << "va:0x" << std::hex << v.v;
-            } else if constexpr (std::is_same_v<T, RelativeVirtualAddress>) {
-                os << "rva:0x" << std::hex << v.v;
-            } else if constexpr (std::is_same_v<T, FileOffsetAddress>) {
-                os << "off:0x" << std::hex << v.v;
-            } else if constexpr (std::is_same_v<T, DnTokenAddress>) {
-                os << "tok:0x" << std::hex << v.token;
-            } else if constexpr (std::is_same_v<T, DnTokenOffsetAddress>) {
-                os << "tok:0x" << std::hex << v.token << "+0x" << v.offset;
-            }
-        },
-        a);
-    return os.str();
-}
 
 std::uint64_t linearize(const Address& a) noexcept {
     // Mix the variant tag into the high byte so different address kinds
