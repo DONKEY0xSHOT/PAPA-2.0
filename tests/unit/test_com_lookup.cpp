@@ -3,12 +3,14 @@
 #include "doctest.h"
 
 #include "papa/rules/com_lookup.h"
+#include "papa/util/hash.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 
 using papa::rules::ComEntry;
 using papa::rules::ComKind;
@@ -66,6 +68,39 @@ TEST_CASE("com_lookup: SystemDeviceEnum and WbemLocator resolve correctly") {
     CHECK(wl->guid_string == "{4590f811-1d3a-11d0-891f-00aa004b2e24}");
     CHECK(static_cast<std::uint8_t>(wl->guid_bytes[0]) == 0x11);
     CHECK(static_cast<std::uint8_t>(wl->guid_bytes[3]) == 0x45);
+}
+
+TEST_CASE("com_lookup: every entry keeps the little-endian bytes of its GUID") {
+    struct Row {
+        ComKind     kind;
+        const char* name;
+        const char* bytes_hex;
+    };
+    constexpr std::array<Row, 16> kRows = {{
+        {ComKind::kClass,     "BackgroundCopyManager",  "4bd39149a180914283b63328366b9097"},
+        {ComKind::kClass,     "CVidCapClassManager",    "10b30b86015dd011bd3b00a0c911ce86"},
+        {ComKind::kClass,     "CWaveinClassManager",    "62a7d933c890d011bd4300a0c911ce86"},
+        {ComKind::kClass,     "ShellDesktop",           "0014020000000000c000000000000046"},
+        {ComKind::kClass,     "ShellLink",              "0114020000000000c000000000000046"},
+        {ComKind::kClass,     "SystemDeviceEnum",       "105dbe62eb60d011bd3b00a0c911ce86"},
+        {ComKind::kClass,     "TaskScheduler",          "9f36870fe5a4fc4cbd3e73e6154572dd"},
+        {ComKind::kClass,     "WbemLocator",            "11f890453a1dd011891f00aa004b2e24"},
+        {ComKind::kClass,     "WshShell",               "d54dc2720ad78b438a4298424b88afb8"},
+        {ComKind::kInterface, "IBackgroundCopyManager", "0d4ce35cc90d1f4c897cdaa1b78cee7c"},
+        {ComKind::kInterface, "ICreateDevEnum",         "22088429845bd011bd3b00a0c911ce86"},
+        {ComKind::kInterface, "IDispatch",              "0004020000000000c000000000000046"},
+        {ComKind::kInterface, "IShellLinkA",            "ee14020000000000c000000000000046"},
+        {ComKind::kInterface, "IShellLinkW",            "f914020000000000c000000000000046"},
+        {ComKind::kInterface, "IUnknown",               "0000000000000000c000000000000046"},
+        {ComKind::kInterface, "IWbemLocator",           "87a612dc7f73cf11884d00aa004b2e24"},
+    }};
+    CHECK(com_class_table().size() + com_interface_table().size() == kRows.size());
+    for (const Row& row : kRows) {
+        CAPTURE(row.name);
+        const ComEntry* e = lookup_com(row.kind, row.name);
+        REQUIRE(e != nullptr);
+        CHECK(papa::util::hex_digest(e->guid_bytes) == std::string{row.bytes_hex});
+    }
 }
 
 TEST_CASE("com_lookup: tables are sorted alphabetically by name") {
