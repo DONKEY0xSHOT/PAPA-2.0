@@ -47,12 +47,11 @@ void collect_match_refs(const ::papa::engine::Statement* s,
         }
     };
 
-    const std::string_view name = s->name();
-    if (name == "feature") {
+    if (s->kind() == ::papa::engine::StatementKind::kFeature) {
         note(static_cast<const ::papa::engine::FeatureStatement*>(s)->feature());
         return;
     }
-    if (name == "count") {
+    if (s->kind() == ::papa::engine::StatementKind::kRange) {
         note(static_cast<const ::papa::engine::Range*>(s)->feature());
         return;
     }

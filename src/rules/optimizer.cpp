@@ -5,11 +5,12 @@
 
 #include <algorithm>
 #include <memory>
-#include <string_view>
 
 namespace papa::rules {
 
 namespace {
+
+using engine::StatementKind;
 
 // Relative evaluation cost of a leaf feature, mirroring capa's get_node_cost, with
 // os and arch cheapest and the scanning features most expensive
@@ -31,13 +32,19 @@ namespace {
 // Worst-case evaluation cost of a statement subtree, mirroring capa's
 // get_node_cost: a compound node costs one plus the sum of its children
 [[nodiscard]] int node_cost(const engine::Statement& s) {
-    const std::string_view name = s.name();
-    if (name == "feature") {
-        return feature_cost(*static_cast<const engine::FeatureStatement&>(s).feature());
-    }
-    if (name == "count") {
-        // Range carries a single feature rather than a child statement
-        return 1 + feature_cost(*static_cast<const engine::Range&>(s).feature());
+    switch (s.kind()) {
+        case StatementKind::kFeature:
+            return feature_cost(*static_cast<const engine::FeatureStatement&>(s).feature());
+        case StatementKind::kRange:
+            // Range carries a single feature rather than a child statement
+            return 1 + feature_cost(*static_cast<const engine::Range&>(s).feature());
+        case StatementKind::kAnd:
+        case StatementKind::kOr:
+        case StatementKind::kNot:
+        case StatementKind::kSome:
+        case StatementKind::kOptional:
+        case StatementKind::kSubscope:
+            break;
     }
     int total = 1;
     for (const auto& child : s.children()) {
@@ -49,20 +56,31 @@ namespace {
 }  // namespace
 
 void optimize(engine::Statement& statement) {
-    const std::string_view name = statement.name();
-    if (name == "and" || name == "or" || name == "some" || name == "optional") {
-        // Stable sort keeps capa's behavior of preserving source order among
-        // equal-cost children. capa does not recurse past this node
-        auto children = statement.children_for_rewrite();
-        std::stable_sort(children.begin(), children.end(),
-                         [](const std::unique_ptr<engine::Statement>& a,
-                            const std::unique_ptr<engine::Statement>& b) {
-                             return node_cost(*a) < node_cost(*b);
-                         });
-    } else if (name == "not") {
-        // A not only follows through to its single child, like capa
-        const auto children = statement.children_for_rewrite();
-        if (!children.empty() && children[0]) { optimize(*children[0]); }
+    switch (statement.kind()) {
+        case StatementKind::kAnd:
+        case StatementKind::kOr:
+        case StatementKind::kSome:
+        case StatementKind::kOptional: {
+            // Stable sort keeps capa's behavior of preserving source order among
+            // equal-cost children. capa does not recurse past this node
+            auto children = statement.children_for_rewrite();
+            std::stable_sort(children.begin(), children.end(),
+                             [](const std::unique_ptr<engine::Statement>& a,
+                                const std::unique_ptr<engine::Statement>& b) {
+                                 return node_cost(*a) < node_cost(*b);
+                             });
+            return;
+        }
+        case StatementKind::kNot: {
+            // A not only follows through to its single child, like capa
+            const auto children = statement.children_for_rewrite();
+            if (!children.empty() && children[0]) { optimize(*children[0]); }
+            return;
+        }
+        case StatementKind::kRange:
+        case StatementKind::kSubscope:
+        case StatementKind::kFeature:
+            return;
     }
 }
 

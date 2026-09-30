@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -18,6 +17,7 @@ namespace papa::rules {
 
 namespace {
 
+using engine::StatementKind;
 using features::FeatureTag;
 
 // A feature is indexable when a structural lookup in the set decides whether it matches
@@ -125,41 +125,46 @@ struct Need {
 // A port of capa's _index_rules_by_feature recursion
 [[nodiscard]] Need need(const engine::Statement* st) {
     if (st == nullptr) { return {}; }
-    const std::string_view name = st->name();
-    if (name == "feature") {
-        return leaf(static_cast<const engine::FeatureStatement*>(st)->feature());
-    }
-    if (name == "count") {
-        // count(x) with a zero minimum is satisfied without x
-        const auto* range = static_cast<const engine::Range*>(st);
-        return range->min() == 0 ? Need{} : leaf(range->feature());
-    }
-    if (name == "and") {
-        // Every child must match, so the most selective one is enough, ties going to fewer
-        Need best;
-        for (const auto& child : st->children()) {
-            Need n = need(child.get());
-            if (n.feats.empty()) { continue; }
-            if (best.feats.empty() || n.score > best.score ||
-                (n.score == best.score && n.feats.size() < best.feats.size())) {
-                best = std::move(n);
+    switch (st->kind()) {
+        case StatementKind::kFeature:
+            return leaf(static_cast<const engine::FeatureStatement*>(st)->feature());
+        case StatementKind::kRange: {
+            // count(x) with a zero minimum is satisfied without x
+            const auto* range = static_cast<const engine::Range*>(st);
+            return range->min() == 0 ? Need{} : leaf(range->feature());
+        }
+        case StatementKind::kAnd: {
+            // Every child must match, so the most selective one is enough, ties going to fewer
+            Need best;
+            for (const auto& child : st->children()) {
+                Need n = need(child.get());
+                if (n.feats.empty()) { continue; }
+                if (best.feats.empty() || n.score > best.score ||
+                    (n.score == best.score && n.feats.size() < best.feats.size())) {
+                    best = std::move(n);
+                }
             }
+            return best;
         }
-        return best;
-    }
-    if (name == "or" || name == "some") {
-        // Any child can satisfy it, so an unconstrained child leaves nothing required
-        Need any{std::numeric_limits<int>::max(), {}};
-        for (const auto& child : st->children()) {
-            Need n = need(child.get());
-            if (n.feats.empty()) { return {}; }
-            any.score = std::min(any.score, n.score);
-            any.feats.merge(n.feats);
+        case StatementKind::kOr:
+        case StatementKind::kSome: {
+            // Any child can satisfy it, so an unconstrained child leaves nothing required
+            Need any{std::numeric_limits<int>::max(), {}};
+            for (const auto& child : st->children()) {
+                Need n = need(child.get());
+                if (n.feats.empty()) { return {}; }
+                any.score = std::min(any.score, n.score);
+                any.feats.merge(n.feats);
+            }
+            if (any.feats.empty()) { return {}; }
+            return any;
         }
-        if (any.feats.empty()) { return {}; }
-        return any;
+        // not, optional and subscope require nothing
+        case StatementKind::kNot:
+        case StatementKind::kOptional:
+        case StatementKind::kSubscope:
+            return {};
     }
-    // not, optional and subscope require nothing
     return {};
 }
 

@@ -43,6 +43,18 @@ using MatchResults = std::unordered_map<
     std::string,
     std::vector<std::pair<features::Address, Result>>>;
 
+/// The concrete kind of a Statement, where a Some with count 0 is kOptional
+enum class StatementKind : std::uint8_t {
+    kAnd,
+    kOr,
+    kNot,
+    kSome,
+    kOptional,
+    kRange,
+    kSubscope,
+    kFeature,
+};
+
 /// Base class for nodes in a rule's logical tree
 class Statement {
 public:
@@ -59,6 +71,9 @@ public:
 
     [[nodiscard]] virtual std::string_view name() const noexcept = 0;
 
+    /// The kind fixed at construction, for dispatch without comparing names
+    [[nodiscard]] StatementKind kind() const noexcept { return kind_; }
+
     [[nodiscard]] std::span<const std::unique_ptr<Statement>> children() const noexcept {
         return children_;
     }
@@ -70,7 +85,12 @@ public:
     }
 
 protected:
+    explicit Statement(StatementKind kind) noexcept : kind_(kind) {}
+
     std::vector<std::unique_ptr<Statement>> children_;
+
+private:
+    StatementKind kind_{StatementKind::kAnd};
 };
 
 // Logical AND

@@ -241,6 +241,30 @@ TEST_CASE("Null children in Not / FeatureStatement constructors reject") {
     CHECK_THROWS_AS((Range{nullptr, 0, 1}), PapaInvariantError);
 }
 
+TEST_CASE("Each statement reports its kind, and Some with count 0 is optional") {
+    const And              and_st{{}};
+    const Or               or_st{{}};
+    const Not              not_st{api_leaf("a")};
+    const Some             some_st{2, {}};
+    const Some             optional_st{0, {}};
+    const Range            range_st{make_feat<Api>(std::string("a")), 1, 2};
+    const Subscope         subscope_st{rules::Scope::kBasicBlock, api_leaf("a")};
+    const FeatureStatement feature_st{make_feat<Api>(std::string("a"))};
+
+    CHECK(and_st.kind() == StatementKind::kAnd);
+    CHECK(or_st.kind() == StatementKind::kOr);
+    CHECK(not_st.kind() == StatementKind::kNot);
+    CHECK(some_st.kind() == StatementKind::kSome);
+    CHECK(optional_st.kind() == StatementKind::kOptional);
+    CHECK(range_st.kind() == StatementKind::kRange);
+    CHECK(subscope_st.kind() == StatementKind::kSubscope);
+    CHECK(feature_st.kind() == StatementKind::kFeature);
+
+    // The names are output, so they stay pinned alongside the kinds
+    CHECK(some_st.name() == "some");
+    CHECK(optional_st.name() == "optional");
+}
+
 }  // TEST_SUITE engine.statements
 
 TEST_SUITE("engine.match") {

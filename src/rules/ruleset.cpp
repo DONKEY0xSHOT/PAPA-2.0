@@ -45,13 +45,14 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
                           std::vector<std::unique_ptr<Rule>>& spawned) {
     if (slot == nullptr) { return; }
 
-    if (auto* sub = dynamic_cast<engine::Subscope*>(slot.get()); sub != nullptr) {
+    if (slot->kind() == engine::StatementKind::kSubscope) {
+        auto& sub = static_cast<engine::Subscope&>(*slot);
         std::string syn_name(parent_name);
         syn_name.push_back('/');
         syn_name.append(std::to_string(counter++));
 
-        const Scope inner_scope = sub->scope();
-        auto        inner       = sub->take_inner();
+        const Scope inner_scope = sub.scope();
+        auto        inner       = sub.take_inner();
 
         // Recurse into the new rule's inner tree before adopting it. A fresh counter rooted
         // at the new name keeps synthetic names unique and reproducible
@@ -82,15 +83,15 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
 // Collect every MatchedRule name referenced anywhere in the statement tree
 // Both leaf FeatureStatement nodes and Range nodes can wrap a MatchedRule
 void collect_match_names(const engine::Statement& s, std::vector<std::string>& out) {
-    if (const auto* fs = dynamic_cast<const engine::FeatureStatement*>(&s); fs != nullptr) {
-        const auto& feat = fs->feature();
+    if (s.kind() == engine::StatementKind::kFeature) {
+        const auto& feat = static_cast<const engine::FeatureStatement&>(s).feature();
         if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
             const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
             out.emplace_back(mr->rule_name());
         }
     }
-    if (const auto* range = dynamic_cast<const engine::Range*>(&s); range != nullptr) {
-        const auto& feat = range->feature();
+    if (s.kind() == engine::StatementKind::kRange) {
+        const auto& feat = static_cast<const engine::Range&>(s).feature();
         if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
             const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
             out.emplace_back(mr->rule_name());

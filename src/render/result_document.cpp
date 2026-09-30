@@ -60,23 +60,32 @@ void sort_addresses(std::vector<features::Address>& addrs) {
 
 // Translate a logic statement into capa's node type plus its extra fields
 void fill_statement(MatchNode& node, const engine::Statement& st) {
-    const std::string_view name = st.name();
-    if (name == "some") {
-        node.statement_type = "some";
-        node.count = static_cast<std::int64_t>(static_cast<const engine::Some&>(st).count());
-    } else if (name == "count") {
-        // capa names the range statement "range", not "count"
-        node.statement_type = "range";
-        const auto& range = static_cast<const engine::Range&>(st);
-        node.range_min   = static_cast<std::int64_t>(range.min());
-        node.range_max   = static_cast<std::int64_t>(range.max());
-        node.range_child = range.feature().get();
-    } else if (name == "subscope") {
-        node.statement_type = "subscope";
-        node.subscope = static_cast<const engine::Subscope&>(st).scope();
-    } else {
+    switch (st.kind()) {
+        case engine::StatementKind::kSome:
+            node.statement_type = "some";
+            node.count = static_cast<std::int64_t>(static_cast<const engine::Some&>(st).count());
+            return;
+        case engine::StatementKind::kRange: {
+            // capa names the range statement "range", not "count"
+            node.statement_type = "range";
+            const auto& range = static_cast<const engine::Range&>(st);
+            node.range_min   = static_cast<std::int64_t>(range.min());
+            node.range_max   = static_cast<std::int64_t>(range.max());
+            node.range_child = range.feature().get();
+            return;
+        }
+        case engine::StatementKind::kSubscope:
+            node.statement_type = "subscope";
+            node.subscope = static_cast<const engine::Subscope&>(st).scope();
+            return;
         // and / or / not / optional carry only their type
-        node.statement_type = std::string(name);
+        case engine::StatementKind::kAnd:
+        case engine::StatementKind::kOr:
+        case engine::StatementKind::kNot:
+        case engine::StatementKind::kOptional:
+        case engine::StatementKind::kFeature:
+            node.statement_type = std::string(st.name());
+            return;
     }
 }
 
