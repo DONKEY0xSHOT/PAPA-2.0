@@ -19,7 +19,7 @@ from pathlib import Path
 SOURCE_DIRS = ("src", "include", "tools", "tests")
 SOURCE_SUFFIXES = (".cpp", ".h")
 
-# Build and CI files, checked for comment length the same way the sources are
+# Build and CI files, whose comments are checked the same way the sources are
 BUILD_PATTERNS = ("*.yml", "*.yaml", "*.cmake", "CMakeLists.txt", "*.py",
                   ".clang-tidy", ".clang-format")
 
@@ -35,6 +35,20 @@ PII_PATTERNS = (
     re.compile(r"/home/[a-z0-9_.-]+/", re.IGNORECASE),
     re.compile(r"[A-Za-z]:[\\/]Documents and Settings[\\/]", re.IGNORECASE),
 )
+
+# A run of rule characters, which only a section divider needs
+DIVIDER_PATTERN = re.compile(r"[-=*#~_]{3,}")
+
+# Pointers to planning notes or to any Markdown file, which a comment should not lean on
+# The M-number labels match in upper case only, so an operand such as r/m8 passes
+REFERENCE_PATTERN = re.compile(
+    r"(?i:\b(?:phase|milestone|task)s?\b|\bplan section|\bdesign doc|\b[\w.-]+\.md\b"
+    r"|\bsection \d+(?:\.\d+)*)"
+    r"|\bM\d\b"
+)
+
+# A sentence break straight after an article or preposition, left by joining two lines
+JOIN_PATTERN = re.compile(r"\b(?:the|a|an|of|to|nor|without|by|for)\. [A-Z]")
 
 
 def tracked_files(root: Path) -> set[Path] | None:
@@ -102,6 +116,37 @@ def comment_run_problems(path: Path, root: Path, lines: list[str],
     return problems
 
 
+def comment_text_problems(where: str, text: str) -> list[str]:
+    """Flag a divider, a pointer outside the tree, or a sentence broken mid-phrase."""
+    problems: list[str] = []
+    if DIVIDER_PATTERN.search(text):
+        problems.append(f"{where}: section divider in a comment, use one short comment")
+    reference = REFERENCE_PATTERN.search(text)
+    if reference:
+        problems.append(
+            f"{where}: comment points at '{reference.group(0)}' instead of stating "
+            f"the point itself"
+        )
+    join = JOIN_PATTERN.search(text)
+    if join:
+        problems.append(
+            f"{where}: '{join.group(0)}' in a comment looks like two lines joined "
+            f"mid-sentence"
+        )
+    return problems
+
+
+def hash_comment_problems(path: Path, root: Path, lines: list[str]) -> list[str]:
+    """Apply the comment text rules to every hash comment line of a build file."""
+    problems: list[str] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#") and not stripped.startswith("#!"):
+            where = f"{path.relative_to(root)}:{index + 1}"
+            problems.extend(comment_text_problems(where, stripped[1:]))
+    return problems
+
+
 def check_file(path: Path, root: Path) -> list[str]:
     problems: list[str] = []
     try:
@@ -112,7 +157,7 @@ def check_file(path: Path, root: Path) -> list[str]:
     lines = text.splitlines()
 
     # A comment run is at most two lines. Anything longer is rationale or
-    # history, which belongs in the docs rather than beside the code
+    # history, which belongs somewhere other than beside the code
     problems.extend(comment_run_problems(path, root, lines, "//"))
 
     for index, line in enumerate(lines):
@@ -135,6 +180,9 @@ def check_file(path: Path, root: Path) -> list[str]:
 
         if not stripped.startswith("//"):
             continue
+
+        marker = "///" if stripped.startswith("///") else "//"
+        problems.extend(comment_text_problems(where, stripped[len(marker):]))
 
         if ";" in stripped:
             problems.append(f"{where}: semicolon in a comment, split it into two lines")
@@ -172,8 +220,8 @@ def main() -> int:
     for path in files:
         problems.extend(check_file(path, root))
 
-    # The build and CI files get the comment-length rule too, since a wall of
-    # commentary is as hard to read in a workflow as it is beside the code
+    # The build and CI files get the comment length and text rules too, since a wall
+    # of commentary is as hard to read in a workflow as it is beside the code
     build = only_tracked(build_files(root), tracked)
     for path in build:
         try:
@@ -182,6 +230,7 @@ def main() -> int:
             problems.append(f"{path.relative_to(root)}: not valid UTF-8")
             continue
         problems.extend(comment_run_problems(path, root, lines, "#"))
+        problems.extend(hash_comment_problems(path, root, lines))
 
     checked = len(files) + len(build)
     if problems:
