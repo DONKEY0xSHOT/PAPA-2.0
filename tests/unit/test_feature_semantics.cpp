@@ -9,9 +9,11 @@
 #include "papa/features/feature.h"
 #include "papa/features/file.h"
 #include "papa/features/insn.h"
+#include "papa/util/hashing.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -315,6 +317,38 @@ TEST_CASE("Different feature kinds never collide in a FeatureSet") {
     fs.add(make<Arch>(std::string("foo")),                             va(0xD));
     fs.add(make<Format>(std::string("foo")),                           va(0xE));
     CHECK(fs.size() == 14);
+}
+
+TEST_CASE("Single-string features hash the tag mixed into the value hash") {
+    // One shared value, a regex literal so Regex must hash the literal, not its pattern
+    const std::string v = "/foo/i";
+    const std::pair<FeaturePtr, FeatureTag> rows[] = {
+        {make<String>(v), FeatureTag::kString},
+        {make<Substring>(v), FeatureTag::kSubstring},
+        {make<Regex>(v), FeatureTag::kRegex},
+        {make<MatchedRule>(v), FeatureTag::kMatchedRule},
+        {make<Characteristic>(v), FeatureTag::kCharacteristic},
+        {make<Class>(v), FeatureTag::kClass},
+        {make<Namespace>(v), FeatureTag::kNamespace},
+        {make<Os>(v), FeatureTag::kOs},
+        {make<Arch>(v), FeatureTag::kArch},
+        {make<Format>(v), FeatureTag::kFormat},
+        {make<Import>(v), FeatureTag::kImport},
+        {make<Export>(v), FeatureTag::kExport},
+        {make<Section>(v), FeatureTag::kSection},
+        {make<FunctionName>(v), FeatureTag::kFunctionName},
+        {make<Api>(v), FeatureTag::kApi},
+        {make<Mnemonic>(v), FeatureTag::kMnemonic},
+    };
+    for (const auto& [f, tag] : rows) {
+        CAPTURE(static_cast<int>(tag));
+        CHECK(f->tag() == tag);
+        CHECK(f->hash() == papa::util::hashing::hash_combine(static_cast<std::size_t>(tag),
+                                                             std::hash<std::string>{}(v)));
+        for (const auto& [other, other_tag] : rows) {
+            if (other_tag != tag) { CHECK_FALSE(f->equals(*other)); }
+        }
+    }
 }
 
 }  // TEST_SUITE
