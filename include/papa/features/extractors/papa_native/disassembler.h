@@ -35,7 +35,6 @@ struct DecodedOperand {
     std::uint8_t  scale         { 0 };
     std::int64_t  disp          { 0 };
     std::uint64_t imm           { 0 };
-    bool          is_signed_imm { false };
     std::size_t   width_bytes   { 0 };
     // True when this memory operand was encoded with a SIB byte
     bool          sib_encoded   { false };

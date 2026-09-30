@@ -108,8 +108,7 @@ namespace {
             break;
 
         case ZYDIS_OPERAND_TYPE_IMMEDIATE:
-            out.is_signed_imm = (op.imm.is_signed != ZYAN_FALSE);
-            out.imm           = op.imm.value.u;
+            out.imm = op.imm.value.u;
             break;
 
         default:
