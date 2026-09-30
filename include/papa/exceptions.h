@@ -3,7 +3,6 @@
 #include "papa/util/expected.h"
 
 #include <cstdint>
-#include <source_location>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -38,13 +37,9 @@ enum class ErrorKind : std::uint8_t {
 struct PapaError {
     ErrorKind   kind { ErrorKind::kOk };
     std::string detail;
-    std::string source_location;
 };
 
-[[nodiscard]] PapaError make_error(
-    ErrorKind kind,
-    std::string detail,
-    std::source_location loc = std::source_location::current());
+[[nodiscard]] PapaError make_error(ErrorKind kind, std::string detail);
 
 template <typename T>
 using Expected = ::papa::util::Expected<T, PapaError>;

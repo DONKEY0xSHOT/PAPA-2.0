@@ -30,13 +30,8 @@ std::string_view to_string(ErrorKind kind) noexcept {
     return "unknown";
 }
 
-PapaError make_error(ErrorKind kind, std::string detail, std::source_location loc) {
-    std::string where;
-    where.reserve(64);
-    where.append(loc.file_name());
-    where.push_back(':');
-    where.append(std::to_string(loc.line()));
-    return PapaError{kind, std::move(detail), std::move(where)};
+PapaError make_error(ErrorKind kind, std::string detail) {
+    return PapaError{kind, std::move(detail)};
 }
 
 }  // namespace papa
