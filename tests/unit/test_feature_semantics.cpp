@@ -385,16 +385,16 @@ TEST_CASE("feature semantics: matches agrees with evaluate success for every kin
     probes.push_back(make<Api>("CreateFileA"));
     probes.push_back(make<Api>("NotPresent"));
 
-    for (const auto& p : probes) {
-        CAPTURE(p->to_string());
-        CHECK(p->matches(fs) == p->evaluate(fs, true).success);
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        CAPTURE(i);
+        CHECK(probes[i]->matches(fs) == probes[i]->evaluate(fs, true).success);
     }
 
     // The empty set must agree too
     const FeatureSet empty;
-    for (const auto& p : probes) {
-        CAPTURE(p->to_string());
-        CHECK(p->matches(empty) == p->evaluate(empty, true).success);
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        CAPTURE(i);
+        CHECK(probes[i]->matches(empty) == probes[i]->evaluate(empty, true).success);
     }
 }
 

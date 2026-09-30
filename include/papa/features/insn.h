@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <string_view>
 #include <variant>
 
 namespace papa::features {
@@ -19,7 +18,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -34,7 +32,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -53,14 +50,11 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
     Access      access_;
 };
-
-[[nodiscard]] std::string_view to_string(Property::Access a) noexcept;
 
 // operand[i].number is a Number feature scoped to a specific operand index
 class OperandNumber : public Feature {
@@ -74,7 +68,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::size_t index_;
@@ -91,7 +84,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::size_t  index_;

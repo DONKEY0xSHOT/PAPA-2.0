@@ -5,6 +5,8 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/indirect_calls.h"
 #include "papa/features/extractors/papa_native/insn.h"
+#include "papa/features/feature.h"
+#include "papa/features/insn.h"
 #include "papa/pe/pe_parser.h"
 
 #include "fixture_paths.h"
@@ -19,7 +21,7 @@ namespace pn = papa::features::extractors::papa_native;
 namespace {
 
 // True when some instruction in the function entered at entry_va yields an api
-// feature whose text contains needle
+// feature whose value contains needle
 [[nodiscard]] bool function_emits_api(const pn::PapaNativeBackend& backend,
                                       std::uint64_t entry_va,
                                       const std::string& needle) {
@@ -31,7 +33,10 @@ namespace {
             for (const auto& ins : bb.instructions) {
                 for (const auto& fa : pn::insn::extract_api_features(
                          f, ins, backend.image(), imports, disasm)) {
-                    if (fa.first->to_string().find(needle) != std::string::npos) {
+                    const auto& feat = *fa.first;
+                    if (feat.tag() == papa::features::FeatureTag::kApi &&
+                        static_cast<const papa::features::Api&>(feat).value().find(needle) !=
+                            std::string::npos) {
                         return true;
                     }
                 }

@@ -13,6 +13,8 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/feature.h"
+#include "papa/features/insn.h"
 #include "papa/pe/pe_parser.h"
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
@@ -119,8 +121,10 @@ TEST_CASE("pipeline: the extractor emits an api feature for the imported call") 
         for (const auto& bb : extractor.get_basic_blocks(fh)) {
             for (const auto& ih : extractor.get_instructions(fh, bb)) {
                 for (const auto& fa : extractor.extract_insn_features(fh, bb, ih)) {
-                    if (fa.first && fa.first->to_string().find("WriteFile") !=
-                                        std::string::npos) {
+                    if (fa.first && fa.first->tag() == papa::features::FeatureTag::kApi &&
+                        static_cast<const papa::features::Api&>(*fa.first)
+                                .value()
+                                .find("WriteFile") != std::string::npos) {
                         found = true;
                     }
                 }

@@ -20,7 +20,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -35,7 +34,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -50,7 +48,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -65,7 +62,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;

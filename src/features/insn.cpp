@@ -5,9 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <sstream>
 #include <string>
-#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -39,7 +37,7 @@ std::size_t hash_number_variant(const OperandNumber::Value& v) noexcept {
 
 // Api
 Api::Api(std::string value, std::string desc)
-    : Feature(FeatureTag::kApi, "api", std::move(desc)),
+    : Feature(FeatureTag::kApi, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t Api::hash() const noexcept {
@@ -52,13 +50,9 @@ bool Api::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Api::to_string() const {
-    return "api(" + value_ + ")";
-}
-
 // Mnemonic
 Mnemonic::Mnemonic(std::string value, std::string desc)
-    : Feature(FeatureTag::kMnemonic, "mnemonic", std::move(desc)),
+    : Feature(FeatureTag::kMnemonic, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t Mnemonic::hash() const noexcept {
@@ -71,22 +65,9 @@ bool Mnemonic::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Mnemonic::to_string() const {
-    return "mnemonic(" + value_ + ")";
-}
-
 // Property
-std::string_view to_string(Property::Access a) noexcept {
-    switch (a) {
-        case Property::Access::kNone:  return "none";
-        case Property::Access::kRead:  return "read";
-        case Property::Access::kWrite: return "write";
-    }
-    return "unknown";
-}
-
 Property::Property(std::string value, Access access, std::string desc)
-    : Feature(FeatureTag::kProperty, "property", std::move(desc)),
+    : Feature(FeatureTag::kProperty, std::move(desc)),
       value_(std::move(value)),
       access_(access) {}
 
@@ -102,22 +83,9 @@ bool Property::equals(const Feature& o) const noexcept {
     return access_ == rhs.access_ && value_ == rhs.value_;
 }
 
-std::string Property::to_string() const {
-    std::string out;
-    out.reserve(value_.size() + 16);
-    out.append("property/");
-    // Fully qualify to reach the free function overload. The unqualified name resolves
-    // to this very member and would be a no-argument ambiguity at the call site
-    out.append(::papa::features::to_string(access_));
-    out.append("(");
-    out.append(value_);
-    out.append(")");
-    return out;
-}
-
 // OperandNumber
 OperandNumber::OperandNumber(std::size_t index, Value value, std::string desc)
-    : Feature(FeatureTag::kOperandNumber, "operand.number", std::move(desc)),
+    : Feature(FeatureTag::kOperandNumber, std::move(desc)),
       index_(index),
       value_(std::move(value)) {}
 
@@ -133,17 +101,9 @@ bool OperandNumber::equals(const Feature& o) const noexcept {
     return index_ == rhs.index_ && value_ == rhs.value_;
 }
 
-std::string OperandNumber::to_string() const {
-    std::ostringstream os;
-    os << "operand[" << index_ << "].number(";
-    std::visit([&os](auto v) { os << v; }, value_);
-    os << ')';
-    return os.str();
-}
-
 // OperandOffset
 OperandOffset::OperandOffset(std::size_t index, std::int64_t value, std::string desc)
-    : Feature(FeatureTag::kOperandOffset, "operand.offset", std::move(desc)),
+    : Feature(FeatureTag::kOperandOffset, std::move(desc)),
       index_(index),
       value_(value) {}
 
@@ -157,12 +117,6 @@ bool OperandOffset::equals(const Feature& o) const noexcept {
     if (o.tag() != FeatureTag::kOperandOffset) { return false; }
     const auto& rhs = static_cast<const OperandOffset&>(o);
     return index_ == rhs.index_ && value_ == rhs.value_;
-}
-
-std::string OperandOffset::to_string() const {
-    std::ostringstream os;
-    os << "operand[" << index_ << "].offset(" << value_ << ')';
-    return os.str();
 }
 
 }  // namespace papa::features

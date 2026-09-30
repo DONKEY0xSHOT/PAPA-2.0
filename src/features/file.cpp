@@ -21,7 +21,7 @@ std::size_t mix_tag(FeatureTag t, std::size_t h) noexcept {
 
 // Import
 Import::Import(std::string value, std::string desc)
-    : Feature(FeatureTag::kImport, "import", std::move(desc)),
+    : Feature(FeatureTag::kImport, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t Import::hash() const noexcept {
@@ -34,13 +34,9 @@ bool Import::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Import::to_string() const {
-    return "import(" + value_ + ")";
-}
-
 // Export
 Export::Export(std::string value, std::string desc)
-    : Feature(FeatureTag::kExport, "export", std::move(desc)),
+    : Feature(FeatureTag::kExport, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t Export::hash() const noexcept {
@@ -53,13 +49,9 @@ bool Export::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Export::to_string() const {
-    return "export(" + value_ + ")";
-}
-
 // Section
 Section::Section(std::string value, std::string desc)
-    : Feature(FeatureTag::kSection, "section", std::move(desc)),
+    : Feature(FeatureTag::kSection, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t Section::hash() const noexcept {
@@ -72,13 +64,9 @@ bool Section::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Section::to_string() const {
-    return "section(" + value_ + ")";
-}
-
 // FunctionName
 FunctionName::FunctionName(std::string value, std::string desc)
-    : Feature(FeatureTag::kFunctionName, "function-name", std::move(desc)),
+    : Feature(FeatureTag::kFunctionName, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t FunctionName::hash() const noexcept {
@@ -89,10 +77,6 @@ bool FunctionName::equals(const Feature& o) const noexcept {
     if (o.tag() != FeatureTag::kFunctionName) { return false; }
     const auto& rhs = static_cast<const FunctionName&>(o);
     return value_ == rhs.value_;
-}
-
-std::string FunctionName::to_string() const {
-    return "function-name(" + value_ + ")";
 }
 
 }  // namespace papa::features

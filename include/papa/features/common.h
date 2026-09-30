@@ -7,7 +7,6 @@
 #include <regex>
 #include <span>
 #include <string>
-#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -23,12 +22,11 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 protected:
     // Constructor used by Substring and Regex so subclasses share value_
     // without redeclaring the same field in every derived class
-    String(FeatureTag t, std::string_view tname, std::string value, std::string desc);
+    String(FeatureTag t, std::string value, std::string desc);
 
     std::string value_;
 };
@@ -73,7 +71,6 @@ public:
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string    to_string() const override;
 
 private:
     std::vector<std::byte> value_;
@@ -91,10 +88,9 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 protected:
-    Number(FeatureTag t, std::string_view tname, Value v, std::string desc);
+    Number(FeatureTag t, Value v, std::string desc);
 
     Value value_;
 };
@@ -108,10 +104,9 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 protected:
-    Offset(FeatureTag t, std::string_view tname, std::int64_t v, std::string desc);
+    Offset(FeatureTag t, std::int64_t v, std::string desc);
 
     std::int64_t value_;
 };
@@ -125,7 +120,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string name_;
@@ -139,7 +133,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -154,7 +147,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -167,7 +159,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
@@ -183,7 +174,6 @@ public:
     [[nodiscard]] bool matches(const FeatureSet& fs) const override;
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string    to_string() const override;
 
 private:
     std::string value_;
@@ -197,7 +187,6 @@ public:
 
     [[nodiscard]] std::size_t    hash()   const noexcept override;
     [[nodiscard]] bool           equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string    to_string() const override;
 
 private:
     std::string value_;
@@ -210,7 +199,6 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;

@@ -509,7 +509,7 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
     CHECK(offs[1].first->tag() == FeatureTag::kOperandOffset);
     // The 0x30 is an absolute address with disp 0, so capa surfaces offset(0). This is
     // what lets the runtime-linking rules count gs:[0x60] as an offset(0) step
-    CHECK(offs[0].first->to_string() == "offset(0)");
+    CHECK(static_cast<const Offset&>(*offs[0].first).value() == 0);
 }
 
 TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number") {

@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -91,14 +90,13 @@ private:
     std::vector<FeaturePtr> bytes_;
 };
 
-// Abstract base for every concrete feature type. Subclasses must implement hash,
-// equals, and to_string
+// Abstract base for every concrete feature type. Subclasses must implement hash
+// and equals
 class Feature {
 public:
     virtual ~Feature() = default;
 
     [[nodiscard]] FeatureTag         tag()         const noexcept { return tag_; }
-    [[nodiscard]] std::string_view   type_name()   const noexcept { return type_name_; }
     [[nodiscard]] const std::string& description() const noexcept { return description_; }
 
     // Membership check plus subclass-specific semantic matching. Default implementation
@@ -116,16 +114,11 @@ public:
     // Structural equality ignoring description field
     [[nodiscard]] virtual bool equals(const Feature& other) const noexcept = 0;
 
-    // Display form used by renderers and diagnostics
-    [[nodiscard]] virtual std::string to_string() const = 0;
-
 protected:
-    Feature(FeatureTag t, std::string_view tname, std::string desc)
-        : tag_(t), type_name_(tname), description_(std::move(desc)) {}
+    Feature(FeatureTag t, std::string desc) : tag_(t), description_(std::move(desc)) {}
 
-    FeatureTag       tag_;
-    std::string_view type_name_;        // points at a static literal, never owned
-    std::string      description_;
+    FeatureTag  tag_;
+    std::string description_;
 };
 
 }  // namespace papa::features

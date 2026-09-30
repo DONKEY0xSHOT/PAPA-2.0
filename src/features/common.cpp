@@ -10,7 +10,6 @@
 #include <functional>
 #include <memory>
 #include <regex>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -61,11 +60,11 @@ constexpr std::string_view kAnyWildcard = "any";
 
 // String
 String::String(std::string value, std::string desc)
-    : Feature(FeatureTag::kString, "string", std::move(desc)),
+    : Feature(FeatureTag::kString, std::move(desc)),
       value_(std::move(value)) {}
 
-String::String(FeatureTag t, std::string_view tname, std::string value, std::string desc)
-    : Feature(t, tname, std::move(desc)),
+String::String(FeatureTag t, std::string value, std::string desc)
+    : Feature(t, std::move(desc)),
       value_(std::move(value)) {}
 
 std::size_t String::hash() const noexcept {
@@ -80,19 +79,9 @@ bool String::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string String::to_string() const {
-    std::string out;
-    out.reserve(type_name().size() + value_.size() + 4);
-    out.append(type_name());
-    out.append("(\"");
-    out.append(value_);
-    out.append("\")");
-    return out;
-}
-
 // Substring
 Substring::Substring(std::string value, std::string desc)
-    : String(FeatureTag::kSubstring, "substring", std::move(value), std::move(desc)) {}
+    : String(FeatureTag::kSubstring, std::move(value), std::move(desc)) {}
 
 engine::Result Substring::evaluate(const FeatureSet& fs, bool sc) const {
     engine::Result r;
@@ -122,7 +111,7 @@ bool Substring::matches(const FeatureSet& fs) const {
 
 // Regex
 Regex::Regex(std::string literal, std::string desc)
-    : String(FeatureTag::kRegex, "regex", std::move(literal), std::move(desc)) {
+    : String(FeatureTag::kRegex, std::move(literal), std::move(desc)) {
     auto parsed = parse_regex_literal(value_);
     pattern_          = std::move(parsed.pattern);
     case_insensitive_ = parsed.case_insensitive;
@@ -171,7 +160,7 @@ bool Regex::matches(const FeatureSet& fs) const {
 
 // Bytes
 Bytes::Bytes(std::vector<std::byte> value, std::string desc)
-    : Feature(FeatureTag::kBytes, "bytes", std::move(desc)),
+    : Feature(FeatureTag::kBytes, std::move(desc)),
       value_(std::move(value)) {}
 
 engine::Result Bytes::evaluate(const FeatureSet& fs, bool sc) const {
@@ -218,28 +207,13 @@ bool Bytes::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Bytes::to_string() const {
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(8 + value_.size() * 3);
-    out.append("bytes(");
-    for (std::size_t i = 0; i < value_.size(); ++i) {
-        if (i != 0) { out.push_back(' '); }
-        auto byte = std::to_integer<std::uint8_t>(value_[i]);
-        out.push_back(kHex[byte >> 4]);
-        out.push_back(kHex[byte & 0x0F]);
-    }
-    out.push_back(')');
-    return out;
-}
-
 // Number
 Number::Number(Value v, std::string desc)
-    : Feature(FeatureTag::kNumber, "number", std::move(desc)),
+    : Feature(FeatureTag::kNumber, std::move(desc)),
       value_(std::move(v)) {}
 
-Number::Number(FeatureTag t, std::string_view tname, Value v, std::string desc)
-    : Feature(t, tname, std::move(desc)),
+Number::Number(FeatureTag t, Value v, std::string desc)
+    : Feature(t, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Number::hash() const noexcept {
@@ -264,21 +238,13 @@ bool Number::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Number::to_string() const {
-    std::ostringstream os;
-    os << type_name() << '(';
-    std::visit([&os](auto v) { os << v; }, value_);
-    os << ')';
-    return os.str();
-}
-
 // Offset
 Offset::Offset(std::int64_t v, std::string desc)
-    : Feature(FeatureTag::kOffset, "offset", std::move(desc)),
+    : Feature(FeatureTag::kOffset, std::move(desc)),
       value_(v) {}
 
-Offset::Offset(FeatureTag t, std::string_view tname, std::int64_t v, std::string desc)
-    : Feature(t, tname, std::move(desc)),
+Offset::Offset(FeatureTag t, std::int64_t v, std::string desc)
+    : Feature(t, std::move(desc)),
       value_(v) {}
 
 std::size_t Offset::hash() const noexcept {
@@ -291,15 +257,9 @@ bool Offset::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Offset::to_string() const {
-    std::ostringstream os;
-    os << type_name() << '(' << value_ << ')';
-    return os.str();
-}
-
 // MatchedRule
 MatchedRule::MatchedRule(std::string name, std::string desc)
-    : Feature(FeatureTag::kMatchedRule, "match", std::move(desc)),
+    : Feature(FeatureTag::kMatchedRule, std::move(desc)),
       name_(std::move(name)) {}
 
 std::size_t MatchedRule::hash() const noexcept {
@@ -312,13 +272,9 @@ bool MatchedRule::equals(const Feature& o) const noexcept {
     return name_ == rhs.name_;
 }
 
-std::string MatchedRule::to_string() const {
-    return "match(\"" + name_ + "\")";
-}
-
 // Characteristic
 Characteristic::Characteristic(std::string v, std::string desc)
-    : Feature(FeatureTag::kCharacteristic, "characteristic", std::move(desc)),
+    : Feature(FeatureTag::kCharacteristic, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Characteristic::hash() const noexcept {
@@ -331,13 +287,9 @@ bool Characteristic::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Characteristic::to_string() const {
-    return "characteristic(\"" + value_ + "\")";
-}
-
 // Class
 Class::Class(std::string v, std::string desc)
-    : Feature(FeatureTag::kClass, "class", std::move(desc)),
+    : Feature(FeatureTag::kClass, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Class::hash() const noexcept {
@@ -350,13 +302,9 @@ bool Class::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Class::to_string() const {
-    return "class(\"" + value_ + "\")";
-}
-
 // Namespace
 Namespace::Namespace(std::string v, std::string desc)
-    : Feature(FeatureTag::kNamespace, "namespace", std::move(desc)),
+    : Feature(FeatureTag::kNamespace, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Namespace::hash() const noexcept {
@@ -369,13 +317,9 @@ bool Namespace::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Namespace::to_string() const {
-    return "namespace(\"" + value_ + "\")";
-}
-
 // Os
 Os::Os(std::string v, std::string desc)
-    : Feature(FeatureTag::kOs, "os", std::move(desc)),
+    : Feature(FeatureTag::kOs, std::move(desc)),
       value_(std::move(v)) {}
 
 engine::Result Os::evaluate(const FeatureSet& fs, bool sc) const {
@@ -418,13 +362,9 @@ bool Os::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Os::to_string() const {
-    return "os(" + value_ + ")";
-}
-
 // Arch
 Arch::Arch(std::string v, std::string desc)
-    : Feature(FeatureTag::kArch, "arch", std::move(desc)),
+    : Feature(FeatureTag::kArch, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Arch::hash() const noexcept {
@@ -437,13 +377,9 @@ bool Arch::equals(const Feature& o) const noexcept {
     return value_ == rhs.value_;
 }
 
-std::string Arch::to_string() const {
-    return "arch(" + value_ + ")";
-}
-
 // Format
 Format::Format(std::string v, std::string desc)
-    : Feature(FeatureTag::kFormat, "format", std::move(desc)),
+    : Feature(FeatureTag::kFormat, std::move(desc)),
       value_(std::move(v)) {}
 
 std::size_t Format::hash() const noexcept {
@@ -454,10 +390,6 @@ bool Format::equals(const Feature& o) const noexcept {
     if (o.tag() != FeatureTag::kFormat) { return false; }
     const auto& rhs = static_cast<const Format&>(o);
     return value_ == rhs.value_;
-}
-
-std::string Format::to_string() const {
-    return "format(" + value_ + ")";
 }
 
 }  // namespace papa::features
