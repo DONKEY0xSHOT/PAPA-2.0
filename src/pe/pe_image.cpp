@@ -40,15 +40,6 @@ std::optional<std::uint64_t> PeImage::rva_to_file_offset(std::uint64_t rva) cons
     return std::nullopt;
 }
 
-std::optional<std::uint64_t> PeImage::file_offset_to_rva(std::uint64_t off) const noexcept {
-    for (const auto& s : sections_) {
-        if (off >= s.raw_offset && off < std::uint64_t{s.raw_offset} + s.raw_size) {
-            return std::uint64_t{s.virtual_address} + (off - s.raw_offset);
-        }
-    }
-    return std::nullopt;
-}
-
 Expected<std::span<const std::byte>> PeImage::read_at_rva(
     std::uint64_t rva, std::size_t n) const {
     const auto maybe = rva_to_file_offset(rva);

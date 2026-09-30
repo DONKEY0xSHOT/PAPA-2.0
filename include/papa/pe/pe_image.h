@@ -71,7 +71,6 @@ public:
     [[nodiscard]] const ParsedSection* section_containing_rva(std::uint64_t rva) const noexcept;
 
     [[nodiscard]] std::optional<std::uint64_t> rva_to_file_offset(std::uint64_t rva) const noexcept;
-    [[nodiscard]] std::optional<std::uint64_t> file_offset_to_rva(std::uint64_t off) const noexcept;
 
     [[nodiscard]] bool probe_readable(std::uint64_t rva, std::size_t n) const noexcept;
 
