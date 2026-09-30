@@ -72,8 +72,7 @@ void emit_string_array(::papa::util::json::Writer& w,
 
 // Emit a bare image-base or similar value as capa's absolute address object
 void emit_absolute(::papa::util::json::Writer& w, std::uint64_t value) {
-    emit_address(w,
-                 ::papa::features::Address{::papa::features::AbsoluteVirtualAddress{value}});
+    emit_address(w, ::papa::features::va_address(value));
 }
 
 // Field order and nesting mirror capa's StaticMetadata / StaticAnalysis so the

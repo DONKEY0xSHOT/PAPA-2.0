@@ -27,14 +27,10 @@ namespace {
 constexpr const char* kCharTightLoop   = "tight loop";
 constexpr const char* kCharStackString = "stack string";
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
 [[nodiscard]] FeatureWithAddress
 make_characteristic(const char* name, std::uint64_t va) {
     return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
+             va_address(va) };
 }
 
 // Mirror of the same helper in insn.cpp. Keeping it private here avoids a public
@@ -134,8 +130,7 @@ extract_basic_block_features(const BasicBlock& bb, bool is_64bit) {
     // Emit a BasicBlock tag feature for every BB
     out.emplace_back(
         std::make_shared<const ::papa::features::BasicBlock>(),
-        ::papa::features::Address{
-            ::papa::features::AbsoluteVirtualAddress{bb.va}});
+        va_address(bb.va));
     if (auto tl = extract_tight_loop(bb); tl.has_value()) {
         out.push_back(std::move(*tl));
     }

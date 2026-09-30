@@ -65,10 +65,6 @@ insn_from_handle(const base::InsnHandle& ih) {
     return *static_cast<const DecodedInsn*>(ih.inner);
 }
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
 // Move one optional feature, or a batch of features, onto the end of out
 void append(std::vector<base::FeatureWithAddress>&   out,
             std::optional<base::FeatureWithAddress>&& one) {
@@ -91,7 +87,7 @@ PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
 }
 
 features::Address PapaNativeStaticExtractor::get_base_address() const {
-    return va_addr(backend_.image().image_base());
+    return va_address(backend_.image().image_base());
 }
 
 std::vector<base::FeatureWithAddress>
@@ -111,7 +107,7 @@ PapaNativeStaticExtractor::get_functions() const {
     out.reserve(funcs.size());
     for (const auto& fn : funcs) {
         base::FunctionHandle fh;
-        fh.addr  = va_addr(fn.va);
+        fh.addr  = va_address(fn.va);
         fh.inner = static_cast<const void*>(&fn);
         out.push_back(fh);
     }
@@ -138,7 +134,7 @@ PapaNativeStaticExtractor::get_basic_blocks(const base::FunctionHandle& fh) cons
     out.reserve(fn.basic_blocks.size());
     for (const auto& bb : fn.basic_blocks) {
         base::BBHandle bbh;
-        bbh.addr  = va_addr(bb.va);
+        bbh.addr  = va_address(bb.va);
         bbh.inner = static_cast<const void*>(&bb);
         out.push_back(bbh);
     }
@@ -161,7 +157,7 @@ PapaNativeStaticExtractor::get_instructions(const base::FunctionHandle& /*fh*/,
     out.reserve(bb.instructions.size());
     for (const auto& ins : bb.instructions) {
         base::InsnHandle ih;
-        ih.addr  = va_addr(ins.va);
+        ih.addr  = va_address(ins.va);
         ih.inner = static_cast<const void*>(&ins);
         out.push_back(ih);
     }

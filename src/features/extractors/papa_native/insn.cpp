@@ -47,16 +47,12 @@ constexpr std::array<ZydisMnemonic, 4> kXorMnemonics{
     ZYDIS_MNEMONIC_PXOR,
 };
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
 // Lift a Characteristic into an addressed feature pair
 // Used by every characteristic-emitting extractor below
 [[nodiscard]] FeatureWithAddress
 make_characteristic(const char* name, std::uint64_t va) {
     return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
+             va_address(va) };
 }
 
 // True when the operand carries a memory access whose displacement matches
@@ -229,7 +225,7 @@ extract_mnemonic(const DecodedInsn& ins) {
     if (ins.mnemonic_str.empty()) { return std::nullopt; }
     return FeatureWithAddress{
         interned_mnemonic(ins.zyd_mnem, ins.mnemonic_str),
-        va_addr(ins.va)
+        va_address(ins.va)
     };
 }
 
@@ -304,7 +300,7 @@ extract_bytes(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
 
         out.emplace_back(
             std::make_shared<const features::Bytes>(std::move(buf)),
-            va_addr(ins.va));
+            va_address(ins.va));
     }
     return out;
 }
@@ -356,10 +352,10 @@ extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
         const features::Number::Value val{v};
         out.emplace_back(
             std::make_shared<const features::Number>(val),
-            va_addr(ins.va));
+            va_address(ins.va));
         out.emplace_back(
             std::make_shared<const features::OperandNumber>(i, val),
-            va_addr(ins.va));
+            va_address(ins.va));
 
         // "add reg, small_imm" doubles as a struct-offset hint in MSVC code
         if (ins.zyd_mnem == ZYDIS_MNEMONIC_ADD &&
@@ -370,10 +366,10 @@ extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
             const std::int64_t signed_v = static_cast<std::int64_t>(v);
             out.emplace_back(
                 std::make_shared<const features::Offset>(signed_v),
-                va_addr(ins.va));
+                va_address(ins.va));
             out.emplace_back(
                 std::make_shared<const features::OperandOffset>(i, signed_v),
-                va_addr(ins.va));
+                va_address(ins.va));
         }
     }
     return out;
@@ -401,10 +397,10 @@ extract_offset(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
         // A zero displacement is still an offset
         out.emplace_back(
             std::make_shared<const features::Offset>(off),
-            va_addr(ins.va));
+            va_address(ins.va));
         out.emplace_back(
             std::make_shared<const features::OperandOffset>(i, off),
-            va_addr(ins.va));
+            va_address(ins.va));
 
         // For lea reg, [reg + off] where off is not readable memory, CAPA also surfaces the
         // displacement as a Number. A stack or frame base and any SIB operand are excluded
@@ -417,10 +413,10 @@ extract_offset(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
                 const features::Number::Value num_v{v};
                 out.emplace_back(
                     std::make_shared<const features::Number>(num_v),
-                    va_addr(ins.va));
+                    va_address(ins.va));
                 out.emplace_back(
                     std::make_shared<const features::OperandNumber>(i, num_v),
-                    va_addr(ins.va));
+                    va_address(ins.va));
             }
         }
     }
@@ -499,7 +495,7 @@ extract_string(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
 
         out.emplace_back(
             std::make_shared<const features::String>(std::move(*s)),
-            va_addr(ins.va));
+            va_address(ins.va));
     }
     return out;
 }
@@ -605,7 +601,7 @@ void emit_api_variants(const ::papa::pe::ParsedImport& imp,
     for (auto& v : variants) {
         out.emplace_back(
             std::make_shared<const features::Api>(std::move(v)),
-            va_addr(addr_va));
+            va_address(addr_va));
     }
 }
 
@@ -673,10 +669,10 @@ std::vector<FeatureWithAddress> extract_flirt_call_api(
 
     // capa yields the library name and, for a leading-underscore name, the form with one
     // underscore removed, so a rule can match either spelling
-    out.emplace_back(std::make_shared<const features::Api>(*name), va_addr(ins.va));
+    out.emplace_back(std::make_shared<const features::Api>(*name), va_address(ins.va));
     if (name->front() == '_' && name->size() > 1U) {
         out.emplace_back(std::make_shared<const features::Api>(name->substr(1)),
-                         va_addr(ins.va));
+                         va_address(ins.va));
     }
     return out;
 }

@@ -19,7 +19,7 @@ features::Address PefileFeatureExtractor::get_base_address() const {
         throw ::papa::PapaInvariantError(
             "PefileFeatureExtractor used after move or with null image");
     }
-    return features::Address{features::AbsoluteVirtualAddress{image_->image_base()}};
+    return features::va_address(image_->image_base());
 }
 
 std::vector<FeatureWithAddress>

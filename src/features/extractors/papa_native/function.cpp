@@ -24,14 +24,10 @@ constexpr const char* kCharCallsFrom     = "calls from";
 constexpr const char* kCharCallsTo       = "calls to";
 constexpr const char* kCharRecursiveCall = "recursive call";
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
 [[nodiscard]] FeatureWithAddress
 make_characteristic(const char* name, std::uint64_t va) {
     return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
+             va_address(va) };
 }
 
 // True when the block graph has a cycle, which is capa's loop test once self-loops are dropped
@@ -127,7 +123,7 @@ extract_function_name(const Function& fn, std::string_view symbol) {
     if (symbol.empty()) { return std::nullopt; }
     return FeatureWithAddress{
         std::make_shared<const features::FunctionName>(std::string(symbol)),
-        va_addr(fn.va)
+        va_address(fn.va)
     };
 }
 
