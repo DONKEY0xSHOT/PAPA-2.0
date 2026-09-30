@@ -57,7 +57,7 @@ struct StaticAnalysisMeta {
 // reproduce a run from the report alone (CAPA does the same)
 struct Metadata {
     std::string               timestamp;     // ISO-8601 UTC
-    std::string               version;       // papa::version::kVersionString
+    std::string               version;       // papa::version::kCapaVersion
     std::vector<std::string>  argv;
     std::filesystem::path     sample_path;
     std::uint64_t             sample_size_bytes{0};

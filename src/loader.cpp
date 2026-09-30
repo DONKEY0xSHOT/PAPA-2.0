@@ -84,7 +84,7 @@ collect_metadata(std::span<const std::byte>                                 samp
                  const features::extractors::StaticFeatureExtractor&        extractor) {
     Metadata m;
     m.timestamp         = utc_iso8601_now();
-    m.version           = std::string(version::kVersionString);
+    m.version           = std::string(version::kCapaVersion);
     m.argv              = std::move(argv);
     m.sample_path       = std::move(sample_path);
     m.sample_size_bytes = static_cast<std::uint64_t>(sample_buf.size());

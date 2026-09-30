@@ -8,6 +8,7 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
+#include "papa/features/extractors/pefile_extractor.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -17,6 +18,7 @@
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
+#include "papa/version.h"
 
 #include <cstddef>
 #include <cstring>
@@ -31,6 +33,7 @@
 #include <utility>
 #include <vector>
 #include "fixture_paths.h"
+#include "pe_builder.h"
 
 namespace {
 
@@ -76,7 +79,7 @@ TEST_CASE("render: build_document filters synthetic subscope rules") {
 
 TEST_CASE("render: JSON output is well-formed for an empty match result") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.argv    = {"papa.exe", "sample.exe"};
     meta.timestamp = "2026-05-02T00:00:00Z";
     meta.sample_path = "sample.exe";
@@ -96,13 +99,13 @@ TEST_CASE("render: JSON output is well-formed for an empty match result") {
     // Spot check: starts with object brace, contains the version, ends in brace
     CHECK(out.front() == '{');
     CHECK(out.back()  == '}');
-    CHECK(out.find("\"version\":\"0.1.0\"") != std::string::npos);
+    CHECK(out.find("\"version\":\"9.4.0\"") != std::string::npos);
     CHECK(out.find("\"rules\":{}")          != std::string::npos);
 }
 
 TEST_CASE("render: text default lists capabilities in capa's table format") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.sample_path = "x.exe";
     meta.sample_size_bytes = 0U;
     meta.hashes.md5 = meta.hashes.sha1 = meta.hashes.sha256 = "0";
@@ -136,7 +139,7 @@ TEST_CASE("render: text default lists capabilities in capa's table format") {
 
 TEST_CASE("render: text hides library rules but JSON keeps them, matching capa") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.sample_path = "x.exe";
     meta.sample_size_bytes = 0U;
     meta.hashes.md5 = meta.hashes.sha1 = meta.hashes.sha256 = "0";
@@ -178,7 +181,7 @@ TEST_CASE("render: text hides library rules but JSON keeps them, matching capa")
 
 TEST_CASE("render: json emits capa's meta and match-tree schema") {
     papa::Metadata meta;
-    meta.version           = "0.1.0";
+    meta.version           = "9.4.0";
     meta.sample_path       = "x.exe";
     meta.argv              = {"papa.exe", "x.exe"};
     meta.hashes.md5        = "aa";
@@ -287,4 +290,28 @@ TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
     const auto json_out = papa::render::json::render_to_string(doc, /*pretty=*/false);
     CHECK(json_out.find("\"sha256\":\"") != std::string::npos);
     CHECK(json_out.find("has-text")     != std::string::npos);
+}
+
+TEST_CASE("collect_metadata: the report version is capa's release so the JSON can match capa") {
+    papa_tests::PeBuilder b;
+    b.code = {0xC3};
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const papa::features::extractors::PefileFeatureExtractor extractor(*img);
+
+    const auto meta = papa::collect_metadata(
+        img->raw_buffer(), "x.exe", {}, {}, *img,
+        papa::capabilities::static_::StaticCapabilities{}, extractor);
+    CHECK(meta.version == "9.4.0");
+}
+
+TEST_CASE("render: the verbose header names PAPA's own version rather than the report's") {
+    papa::render::ResultDocument doc;
+    doc.meta.version = "9.4.0";
+    const auto out = papa::render::text::render_to_string(
+        doc, papa::render::text::Verbosity::kVerbose);
+    const std::string first_line =
+        "PAPA " + std::string(papa::version::kVersionString) + "\n";
+    CHECK(out.rfind(first_line, 0) == 0);
+    CHECK(out.find("9.4.0") == std::string::npos);
 }
