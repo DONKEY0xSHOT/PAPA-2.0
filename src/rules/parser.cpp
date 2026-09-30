@@ -683,26 +683,14 @@ parse_statement_children(const yaml::Node& seq_node, Scope scope) {
     return out;
 }
 
-// The mapping argument is one item of a top-level features sequence
-// Each item must be a one-key mapping whose key drives the dispatch
-[[nodiscard]] Expected<std::unique_ptr<Statement>>
-parse_statement_item(const yaml::Node& node, Scope scope) {
-    if (node.kind() != yaml::NodeKind::kMapping) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule,
-            "feature item must be a mapping", node.line(), node.column())};
-    }
-    if (node.mapping().empty()) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule,
-            "feature mapping is empty", node.line(), node.column())};
-    }
+// A parser for one family of statement keys, which returns nullopt for any other key
+using MaybeStatement = std::optional<Expected<std::unique_ptr<Statement>>>;
 
-    // First key drives the dispatch
-    // Sibling keys may carry an out-of-line "description"
-    const auto& first = node.mapping().front();
-    const std::string_view key = first.first;
-    const yaml::Node& value = first.second;
-
-    // operators
+// and, or, not, optional and "N or more", each over a sequence of child statements
+[[nodiscard]] MaybeStatement parse_operator(std::string_view  key,
+                                            const yaml::Node& node,
+                                            const yaml::Node& value,
+                                            Scope             scope) {
     if (key == "and") {
         auto kids = parse_statement_children(value, scope);
         if (!kids) { return Unexpected{kids.error()}; }
@@ -728,93 +716,108 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
         return std::make_unique<Some>(0, std::move(*kids));
     }
     // "N or more"
-    {
-        const auto pos = key.rfind(" or more");
-        if (pos != std::string_view::npos && pos + std::string_view{" or more"}.size() == key.size()) {
-            const auto n = parse_size_t(key.substr(0, pos));
-            if (!n.has_value()) {
-                return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                    std::string{"malformed N-or-more: "}.append(key),
-                    node.line(), node.column())};
-            }
-            auto kids = parse_statement_children(value, scope);
-            if (!kids) { return Unexpected{kids.error()}; }
-            return std::make_unique<Some>(*n, std::move(*kids));
-        }
-    }
-
-    // subscope nodes
-    auto subscope_kind = [&]() -> std::optional<Scope> {
-        if (key == "basic block")     return Scope::kBasicBlock;
-        if (key == "instruction")     return Scope::kInstruction;
-        if (key == "function")        return Scope::kFunction;
-        if (key == "call")            return Scope::kCall;
-        if (key == "process")         return Scope::kProcess;
-        if (key == "thread")          return Scope::kThread;
-        if (key == "span of calls")   return Scope::kSpanOfCalls;
+    const auto pos = key.rfind(" or more");
+    if (pos == std::string_view::npos || pos + std::string_view{" or more"}.size() != key.size()) {
         return std::nullopt;
-    }();
-    if (subscope_kind.has_value()) {
-        // Inner statements are evaluated at the subscope's scope, not the parent's
-        auto kids = parse_statement_children(value, *subscope_kind);
-        if (!kids) { return Unexpected{kids.error()}; }
-        std::unique_ptr<Statement> inner;
-        if (kids->size() == 1) {
-            inner = std::move(kids->front());
-        } else {
-            inner = std::make_unique<And>(std::move(*kids));
-        }
-        return std::make_unique<Subscope>(*subscope_kind, std::move(inner));
+    }
+    const auto n = parse_size_t(key.substr(0, pos));
+    if (!n.has_value()) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"malformed N-or-more: "}.append(key),
+            node.line(), node.column())};
+    }
+    auto kids = parse_statement_children(value, scope);
+    if (!kids) { return Unexpected{kids.error()}; }
+    return std::make_unique<Some>(*n, std::move(*kids));
+}
+
+// The scope a subscope key opens, or nullopt for any other key
+[[nodiscard]] std::optional<Scope> subscope_scope(std::string_view key) noexcept {
+    if (key == "basic block")     return Scope::kBasicBlock;
+    if (key == "instruction")     return Scope::kInstruction;
+    if (key == "function")        return Scope::kFunction;
+    if (key == "call")            return Scope::kCall;
+    if (key == "process")         return Scope::kProcess;
+    if (key == "thread")          return Scope::kThread;
+    if (key == "span of calls")   return Scope::kSpanOfCalls;
+    return std::nullopt;
+}
+
+// A subscope block, one child or an implicit and of several
+[[nodiscard]] MaybeStatement parse_subscope(std::string_view key, const yaml::Node& value) {
+    const auto subscope_kind = subscope_scope(key);
+    if (!subscope_kind.has_value()) { return std::nullopt; }
+
+    // Inner statements are evaluated at the subscope's scope, not the parent's
+    auto kids = parse_statement_children(value, *subscope_kind);
+    if (!kids) { return Unexpected{kids.error()}; }
+    std::unique_ptr<Statement> inner;
+    if (kids->size() == 1) {
+        inner = std::move(kids->front());
+    } else {
+        inner = std::make_unique<And>(std::move(*kids));
+    }
+    return std::make_unique<Subscope>(*subscope_kind, std::move(inner));
+}
+
+// com/class and com/interface expand into Or(Bytes(le_guid), String(canonical_guid))
+// The lookup tables live in com_classes.cpp and com_interfaces.cpp
+[[nodiscard]] MaybeStatement parse_com(std::string_view  key,
+                                       const yaml::Node& node,
+                                       const yaml::Node& value,
+                                       Scope             scope) {
+    if (key != "com/class" && key != "com/interface") { return std::nullopt; }
+
+    if (value.kind() != yaml::NodeKind::kScalar) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"'"}.append(key).append("' value must be scalar"),
+            value.line(), value.column())};
+    }
+    const auto split_pair = ::papa::rules::RuleParser::split_inline_description(
+        value.scalar());
+    const std::string_view name_part = split_pair.first;
+    const std::string desc_str(split_pair.second.has_value()
+        ? std::string(*split_pair.second)
+        : std::string{});
+
+    const ComKind com_kind = (key == "com/class") ? ComKind::kClass : ComKind::kInterface;
+    const ComEntry* entry  = ::papa::rules::lookup_com(com_kind, name_part);
+    if (entry == nullptr) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"unknown COM "}
+                .append(com_kind == ComKind::kClass ? "class" : "interface")
+                .append(" name: ").append(name_part),
+            value.line(), value.column())};
     }
 
-    // com/class and com/interface expand into Or(Bytes(le_guid), String(canonical_guid))
-    // The lookup tables live in com_classes.cpp and com_interfaces.cpp
-    if (key == "com/class" || key == "com/interface") {
-        if (value.kind() != yaml::NodeKind::kScalar) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"'"}.append(key).append("' value must be scalar"),
-                value.line(), value.column())};
-        }
-        const auto split_pair = ::papa::rules::RuleParser::split_inline_description(
-            value.scalar());
-        const std::string_view name_part = split_pair.first;
-        const std::string desc_str(split_pair.second.has_value()
-            ? std::string(*split_pair.second)
-            : std::string{});
-
-        const ComKind com_kind = (key == "com/class") ? ComKind::kClass : ComKind::kInterface;
-        const ComEntry* entry  = ::papa::rules::lookup_com(com_kind, name_part);
-        if (entry == nullptr) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"unknown COM "}
-                    .append(com_kind == ComKind::kClass ? "class" : "interface")
-                    .append(" name: ").append(name_part),
-                value.line(), value.column())};
-        }
-
-        // Both child features must be valid at the rule's scope
-        // String is universally allowed and Bytes bubbles up from instruction scope
-        if (!is_feature_allowed(FeatureTag::kBytes,  scope) ||
-            !is_feature_allowed(FeatureTag::kString, scope)) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"'"}.append(key).append("' not allowed at scope ")
-                    .append(::papa::rules::to_string(scope)),
-                node.line(), node.column())};
-        }
-
-        std::vector<std::byte> bytes_value(entry->guid_bytes.begin(),
-                                           entry->guid_bytes.end());
-        auto bytes_feat  = std::make_shared<const Bytes>(std::move(bytes_value), desc_str);
-        auto string_feat = std::make_shared<const String>(
-            std::string(entry->guid_string), desc_str);
-
-        std::vector<std::unique_ptr<Statement>> kids;
-        kids.reserve(2);
-        kids.push_back(std::make_unique<FeatureStatement>(std::move(bytes_feat)));
-        kids.push_back(std::make_unique<FeatureStatement>(std::move(string_feat)));
-        return std::make_unique<Or>(std::move(kids));
+    // Both child features must be valid at the rule's scope
+    // String is universally allowed and Bytes bubbles up from instruction scope
+    if (!is_feature_allowed(FeatureTag::kBytes,  scope) ||
+        !is_feature_allowed(FeatureTag::kString, scope)) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"'"}.append(key).append("' not allowed at scope ")
+                .append(::papa::rules::to_string(scope)),
+            node.line(), node.column())};
     }
 
+    std::vector<std::byte> bytes_value(entry->guid_bytes.begin(),
+                                       entry->guid_bytes.end());
+    auto bytes_feat  = std::make_shared<const Bytes>(std::move(bytes_value), desc_str);
+    auto string_feat = std::make_shared<const String>(
+        std::string(entry->guid_string), desc_str);
+
+    std::vector<std::unique_ptr<Statement>> kids;
+    kids.reserve(2);
+    kids.push_back(std::make_unique<FeatureStatement>(std::move(bytes_feat)));
+    kids.push_back(std::make_unique<FeatureStatement>(std::move(string_feat)));
+    return std::make_unique<Or>(std::move(kids));
+}
+
+// count(basic blocks) and count(feature(value)), each bounded by a scalar range
+[[nodiscard]] MaybeStatement parse_count(std::string_view  key,
+                                         const yaml::Node& node,
+                                         const yaml::Node& value,
+                                         Scope             scope) {
     // count(basic blocks) or count(basic block) is a tag form CAPA rules use to set a
     // numeric bound on the number of basic blocks in the function
     if (key == "count(basic blocks)" || key == "count(basic block)") {
@@ -830,29 +833,34 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
     }
 
     // count(feature(value))
-    if (auto split = split_count_call(key); split.has_value()) {
-        const auto& [inner_key, inner_value] = *split;
-        if (value.kind() != yaml::NodeKind::kScalar) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                "count(...) value must be a scalar range",
-                value.line(), value.column())};
-        }
-        auto rng = ::papa::rules::RuleParser::parse_count_range(value.scalar());
-        if (!rng) { return Unexpected{rng.error()}; }
-        auto feat = build_feature_leaf(inner_key, inner_value, std::string{},
-                                       node.line(), node.column());
-        if (!feat) { return Unexpected{feat.error()}; }
-        if (!is_feature_allowed((*feat)->tag(), scope)) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"feature in count(): "}.append(inner_key)
-                    .append(" not allowed at scope ")
-                    .append(::papa::rules::to_string(scope)),
-                node.line(), node.column())};
-        }
-        return std::make_unique<Range>(std::move(*feat), rng->min, rng->max);
+    const auto split = split_count_call(key);
+    if (!split.has_value()) { return std::nullopt; }
+    const auto& [inner_key, inner_value] = *split;
+    if (value.kind() != yaml::NodeKind::kScalar) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "count(...) value must be a scalar range",
+            value.line(), value.column())};
     }
+    auto rng = ::papa::rules::RuleParser::parse_count_range(value.scalar());
+    if (!rng) { return Unexpected{rng.error()}; }
+    auto feat = build_feature_leaf(inner_key, inner_value, std::string{},
+                                   node.line(), node.column());
+    if (!feat) { return Unexpected{feat.error()}; }
+    if (!is_feature_allowed((*feat)->tag(), scope)) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"feature in count(): "}.append(inner_key)
+                .append(" not allowed at scope ")
+                .append(::papa::rules::to_string(scope)),
+            node.line(), node.column())};
+    }
+    return std::make_unique<Range>(std::move(*feat), rng->min, rng->max);
+}
 
-    // leaf feature
+// A leaf feature with an optional sibling description, checked against the rule's scope
+[[nodiscard]] Expected<std::unique_ptr<Statement>> parse_leaf(std::string_view  key,
+                                                              const yaml::Node& node,
+                                                              const yaml::Node& value,
+                                                              Scope             scope) {
     if (value.kind() != yaml::NodeKind::kScalar) {
         return Unexpected{rule_error(ErrorKind::kInvalidRule,
             std::string{"feature '"}.append(key).append("' expects a scalar value"),
@@ -898,6 +906,32 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
         }
     }
     return std::make_unique<FeatureStatement>(std::move(*feat));
+}
+
+// The mapping argument is one item of a top-level features sequence
+// Each item must be a one-key mapping whose key drives the dispatch
+[[nodiscard]] Expected<std::unique_ptr<Statement>>
+parse_statement_item(const yaml::Node& node, Scope scope) {
+    if (node.kind() != yaml::NodeKind::kMapping) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "feature item must be a mapping", node.line(), node.column())};
+    }
+    if (node.mapping().empty()) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "feature mapping is empty", node.line(), node.column())};
+    }
+
+    // First key drives the dispatch
+    // Sibling keys may carry an out-of-line "description"
+    const auto& first = node.mapping().front();
+    const std::string_view key = first.first;
+    const yaml::Node& value = first.second;
+
+    if (auto st = parse_operator(key, node, value, scope)) { return std::move(*st); }
+    if (auto st = parse_subscope(key, value))              { return std::move(*st); }
+    if (auto st = parse_com(key, node, value, scope))      { return std::move(*st); }
+    if (auto st = parse_count(key, node, value, scope))    { return std::move(*st); }
+    return parse_leaf(key, node, value, scope);
 }
 
 [[nodiscard]] Expected<std::unique_ptr<Statement>>
