@@ -31,21 +31,6 @@ Rule::Rule(RuleMeta                            meta,
     }
 }
 
-Rule::Rule(std::string                         name,
-           std::optional<std::string>          ns,
-           Scope                               scope,
-           std::unique_ptr<engine::Statement>  stmt,
-           bool                                is_lib)
-    : statement_(std::move(stmt)) {
-    if (!statement_) {
-        throw PapaInvariantError("Rule constructed with null statement");
-    }
-    meta_.name        = std::move(name);
-    meta_.namespace_  = std::move(ns);
-    meta_.scopes.static_scope = scope;
-    meta_.lib         = is_lib;
-}
-
 Rule::~Rule()                                = default;
 Rule::Rule(Rule&&) noexcept                  = default;
 Rule& Rule::operator=(Rule&&) noexcept       = default;

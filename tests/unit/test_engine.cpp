@@ -11,6 +11,8 @@
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
+#include "test_support.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -247,14 +249,14 @@ TEST_CASE("index_rule_matches adds the rule name and each namespace level") {
     auto fs = FeatureSet{};
     auto inner = std::make_unique<FeatureStatement>(
         make_feat<Api>(std::string("anything")));
-    rules::Rule r{
+    const auto r = papa_tests::make_rule(
         "my-rule",
         std::string("foo/bar/baz"),
         rules::Scope::kFile,
-        std::move(inner)};
+        std::move(inner));
 
     const std::array<Address, 2> addrs{va(0x100), va(0x200)};
-    index_rule_matches(fs, r, addrs);
+    index_rule_matches(fs, *r, addrs);
 
     // One entry per distinct name: "my-rule" + 3 namespace levels
     CHECK(fs.size() == 4);
@@ -280,14 +282,14 @@ TEST_CASE("Rule without namespace only injects the rule name") {
     FeatureSet fs;
     auto inner = std::make_unique<FeatureStatement>(
         make_feat<Api>(std::string("x")));
-    rules::Rule r{
+    const auto r = papa_tests::make_rule(
         "no-namespace",
         std::nullopt,
         rules::Scope::kFile,
-        std::move(inner)};
+        std::move(inner));
 
     const std::array<Address, 1> addrs{va(0x100)};
-    index_rule_matches(fs, r, addrs);
+    index_rule_matches(fs, *r, addrs);
     CHECK(fs.size() == 1);
 }
 
@@ -297,7 +299,7 @@ TEST_CASE("match walks topologically ordered rules and publishes MatchedRule fea
     fs0.add(make_feat<Api>(std::string("CreateFile")), va(0x1000));
 
     // Rule 1: matches "api: CreateFile"
-    auto rule1 = std::make_unique<rules::Rule>(
+    auto rule1 = papa_tests::make_rule(
         "matches-createfile",
         std::nullopt,
         rules::Scope::kFile,
@@ -305,7 +307,7 @@ TEST_CASE("match walks topologically ordered rules and publishes MatchedRule fea
 
     // Rule 2: matches only if Rule 1 has matched
     // Uses "match: matches-createfile"
-    auto rule2 = std::make_unique<rules::Rule>(
+    auto rule2 = papa_tests::make_rule(
         "depends-on-rule1",
         std::nullopt,
         rules::Scope::kFile,
@@ -326,7 +328,7 @@ TEST_CASE("match walks topologically ordered rules and publishes MatchedRule fea
 }
 
 TEST_CASE("match stops early on rules that cannot succeed") {
-    auto rule = std::make_unique<rules::Rule>(
+    auto rule = papa_tests::make_rule(
         "never-matches",
         std::nullopt,
         rules::Scope::kFile,
