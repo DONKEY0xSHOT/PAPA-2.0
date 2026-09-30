@@ -4,10 +4,10 @@
 #include "papa/exceptions.h"
 #include "papa/pe/ordinal_names.h"
 #include "papa/pe/pe_structs.h"
+#include "papa/util/string_utils.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -37,28 +37,6 @@ template <typename T>
         s.push_back(static_cast<char>(c));
     }
     return s;
-}
-
-[[nodiscard]] std::string to_lower_ascii(std::string_view s) {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        out.push_back(static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c))));
-    }
-    return out;
-}
-
-[[nodiscard]] std::string normalize_dll_name(std::string_view dll) {
-    std::string lower = to_lower_ascii(dll);
-    for (const auto& ext : constants::kDllExtensions) {
-        if (lower.size() >= ext.size() &&
-            std::string_view{lower.data() + lower.size() - ext.size(), ext.size()} == ext) {
-            lower.resize(lower.size() - ext.size());
-            break;
-        }
-    }
-    return lower;
 }
 
 [[nodiscard]] Expected<std::string> read_cstring_at_rva(
@@ -410,6 +388,17 @@ struct DataDirectory {
 }
 
 }  // namespace
+
+std::string normalize_dll_name(std::string_view dll) {
+    std::string lower = util::to_lower_ascii(dll);
+    for (const auto ext : constants::kDllExtensions) {
+        if (lower.ends_with(ext)) {
+            lower.resize(lower.size() - ext.size());
+            break;
+        }
+    }
+    return lower;
+}
 
 Expected<PeImage> PeParser::parse(std::vector<std::byte> buffer) {
     PeImage img;

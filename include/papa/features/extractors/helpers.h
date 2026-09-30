@@ -10,10 +10,6 @@
 
 namespace papa::features::extractors::helpers {
 
-// Lowercase the DLL name and strip a trailing .dll, .drv, or .so suffix
-// Used to canonicalize import names so rule lookups match every common spelling
-[[nodiscard]] std::string normalize_dll_name(std::string_view dll);
-
 // Strip a trailing 'A' or 'W' from an exported symbol name when one exists. Returns the
 // stripped base name when the suffix was present, std::nullopt otherwise
 [[nodiscard]] std::optional<std::string_view> strip_aw_suffix(std::string_view symbol);

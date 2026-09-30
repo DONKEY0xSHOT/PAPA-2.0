@@ -15,7 +15,6 @@
 
 using papa::features::extractors::helpers::carve_pe_files;
 using papa::features::extractors::helpers::generate_symbols;
-using papa::features::extractors::helpers::normalize_dll_name;
 using papa::features::extractors::helpers::reformat_forwarded_export_name;
 using papa::features::extractors::helpers::strip_aw_suffix;
 
@@ -27,18 +26,6 @@ namespace {
 }
 
 }  // namespace
-
-TEST_CASE("helpers: normalize_dll_name lowercases and strips known extensions") {
-    CHECK(normalize_dll_name("KERNEL32.DLL") == "kernel32");
-    CHECK(normalize_dll_name("kernel32.dll") == "kernel32");
-    CHECK(normalize_dll_name("WS2_32.DLL")   == "ws2_32");
-    CHECK(normalize_dll_name("driver.drv")   == "driver");
-    CHECK(normalize_dll_name("libc.so")      == "libc");
-    // Unknown extension is preserved
-    CHECK(normalize_dll_name("Mod.exe")      == "mod.exe");
-    // No extension
-    CHECK(normalize_dll_name("KERNEL32")     == "kernel32");
-}
 
 TEST_CASE("helpers: strip_aw_suffix returns the base only when suffix matches") {
     auto a = strip_aw_suffix("CreateFileA");

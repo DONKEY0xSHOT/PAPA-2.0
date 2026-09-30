@@ -47,17 +47,6 @@ constexpr std::uint8_t kAsciiZ       = 'Z';
 
 }  // namespace
 
-std::string normalize_dll_name(std::string_view dll) {
-    std::string lower = ::papa::util::to_lower_ascii(dll);
-    for (const auto ext : ::papa::constants::kDllExtensions) {
-        if (lower.ends_with(ext)) {
-            lower.resize(lower.size() - ext.size());
-            return lower;
-        }
-    }
-    return lower;
-}
-
 std::optional<std::string_view> strip_aw_suffix(std::string_view symbol) {
     if (symbol.size() < 2) { return std::nullopt; }
     const char last = symbol.back();

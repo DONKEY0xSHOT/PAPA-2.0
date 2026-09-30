@@ -202,6 +202,19 @@ TEST_CASE("imports carry lowercased dll names with no extension") {
     }
 }
 
+TEST_CASE("normalize_dll_name lowercases and strips known extensions") {
+    using papa::pe::normalize_dll_name;
+    CHECK(normalize_dll_name("KERNEL32.DLL") == "kernel32");
+    CHECK(normalize_dll_name("kernel32.dll") == "kernel32");
+    CHECK(normalize_dll_name("WS2_32.DLL")   == "ws2_32");
+    CHECK(normalize_dll_name("driver.drv")   == "driver");
+    CHECK(normalize_dll_name("libc.so")      == "libc");
+    // Unknown extension is preserved
+    CHECK(normalize_dll_name("Mod.exe")      == "mod.exe");
+    // No extension
+    CHECK(normalize_dll_name("KERNEL32")     == "kernel32");
+}
+
 TEST_CASE("lookup_ordinal_name resolves ws2_32 ordinals like vivisect ordlookup") {
     using papa::pe::lookup_ordinal_name;
     CHECK(lookup_ordinal_name("ws2_32", 6) == "getsockname");
