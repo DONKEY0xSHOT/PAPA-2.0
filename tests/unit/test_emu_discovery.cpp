@@ -10,6 +10,7 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/imports.h"
+#include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_parser.h"
 
 #include "fixture_paths.h"
@@ -174,9 +175,9 @@ TEST_CASE("emu discovery: x64 lea-referenced function is recovered (certutil adl
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
     const auto imports = pn::build_import_table(*img);
-    auto rec = pn::cfg::recover(*img, disasm, imports, papa_tests::shared_flirt_sigs());
-    REQUIRE(rec.has_value());
-    const auto& funcs = rec->functions;
+    const auto rec =
+        pn::viv::discover_functions(*img, disasm, imports, papa_tests::shared_flirt_sigs());
+    const auto& funcs = rec.functions;
     // adler32 at 0x140109160 is referenced only by `lea rdx, [rip + ...]` at
     // 0x140108161 and is absent from .pdata and the relocations
     const bool recovered = std::any_of(

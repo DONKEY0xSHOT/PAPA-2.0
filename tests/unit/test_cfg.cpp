@@ -4,31 +4,15 @@
 #include "doctest.h"
 
 #include "papa/features/extractors/papa_native/cfg.h"
-#include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/imports.h"
-#include "papa/pe/pe_image.h"
-#include "papa/pe/pe_parser.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <vector>
-#include "fixture_paths.h"
-#include "test_support.h"
 
 namespace cfg = papa::features::extractors::papa_native::cfg;
 
-using papa::features::extractors::papa_native::Disassembler;
-using papa::features::extractors::papa_native::Function;
 using papa::features::extractors::papa_native::PdataEntryKind;
-
-namespace {
-
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-}  // namespace
 
 TEST_CASE("classify_pdata_unwind seeds v1, skips chained, stops on v2 or unreadable") {
     // v1 (ver=1), no flags -> a real function entry
@@ -68,33 +52,4 @@ TEST_CASE("find_function_prologues finds vivisect i386 prologues in gaps only") 
     const auto seeds = cfg::find_function_prologues(code, 0x1000u, covered);
     const std::vector<std::uint64_t> want{0x1011u, 0x1041u};
     CHECK(seeds == want);
-}
-
-TEST_CASE("recover on notepad.exe seeds at least the entry point and several exports/pdata") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    Disassembler d(res->is_64bit());
-
-    const auto imports = papa::features::extractors::papa_native::build_import_table(*res);
-    const auto rec = cfg::recover(*res, d, imports, papa_tests::shared_flirt_sigs());
-    REQUIRE(rec.has_value());
-    const std::vector<Function>& funcs = rec->functions;
-
-    // A soft floor
-    CHECK(funcs.size() >= 50);
-
-    // The entry point must appear as a recovered function
-    const std::uint64_t entry_va = res->image_base() + res->entry_point_rva();
-    const bool has_entry = std::any_of(funcs.begin(), funcs.end(),
-        [&](const Function& f) { return f.va == entry_va; });
-    CHECK(has_entry);
-
-    // Caller backlinks must be filled for at least one recovered function
-    const bool any_callers = std::any_of(funcs.begin(), funcs.end(),
-        [](const Function& f) { return !f.callers.empty(); });
-    CHECK(any_callers);
 }

@@ -1,9 +1,6 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 
 #include "papa/constants.h"
-#include "papa/exceptions.h"
-#include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_image.h"
 
 #include <algorithm>
@@ -12,7 +9,6 @@
 #include <cstring>
 #include <optional>
 #include <span>
-#include <unordered_map>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -37,29 +33,6 @@ template <typename T>
     }
     const std::uint64_t rva = va - base;
     return rva < image.size_of_image();
-}
-
-// Build the reverse-edge map: callees across all functions become callers
-void fill_callers(std::vector<Function>& funcs) {
-    std::unordered_map<std::uint64_t, std::size_t> by_va;
-    by_va.reserve(funcs.size());
-    for (std::size_t i = 0; i < funcs.size(); ++i) {
-        by_va.emplace(funcs[i].va, i);
-    }
-    for (const auto& caller : funcs) {
-        for (std::uint64_t callee_va : caller.callees) {
-            auto it = by_va.find(callee_va);
-            if (it == by_va.end()) {
-                continue;
-            }
-            funcs[it->second].callers.push_back(caller.va);
-        }
-    }
-    // Deduplicate per callee so one caller with two call sites counts once
-    for (auto& f : funcs) {
-        std::sort(f.callers.begin(), f.callers.end());
-        f.callers.erase(std::unique(f.callers.begin(), f.callers.end()), f.callers.end());
-    }
 }
 
 // A function start in code without a .pdata table sits just past a boundary, a return
@@ -173,17 +146,6 @@ std::vector<std::uint64_t> cfg::find_function_prologues(
             out.push_back(base_va + static_cast<std::uint64_t>(i));
         }
     }
-    return out;
-}
-
-Expected<RecoveredImage> cfg::recover(const pe::PeImage& image,
-                                      const Disassembler& disasm,
-                                      const ImportTable& imports,
-                                      const flirt::FlirtSignatureSet& sigs) {
-    // The discovery engine runs the ordered passes and per-function analysis internally.
-    // Only the caller edges are added here, being a whole-image view
-    RecoveredImage out = viv::discover_functions(image, disasm, imports, sigs);
-    fill_callers(out.functions);
     return out;
 }
 

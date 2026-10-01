@@ -4,6 +4,7 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/imports.h"
+#include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_image.h"
 
 #include <utility>
@@ -35,16 +36,13 @@ PapaNativeBackend::build(const ::papa::pe::PeImage& image,
     // Discovery and the instruction extractors share this one table
     ImportTable imports = build_import_table(image);
 
-    auto cfg_result = cfg::recover(image, disasm, imports, sigs);
-    if (!cfg_result) {
-        return ::papa::Unexpected{cfg_result.error()};
-    }
+    RecoveredImage recovered = viv::discover_functions(image, disasm, imports, sigs);
 
     return PapaNativeBackend(image,
                              std::move(disasm),
-                             std::move(cfg_result->functions),
+                             std::move(recovered.functions),
                              std::move(imports),
-                             std::move(cfg_result->library_names));
+                             std::move(recovered.library_names));
 }
 
 const ::papa::pe::PeImage& PapaNativeBackend::image() const noexcept {

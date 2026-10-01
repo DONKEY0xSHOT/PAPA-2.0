@@ -5,6 +5,8 @@
 #include <cstring>
 #include <optional>
 #include <span>
+#include <unordered_map>
+#include <vector>
 
 #include "papa/constants.h"
 #include "papa/exceptions.h"
@@ -202,6 +204,29 @@ std::vector<std::uint64_t> reloc_pointer_sites(const pe::PeImage& image) {
     return sites;
 }
 
+// Build the reverse-edge map: callees across all functions become callers
+void fill_callers(std::vector<Function>& funcs) {
+    std::unordered_map<std::uint64_t, std::size_t> by_va;
+    by_va.reserve(funcs.size());
+    for (std::size_t i = 0; i < funcs.size(); ++i) {
+        by_va.emplace(funcs[i].va, i);
+    }
+    for (const auto& caller : funcs) {
+        for (std::uint64_t callee_va : caller.callees) {
+            auto it = by_va.find(callee_va);
+            if (it == by_va.end()) {
+                continue;
+            }
+            funcs[it->second].callers.push_back(caller.va);
+        }
+    }
+    // Deduplicate per callee so one caller with two call sites counts once
+    for (auto& f : funcs) {
+        std::sort(f.callers.begin(), f.callers.end());
+        f.callers.erase(std::unique(f.callers.begin(), f.callers.end()), f.callers.end());
+    }
+}
+
 }  // namespace
 
 RecoveredImage
@@ -339,6 +364,9 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm,
     RecoveredImage out;
     out.functions     = disc.materialize_functions();
     out.library_names = flirt_analyzer.library_names();
+    // The caller edges are a whole-image view, so they are added once every function
+    // is known
+    fill_callers(out.functions);
     return out;
 }
 

@@ -40,3 +40,31 @@ TEST_CASE("discovery engine: recovers the entry point and a non-empty function s
     CHECK(std::any_of(funcs.begin(), funcs.end(),
                       [entry](const pn::Function& f) { return f.va == entry; }));
 }
+
+TEST_CASE("discovery engine: notepad.exe recovers the entry point and fills caller backlinks") {
+    const auto path = papa_tests::fixture_path("notepad.exe");
+    if (!papa_tests::fixture_available(path)) {
+        MESSAGE("fixture missing: notepad.exe");
+        return;
+    }
+    auto img = papa::pe::PeParser::parse_file(path);
+    REQUIRE(img.has_value());
+    const pn::Disassembler disasm(img->is_64bit());
+    const auto imports = pn::build_import_table(*img);
+
+    const auto rec =
+        pn::viv::discover_functions(*img, disasm, imports, papa_tests::shared_flirt_sigs());
+    const std::vector<pn::Function>& funcs = rec.functions;
+
+    // A soft floor
+    CHECK(funcs.size() >= 50);
+
+    // The entry point must appear as a recovered function
+    const std::uint64_t entry_va = img->image_base() + img->entry_point_rva();
+    CHECK(std::any_of(funcs.begin(), funcs.end(),
+                      [entry_va](const pn::Function& f) { return f.va == entry_va; }));
+
+    // Caller backlinks must be filled for at least one recovered function
+    CHECK(std::any_of(funcs.begin(), funcs.end(),
+                      [](const pn::Function& f) { return !f.callers.empty(); }));
+}
