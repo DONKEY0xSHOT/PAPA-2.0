@@ -4,80 +4,21 @@
 
 #include "papa/features/extractors/papa_native/viv/flirt_analysis.h"
 
-#include <algorithm>
-#include <cstddef>
+#include "test_support.h"
+
 #include <cstdint>
-#include <optional>
 #include <span>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
 namespace viv   = papa::features::extractors::papa_native::viv;
 
-namespace {
-
-// A scriptable FunctionContext standing in for the in-progress workspace
-class MockContext : public flirt::FunctionContext {
-public:
-    std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> code;
-    std::unordered_map<std::uint64_t, flirt::FlirtXref>          xrefs;
-    std::unordered_set<std::uint64_t>                            functions;
-
-    [[nodiscard]] std::span<const std::uint8_t>
-    code_at(std::uint64_t va, std::size_t max_len) const override {
-        const auto it = code.find(va);
-        if (it == code.end()) {
-            return {};
-        }
-        return std::span<const std::uint8_t>(
-            it->second.data(), std::min(max_len, it->second.size()));
-    }
-
-    [[nodiscard]] std::optional<flirt::FlirtXref>
-    xref_from(std::uint64_t site_va) const override {
-        const auto it = xrefs.find(site_va);
-        return it == xrefs.end() ? std::nullopt
-                                 : std::optional<flirt::FlirtXref>{it->second};
-    }
-
-    [[nodiscard]] std::optional<std::string_view>
-    import_name(std::uint64_t) const override {
-        return std::nullopt;
-    }
-
-    [[nodiscard]] bool is_function_entry(std::uint64_t va) const override {
-        return functions.count(va) != 0;
-    }
-};
-
-// A matcher yielding the modules whose key byte leads the buffer
-flirt::ModuleMatchFn byte_dispatch(
-    std::unordered_map<std::uint8_t, std::vector<const flirt::FlirtModule*>> table) {
-    return [table = std::move(table)](std::span<const std::uint8_t> b)
-               -> std::vector<const flirt::FlirtModule*> {
-        if (b.empty()) {
-            return {};
-        }
-        const auto it = table.find(b[0]);
-        return it == table.end() ? std::vector<const flirt::FlirtModule*>{}
-                                 : it->second;
-    };
-}
-
-flirt::FlirtModule public_module(std::string name) {
-    flirt::FlirtModule m;
-    m.names.push_back({0, std::move(name), flirt::FlirtNameType::kPublic});
-    return m;
-}
-
-}  // namespace
+using papa_tests::byte_dispatch;
+using papa_tests::MockFlirtContext;
+using papa_tests::public_module;
 
 TEST_CASE("flirt analysis: a local name creates its function and names it library") {
-    MockContext ctx;
+    MockFlirtContext ctx;
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x11U, 0x00U, 0x00U};
 
@@ -105,7 +46,7 @@ TEST_CASE("flirt analysis: a local name creates its function and names it librar
 }
 
 TEST_CASE("flirt analysis: a public name never creates a function") {
-    MockContext ctx;
+    MockFlirtContext ctx;
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x12U, 0x00U, 0x00U};
 
@@ -128,7 +69,7 @@ TEST_CASE("flirt analysis: a public name never creates a function") {
 }
 
 TEST_CASE("flirt analysis: a function an earlier tree named is skipped by later trees") {
-    MockContext ctx;
+    MockFlirtContext ctx;
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x13U, 0x00U, 0x00U};
 
@@ -157,7 +98,7 @@ TEST_CASE("flirt analysis: a function an earlier tree named is skipped by later 
 }
 
 TEST_CASE("flirt analysis: an unmatched function is named by a later tree") {
-    MockContext ctx;
+    MockFlirtContext ctx;
     ctx.functions.insert(0x1000U);
     ctx.code[0x1000U] = {0x14U, 0x00U, 0x00U};
 

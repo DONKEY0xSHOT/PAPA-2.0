@@ -4,29 +4,13 @@
 
 #include "papa/features/extractors/papa_native/flirt/flirt_tree.h"
 
+#include "test_support.h"
+
 #include <array>
 #include <cstdint>
 #include <memory>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
-
-namespace {
-
-flirt::FlirtPattern make_pattern(std::initializer_list<int> bytes) {
-    flirt::FlirtPattern pat;
-    pat.length = 0;
-    for (int b : bytes) {
-        if (b < 0) {
-            pat.wildcard.set(pat.length);
-        } else {
-            pat.bytes[pat.length] = static_cast<std::uint8_t>(b);
-        }
-        pat.length = static_cast<std::uint8_t>(pat.length + 1U);
-    }
-    return pat;
-}
-
-}  // namespace
 
 TEST_CASE("flirt_tree: empty pattern matches empty buffer and any buffer") {
     flirt::FlirtPattern pat;
@@ -36,7 +20,7 @@ TEST_CASE("flirt_tree: empty pattern matches empty buffer and any buffer") {
 }
 
 TEST_CASE("flirt_tree: pattern without wildcards demands exact match") {
-    const auto pat = make_pattern({0x48, 0x83, 0xEC});
+    const auto pat = papa_tests::pattern({0x48, 0x83, 0xEC});
     constexpr std::array<std::uint8_t, 4> ok      = {0x48, 0x83, 0xEC, 0x28};
     constexpr std::array<std::uint8_t, 4> diff    = {0x48, 0x83, 0xED, 0x28};
     constexpr std::array<std::uint8_t, 2> shorter = {0x48, 0x83};
@@ -46,7 +30,7 @@ TEST_CASE("flirt_tree: pattern without wildcards demands exact match") {
 }
 
 TEST_CASE("flirt_tree: pattern with wildcards matches any byte at masked positions") {
-    const auto pat = make_pattern({0x48, -1, 0xEC, -1});  // -1 = wildcard
+    const auto pat = papa_tests::pattern({0x48, -1, 0xEC, -1});  // -1 = wildcard
     constexpr std::array<std::uint8_t, 4> a = {0x48, 0x83, 0xEC, 0x28};
     constexpr std::array<std::uint8_t, 4> b = {0x48, 0x00, 0xEC, 0xFF};
     constexpr std::array<std::uint8_t, 4> c = {0x48, 0x83, 0xED, 0x28};  // fixed pos differs

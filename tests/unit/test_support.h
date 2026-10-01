@@ -6,6 +6,8 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
+#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
+#include "papa/features/extractors/papa_native/flirt/flirt_tree.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
@@ -21,6 +23,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -150,6 +154,209 @@ make_span_reader(std::span<const std::byte> region, std::uint64_t base_va,
         const std::size_t avail = std::min<std::size_t>(
             papa::constants::kMaxInsnBytes, region.size() - static_cast<std::size_t>(off));
         return dis->decode(region.subspan(static_cast<std::size_t>(off), avail), va);
+    };
+}
+
+/// Builds FLIRT .sig bytes one field at a time, each in its on-disk encoding
+class SigWriter {
+public:
+    std::vector<std::uint8_t> buf;
+
+    void u8(std::uint8_t v) { buf.push_back(v); }
+
+    void u16_le(std::uint16_t v) {
+        buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
+        buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
+    }
+
+    /// Big-endian, the encoding of the module CRC16
+    void u16_be(std::uint16_t v) {
+        buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
+        buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
+    }
+
+    void u32_le(std::uint32_t v) {
+        for (int i = 0; i < 4; ++i) {
+            buf.push_back(static_cast<std::uint8_t>((v >> (8 * i)) & 0xFFU));
+        }
+    }
+
+    void zeroes(std::size_t n) { buf.insert(buf.end(), n, std::uint8_t{0}); }
+
+    /// FLAIR vint16. Values below 0x80 take one byte, larger ones two with the lead
+    /// byte's high bit set
+    void vle16(std::uint16_t v) {
+        if (v < 0x80U) {
+            buf.push_back(static_cast<std::uint8_t>(v));
+            return;
+        }
+        buf.push_back(static_cast<std::uint8_t>(0x80U | ((v >> 8) & 0x7FU)));
+        buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
+    }
+
+    /// A node child header with no wildcards: the length, a clear variant mask, then
+    /// the literal bytes
+    void child_pattern(std::span<const std::uint8_t> pattern_bytes) {
+        vle16(static_cast<std::uint16_t>(pattern_bytes.size()));
+        vle16(0);
+        buf.insert(buf.end(), pattern_bytes.begin(), pattern_bytes.end());
+    }
+
+    /// A node child header with wildcards. Mask bit (length-1-i) marks position i
+    void child_pattern_masked(std::uint16_t length, std::uint16_t mask,
+                              std::span<const std::uint8_t> literals) {
+        vle16(length);
+        vle16(mask);
+        buf.insert(buf.end(), literals.begin(), literals.end());
+    }
+
+    /// A module body without its crc_len and crc16: the function size, one name at
+    /// relative offset zero, then the trailing flags byte
+    void module_body(std::uint32_t function_size, std::string_view name,
+                     std::uint8_t trailing_flags) {
+        vle16(static_cast<std::uint16_t>(function_size));
+        vle16(0);
+        for (const char c : name) { buf.push_back(static_cast<std::uint8_t>(c)); }
+        u8(trailing_flags);
+    }
+
+    /// A name record: the relative offset, a name-flag byte when non-zero, the name,
+    /// then the trailing flags byte that ends it
+    void name_record(std::uint16_t relative_offset, std::uint8_t name_flags,
+                     std::string_view name, std::uint8_t trailing_flags) {
+        vle16(relative_offset);
+        if (name_flags != 0U) { u8(name_flags); }
+        for (const char c : name) { buf.push_back(static_cast<std::uint8_t>(c)); }
+        u8(trailing_flags);
+    }
+};
+
+/// Offset of the little-endian features word inside every .sig header
+inline constexpr std::size_t kSigFeaturesOffset = 16;
+
+/// A minimal well-formed .sig header of the given version, marked compressed, with a
+/// library name of ln_len letters
+[[nodiscard]] inline std::vector<std::uint8_t> sig_header(std::uint8_t version,
+                                                          std::uint8_t ln_len = 0) {
+    SigWriter w;
+    w.buf = {'I', 'D', 'A', 'S', 'G', 'N'};
+    w.u8(version);
+    w.u8(0x01);             // arch x86
+    w.u32_le(0x00000002U);  // file_types
+    w.u16_le(0x0003U);      // os_types
+    w.u16_le(0x0004U);      // app_types
+    w.u16_le(0x0010U);      // features, compressed is 0x10
+    w.u16_le(0x0007U);      // old_n_functions
+    w.u16_le(0xABCDU);      // pattern_crc16
+    w.zeroes(12);           // ctype
+    w.u8(ln_len);
+    w.u16_le(0x1234U);      // ctypes_crc16
+    if (version >= 9) {
+        w.u32_le(0x0000002AU);  // n_functions
+    }
+    if (version >= 10) {
+        w.u16_le(0x0020U);  // pattern_size
+        w.u16_le(0x0000U);  // unknown
+    }
+    for (std::uint8_t i = 0; i < ln_len; ++i) {
+        w.buf.push_back(static_cast<std::uint8_t>('a' + (i % 26)));
+    }
+    return w.buf;
+}
+
+/// Clears the compression bit so the body that follows reads as plain tree bytes
+inline void clear_compression_bit(std::vector<std::uint8_t>& header) {
+    header[kSigFeaturesOffset] =
+        static_cast<std::uint8_t>(header[kSigFeaturesOffset] & ~0x10U);
+}
+
+/// A v10 header with compression cleared, followed by body
+[[nodiscard]] inline std::vector<std::uint8_t> sig_with_body(std::span<const std::uint8_t> body) {
+    auto sig = sig_header(10);
+    clear_compression_bit(sig);
+    sig.insert(sig.end(), body.begin(), body.end());
+    return sig;
+}
+
+/// A FlirtPattern from a byte list starting at offset 0. A negative entry is a wildcard
+[[nodiscard]] inline papa::features::extractors::papa_native::flirt::FlirtPattern
+pattern(std::initializer_list<int> values) {
+    papa::features::extractors::papa_native::flirt::FlirtPattern pat;
+    pat.length = 0;
+    for (const int b : values) {
+        if (b < 0) {
+            pat.wildcard.set(pat.length);
+        } else {
+            pat.bytes[pat.length] = static_cast<std::uint8_t>(b);
+        }
+        pat.length = static_cast<std::uint8_t>(pat.length + 1U);
+    }
+    return pat;
+}
+
+/// A scriptable FLIRT FunctionContext. Each answer comes from the matching map
+class MockFlirtContext : public papa::features::extractors::papa_native::flirt::FunctionContext {
+public:
+    std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> code;
+    std::unordered_map<std::uint64_t,
+                       papa::features::extractors::papa_native::flirt::FlirtXref> xrefs;
+    std::unordered_map<std::uint64_t, std::string> imports;
+    std::unordered_set<std::uint64_t>              functions;
+
+    [[nodiscard]] std::span<const std::uint8_t>
+    code_at(std::uint64_t va, std::size_t max_len) const override {
+        const auto it = code.find(va);
+        if (it == code.end()) {
+            return {};
+        }
+        return std::span<const std::uint8_t>(it->second.data(),
+                                              std::min(max_len, it->second.size()));
+    }
+
+    [[nodiscard]] std::optional<papa::features::extractors::papa_native::flirt::FlirtXref>
+    xref_from(std::uint64_t site_va) const override {
+        const auto it = xrefs.find(site_va);
+        if (it == xrefs.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+    [[nodiscard]] std::optional<std::string_view> import_name(std::uint64_t va) const override {
+        const auto it = imports.find(va);
+        if (it == imports.end()) {
+            return std::nullopt;
+        }
+        return std::string_view(it->second);
+    }
+
+    [[nodiscard]] bool is_function_entry(std::uint64_t va) const override {
+        return functions.find(va) != functions.end();
+    }
+};
+
+/// A FLIRT module carrying one public name at offset 0
+[[nodiscard]] inline papa::features::extractors::papa_native::flirt::FlirtModule
+public_module(std::string name) {
+    papa::features::extractors::papa_native::flirt::FlirtModule m;
+    m.names.push_back(
+        {0, std::move(name), papa::features::extractors::papa_native::flirt::FlirtNameType::kPublic});
+    return m;
+}
+
+/// A module matcher that yields the modules keyed by the first byte of the buffer
+[[nodiscard]] inline papa::features::extractors::papa_native::flirt::ModuleMatchFn byte_dispatch(
+    std::unordered_map<std::uint8_t,
+                       std::vector<const papa::features::extractors::papa_native::flirt::FlirtModule*>>
+        table) {
+    using papa::features::extractors::papa_native::flirt::FlirtModule;
+    return [table = std::move(table)](std::span<const std::uint8_t> b)
+               -> std::vector<const FlirtModule*> {
+        if (b.empty()) {
+            return {};
+        }
+        const auto it = table.find(b[0]);
+        return it == table.end() ? std::vector<const FlirtModule*>{} : it->second;
     };
 }
 
