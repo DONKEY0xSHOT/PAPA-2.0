@@ -13,10 +13,52 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
+
+namespace {
+
+// One module with three names, a tail byte and a referenced function. Its last name ends
+// with last_flags, which mark the tail bytes and references and may chain more modules
+void rich_module(papa_tests::SigWriter& body, std::uint8_t last_flags) {
+    body.vle16(0x40);  // function_size
+    // Three names: public foo @rel 0, local bar @rel +5, public baz @rel +3.
+    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta)
+    constexpr std::uint8_t kMorePublicNames = 0x01;
+    constexpr std::uint8_t kLocalFlag       = 0x02;
+    body.name_record(0, 0,          "foo", kMorePublicNames);
+    body.name_record(5, kLocalFlag, "bar", kMorePublicNames);
+    body.name_record(3, 0,          "baz", last_flags);
+    // Tail bytes: count 1, absolute offset 0x20, value 0xAB
+    body.vle16(1);
+    body.vle16(0x20);
+    body.u8(0xAB);
+    // Referenced functions: count 1, absolute offset 0x10, name "malloc"
+    body.vle16(1);
+    body.vle16(0x10);
+    body.u8(6);
+    for (const char c : std::string_view{"malloc"}) {
+        body.u8(static_cast<std::uint8_t>(c));
+    }
+}
+
+// The trailing flags that announce tail bytes and referenced functions
+constexpr std::uint8_t kTailAndRefs = 0x02 | 0x04;
+
+// A sig of the given version with compression cleared, followed by body
+[[nodiscard]] std::vector<std::uint8_t> plain_sig(std::uint8_t version,
+                                                  std::span<const std::uint8_t> body) {
+    auto sig = papa_tests::sig_header(version);
+    papa_tests::clear_compression_bit(sig);
+    sig.insert(sig.end(), body.begin(), body.end());
+    return sig;
+}
+
+}  // namespace
 
 TEST_CASE("flirt_reader: parse_header rejects a short buffer, a wrong magic, an unsupported version and a cut library name") {
     const auto with_version = [](std::uint8_t v) {
@@ -226,7 +268,7 @@ TEST_CASE("flirt_reader: leaf with two colliding modules") {
     CHECK(child->leaf_modules[1].tail_crc16 == 0x1234U);
 }
 
-TEST_CASE("flirt_reader: parse_sig_buffer rejects a cut body and an over-long pattern") {
+TEST_CASE("flirt_reader: parse_sig_buffer rejects a cut body, an over-long pattern, a tree past the depth cap and a bad compressed body") {
     papa_tests::SigWriter one_module;
     one_module.vle16(1);
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
@@ -243,23 +285,48 @@ TEST_CASE("flirt_reader: parse_sig_buffer rejects a cut body and an over-long pa
     long_pattern.vle16(0);  // empty variant mask
     long_pattern.buf.insert(long_pattern.buf.end(), 33, std::uint8_t{0x90});
 
+    // A chain of nodes with one child each and an empty pattern, so a level is the two
+    // bytes 0x01 0x00 and carries no mask or pattern bytes
+    const auto chain = [](std::size_t levels) {
+        std::vector<std::uint8_t> body;
+        for (std::size_t i = 0; i < levels; ++i) {
+            body.push_back(0x01);
+            body.push_back(0x00);
+        }
+        return papa_tests::sig_with_body(body);
+    };
+    const auto cut = [](std::vector<std::uint8_t> sig, std::size_t drop) {
+        sig.resize(sig.size() - drop);
+        return sig;
+    };
+    // The header keeps its compressed bit, and the body is no zlib stream
+    auto not_zlib = papa_tests::sig_header(10);
+    not_zlib.insert(not_zlib.end(), {0x01, 0x02, 0x03});
+
     struct Row {
         std::string_view          label;
-        std::vector<std::uint8_t> body;
-        std::size_t               drop;
+        std::vector<std::uint8_t> sig;
         papa::ErrorKind           kind;
     };
     const std::vector<Row> rows{
         // Dropping 2 bytes cuts the trailing flags and the last name byte
-        {"a body cut short", one_module.buf, 2, papa::ErrorKind::kFlirtTruncated},
-        {"a pattern longer than the cap is a bad node", long_pattern.buf, 0,
+        {"a body cut short", cut(papa_tests::sig_with_body(one_module.buf), 2),
+         papa::ErrorKind::kFlirtTruncated},
+        {"a pattern longer than the cap is a bad node", papa_tests::sig_with_body(long_pattern.buf),
          papa::ErrorKind::kFlirtBadNode},
+        {"a chain two levels past the depth cap", chain(flirt::kMaxTreeDepth + 2U),
+         papa::ErrorKind::kFlirtTooDeep},
+        {"a chain one level past the depth cap", chain(flirt::kMaxTreeDepth + 1U),
+         papa::ErrorKind::kFlirtTooDeep},
+        // Its last node sits at the cap and finds no child count to read
+        {"a chain that reaches the depth cap is only cut short", chain(flirt::kMaxTreeDepth),
+         papa::ErrorKind::kFlirtTruncated},
+        {"a compressed body that is no zlib stream", not_zlib,
+         papa::ErrorKind::kFlirtBadCompressedStream},
     };
     for (const Row& row : rows) {
         CAPTURE(row.label);
-        auto sig = papa_tests::sig_with_body(row.body);
-        sig.resize(sig.size() - row.drop);
-        const auto r = flirt::parse_sig_buffer(sig);
+        const auto r = flirt::parse_sig_buffer(row.sig);
         CHECK_FALSE(r.has_value());
         if (!r.has_value()) { CHECK(r.error().kind == row.kind); }
     }
@@ -332,27 +399,7 @@ TEST_CASE("flirt_reader: a module retains names, tail bytes, and references") {
     body.vle16(0);                                // leaf
     body.u8(0x08);                                // crc_len
     body.u16_be(0x1234);                          // crc16
-
-    body.vle16(0x40);                             // function_size
-    // Three names: public foo @rel 0, local bar @rel +5, public baz @rel +3.
-    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta)
-    constexpr std::uint8_t kMorePublicNames = 0x01;
-    constexpr std::uint8_t kLocalFlag       = 0x02;
-    constexpr std::uint8_t kTailAndRefs     = 0x02 | 0x04;
-    body.name_record(0, 0,          "foo", kMorePublicNames);
-    body.name_record(5, kLocalFlag, "bar", kMorePublicNames);
-    body.name_record(3, 0,          "baz", kTailAndRefs);
-    // Tail bytes: count 1, absolute offset 0x20, value 0xAB
-    body.vle16(1);
-    body.vle16(0x20);
-    body.u8(0xAB);
-    // Referenced functions: count 1, absolute offset 0x10, name "malloc"
-    body.vle16(1);
-    body.vle16(0x10);
-    body.u8(6);
-    for (const char c : std::string_view{"malloc"}) {
-        body.u8(static_cast<std::uint8_t>(c));
-    }
+    rich_module(body, kTailAndRefs);
 
     const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
@@ -406,4 +453,70 @@ TEST_CASE("flirt_reader: leaf with two distinct-crc module groups") {
     CHECK(child->leaf_modules[0].tail_length == 0x08U);
     CHECK(child->leaf_modules[1].tail_crc16 == 0xBBBBU);
     CHECK(child->leaf_modules[1].tail_length == 0x0CU);
+}
+
+TEST_CASE("flirt_reader: every cut of a rich sig is truncated at versions 8, 9 and 10") {
+    // Two root children. The first has a masked pattern over an internal node whose leaf
+    // holds the rich module, one sharing its crc and a second crc group
+    papa_tests::SigWriter body;
+    body.vle16(2);
+    const std::array<std::uint8_t, 2> masked{0x55, 0xEC};
+    body.child_pattern_masked(3, 0x02, masked);
+    body.vle16(1);  // internal, one child
+    const std::array<std::uint8_t, 2> inner{0x8B, 0xEC};
+    body.child_pattern(inner);
+    body.vle16(0);  // leaf
+    body.u8(0x08);
+    body.u16_be(0x1234);
+    rich_module(body, kTailAndRefs | 0x08);  // a module with the same crc follows
+    body.module_body(0x18, "same", 0x10);    // then a second crc group
+    body.u8(0x0C);
+    body.u16_be(0xBBBB);
+    body.module_body(0x20, "group", 0x00);
+    // The second child is a plain leaf whose reference spells its name length as a vint
+    const std::array<std::uint8_t, 1> plain{0x90};
+    body.child_pattern(plain);
+    body.vle16(0);  // leaf
+    body.u8(0x04);
+    body.u16_be(0xCCCC);
+    body.vle16(0x10);  // function_size
+    body.name_record(0, 0, "last", 0x04);
+    body.vle16(1);     // one reference
+    body.vle16(0x08);
+    body.u8(0);        // the length follows as a vint
+    body.vle16(3);
+    for (const char c : std::string_view{"abc"}) {
+        body.u8(static_cast<std::uint8_t>(c));
+    }
+
+    // Every value is below 0x80, so the same bytes read alike under each version's widths
+    for (const std::uint8_t version : {std::uint8_t{8}, std::uint8_t{9}, std::uint8_t{10}}) {
+        CAPTURE(static_cast<int>(version));
+        const auto sig   = plain_sig(version, body.buf);
+        const auto whole = flirt::parse_sig_buffer(sig);
+        REQUIRE(whole.has_value());
+        CHECK(whole->module_count() == 4U);
+        REQUIRE(whole->root() != nullptr);
+        CHECK(whole->root()->children.size() == 2U);
+
+        const std::size_t header        = flirt::header_size_for_version(version);
+        std::size_t       problem_count = 0;
+        std::string       problems;
+        for (std::size_t n = 0; n < sig.size(); ++n) {
+            const auto r = flirt::parse_sig_buffer(std::span<const std::uint8_t>(sig.data(), n));
+            std::string problem;
+            if (r.has_value()) {
+                problem = "parsed";
+            } else if (r.error().kind != papa::ErrorKind::kFlirtTruncated &&
+                       (n >= header || r.error().kind != papa::ErrorKind::kFlirtBadMagic)) {
+                problem = "an unexpected error kind, " + r.error().detail;
+            }
+            // The first few problems name their prefix, and the rest are only counted
+            if (!problem.empty() && ++problem_count <= 8U) {
+                problems.append(std::to_string(n)).append(" bytes: ").append(problem).append("\n");
+            }
+        }
+        CHECK(problems == "");
+        CHECK(problem_count == 0U);
+    }
 }
