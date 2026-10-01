@@ -57,16 +57,7 @@ std::vector<FeatureWithAddress>
 extract_file_import_names(const ::papa::pe::PeImage& image) {
     std::vector<FeatureWithAddress> out;
     for (const auto& imp : image.imports()) {
-        // Build the symbol token
-        // Ordinals get the canonical "#<n>" form
-        std::string symbol;
-        if (imp.by_ordinal) {
-            symbol.reserve(2 + 10);
-            symbol.push_back('#');
-            symbol.append(std::to_string(imp.ordinal));
-        } else {
-            symbol = imp.name;
-        }
+        const std::string symbol = ::papa::features::extractors::helpers::import_symbol(imp);
         if (symbol.empty()) { continue; }
 
         for (auto& variant :

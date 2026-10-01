@@ -576,16 +576,7 @@ namespace {
 void emit_api_variants(const ::papa::pe::ParsedImport& imp,
                        std::uint64_t                   addr_va,
                        std::vector<FeatureWithAddress>& out) {
-    // For ordinal-only imports the symbol is "#<ordinal>"
-    // Otherwise the symbol is the named import as recorded by the PE parser
-    std::string symbol;
-    if (imp.by_ordinal) {
-        symbol.reserve(2 + 10);
-        symbol.push_back('#');
-        symbol.append(std::to_string(imp.ordinal));
-    } else {
-        symbol = imp.name;
-    }
+    const std::string symbol = ::papa::features::extractors::helpers::import_symbol(imp);
     if (symbol.empty()) { return; }
 
     auto variants = ::papa::features::extractors::helpers::generate_symbols(

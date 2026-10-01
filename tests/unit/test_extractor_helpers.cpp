@@ -3,6 +3,7 @@
 #include "doctest.h"
 
 #include "papa/features/extractors/helpers.h"
+#include "papa/pe/pe_image.h"
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,7 @@
 
 using papa::features::extractors::helpers::carve_pe_files;
 using papa::features::extractors::helpers::generate_symbols;
+using papa::features::extractors::helpers::import_symbol;
 using papa::features::extractors::helpers::reformat_forwarded_export_name;
 using papa::features::extractors::helpers::strip_aw_suffix;
 
@@ -26,6 +28,19 @@ namespace {
 }
 
 }  // namespace
+
+TEST_CASE("helpers: import_symbol is the import name or its ordinal after a hash") {
+    papa::pe::ParsedImport named;
+    named.dll  = "kernel32";
+    named.name = "CreateFileW";
+    CHECK(import_symbol(named) == "CreateFileW");
+
+    papa::pe::ParsedImport by_ordinal;
+    by_ordinal.dll        = "ws2_32";
+    by_ordinal.ordinal    = 115;
+    by_ordinal.by_ordinal = true;
+    CHECK(import_symbol(by_ordinal) == "#115");
+}
 
 TEST_CASE("helpers: strip_aw_suffix returns the base only when suffix matches") {
     auto a = strip_aw_suffix("CreateFileA");

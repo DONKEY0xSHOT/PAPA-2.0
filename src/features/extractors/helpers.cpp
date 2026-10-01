@@ -1,6 +1,7 @@
 #include "papa/features/extractors/helpers.h"
 
 #include "papa/constants.h"
+#include "papa/pe/pe_image.h"
 #include "papa/util/string_utils.h"
 
 #include <algorithm>
@@ -94,6 +95,11 @@ generate_symbols(std::string_view dll, std::string_view symbol, bool include_dll
         out.emplace_back(*base);
     }
     return out;
+}
+
+std::string import_symbol(const ::papa::pe::ParsedImport& imp) {
+    if (imp.by_ordinal) { return "#" + std::to_string(imp.ordinal); }
+    return imp.name;
 }
 
 std::string reformat_forwarded_export_name(std::string_view forwarder) {
