@@ -24,6 +24,27 @@ namespace {
 
 namespace base = ::papa::features::extractors;
 
+// Per-instruction result: post-injection feature set plus the rule matches
+struct InstructionCapabilities {
+    features::FeatureSet  features;
+    engine::MatchResults  matches;
+};
+
+// Per-basic-block result, accumulating the contained instruction matches too
+struct BasicBlockCapabilities {
+    features::FeatureSet  features;
+    engine::MatchResults  matches;
+    engine::MatchResults  insn_matches;
+};
+
+// Per-function aggregate over all contained BBs and instructions
+struct CodeCapabilities {
+    engine::MatchResults  function_matches;
+    engine::MatchResults  bb_matches;
+    engine::MatchResults  insn_matches;
+    std::size_t           feature_count{0};
+};
+
 // One recovered function's analysis output, held until the ordered reduction
 struct FunctionSlot {
     CodeCapabilities  caps;
