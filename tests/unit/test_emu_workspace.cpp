@@ -6,7 +6,10 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 namespace emu = papa::features::extractors::papa_native::emu;
@@ -65,58 +68,73 @@ constexpr std::uint64_t kBase = 0x00401000;
 
 }  // namespace
 
-TEST_CASE("emu workspace: prepare taints the entry registers and seeds the stack") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    we.prepare(kBase);
-    // EAX is a taint sentinel, not a real pointer. ESP points into the stack
-    CHECK(we.emu().regs().is_tainted(emu::kRegEax));
-    CHECK_FALSE(we.emu().memory().is_valid_pointer(
-        we.emu().regs().get_register(emu::kRegEax)));
-    CHECK(we.emu().memory().is_valid_pointer(we.emu().regs().get_register(emu::kRegEsp)));
+TEST_CASE("emu workspace: prepare taints the entry registers and points the stack pointer into the stack") {
+    struct Row {
+        std::string_view           label;
+        bool                       is_64bit;
+        std::uint64_t              entry;
+        std::vector<std::uint32_t> tainted;
+        std::uint64_t              sp_above;
+    };
+    const std::vector<Row> rows{
+        {"i386 taints EAX and seeds the stack", false, kBase, {emu::kRegEax}, emu::kStackBase - 1U},
+        // r9 is an amd64 argument register, and the 64-bit stack sits in the sign-extended band
+        {"amd64 taints RAX and R9 and seeds the 64-bit stack", true, 0x140001000ULL,
+         {emu::kRegRax, emu::kRegR9}, 0xFFFFFFFF00000000ULL},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const pn::Disassembler disasm(row.is_64bit);
+        emu::WorkspaceEmulator we(disasm);
+        we.prepare(row.entry);
+        // A tainted register holds a taint sentinel, which is never a real pointer
+        for (const std::uint32_t r : row.tainted) {
+            CAPTURE(r);
+            CHECK(we.emu().regs().is_tainted(r));
+            CHECK_FALSE(we.emu().memory().is_valid_pointer(we.emu().regs().get_register(r)));
+        }
+        const std::uint64_t sp = we.emu().regs().get_register(emu::kRegEsp);
+        CHECK(we.emu().memory().is_valid_pointer(sp));
+        CHECK(sp > row.sp_above);
+    }
 }
 
-TEST_CASE("emu workspace: a straight-line function runs to its ret") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // xor eax, eax / ret
-    static const std::array<std::uint8_t, 3> code = {0x31, 0xC0, 0xC3};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    Recorder rec;
-    const std::size_t steps = we.run_function(kBase, &rec);
-    CHECK(rec.saw(kBase));          // xor
-    CHECK(rec.saw(kBase + 2));      // ret
-    CHECK(steps == 2);
-}
-
-TEST_CASE("emu workspace: a direct jmp is followed") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // jmp +0 (to the next instruction) / ret
-    static const std::array<std::uint8_t, 3> code = {0xEB, 0x00, 0xC3};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    Recorder rec;
-    we.run_function(kBase, &rec);
-    CHECK(rec.saw(kBase));          // jmp
-    CHECK(rec.saw(kBase + 2));      // ret
-}
-
-TEST_CASE("emu workspace: both sides of a conditional branch are explored") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // jz +1 / ret (fall-through) / ret (taken)
-    static const std::array<std::uint8_t, 4> code = {0x74, 0x01, 0xC3, 0xC3};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    Recorder rec;
-    we.run_function(kBase, &rec);
-    CHECK(rec.saw(kBase + 2));      // fall-through ret
-    CHECK(rec.saw(kBase + 3));      // taken ret
+TEST_CASE("emu workspace: run_function follows straight lines, jumps and both sides of a branch to each ret") {
+    struct Row {
+        std::string_view           label;
+        bool                       is_64bit;
+        std::uint64_t              base;
+        std::vector<std::uint8_t>  code;
+        std::vector<std::uint64_t> visited;
+        std::size_t                steps;
+    };
+    const std::vector<Row> rows{
+        // xor eax, eax / ret
+        {"a straight-line function runs to its ret", false, kBase, {0x31, 0xC0, 0xC3},
+         {kBase, kBase + 2}, 2},
+        // jmp +0 (to the next instruction) / ret
+        {"a direct jmp is followed", false, kBase, {0xEB, 0x00, 0xC3}, {kBase, kBase + 2}, 2},
+        // jz +1 / ret (fall-through) / ret (taken)
+        {"both sides of a conditional branch are explored", false, kBase, {0x74, 0x01, 0xC3, 0xC3},
+         {kBase + 2, kBase + 3}, 3},
+        // xor rax, rax / ret (REX.W 31 C0 / C3)
+        {"amd64 a 64-bit function runs to its ret", true, 0x140001000ULL, {0x48, 0x31, 0xC0, 0xC3},
+         {0x140001000ULL, 0x140001003ULL}, 2},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const pn::Disassembler disasm(row.is_64bit);
+        emu::WorkspaceEmulator we(disasm);
+        we.add_map(row.base, emu::kMemRead | emu::kMemExec, row.code);
+        we.prepare(row.base);
+        Recorder rec;
+        const std::size_t steps = we.run_function(row.base, &rec);
+        for (const std::uint64_t va : row.visited) {
+            CAPTURE(va);
+            CHECK(rec.saw(va));
+        }
+        CHECK(steps == row.steps);
+    }
 }
 
 TEST_CASE("emu workspace: a call does not recurse and taints the return value") {
@@ -141,94 +159,56 @@ TEST_CASE("emu workspace: a call does not recurse and taints the return value") 
     CHECK(t->type == emu::TaintType::kApiCall);
 }
 
-TEST_CASE("emu workspace: apicall reports the resolved indirect call target") {
+TEST_CASE("emu workspace: apicall reports the call site and the resolved direct or indirect target") {
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> code;
+        std::uint64_t             site;
+    };
+    const std::vector<Row> rows{
+        // mov eax, 0x00402000 / call eax / ret
+        {"an indirect call resolves its target from the emulated eax",
+         {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3}, kBase + 5},
+        // call 0x402000 / ret  (E8 imm32, imm32 = 0x402000 - (0x401000 + 5) = 0x0FFB)
+        {"a direct call reports its target", {0xE8, 0xFB, 0x0F, 0x00, 0x00, 0xC3}, kBase},
+    };
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // mov eax, 0x00402000 / call eax / ret
-    static const std::array<std::uint8_t, 8> code = {
-        0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    ApiCallRecorder rec;
-    we.run_function(kBase, &rec);
-
-    REQUIRE(rec.calls.size() == 1);
-    CHECK(rec.calls[0].site == kBase + 5);       // the `call eax`
-    CHECK(rec.calls[0].target == 0x00402000);    // resolved from the emulated eax
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::WorkspaceEmulator we(disasm);
+        we.add_map(kBase, emu::kMemRead | emu::kMemExec, row.code);
+        we.prepare(kBase);
+        ApiCallRecorder rec;
+        we.run_function(kBase, &rec);
+        CHECK(rec.calls.size() == 1);
+        if (rec.calls.size() != 1) { continue; }
+        CHECK(rec.calls[0].site == row.site);
+        CHECK(rec.calls[0].target == 0x00402000);
+    }
 }
 
-TEST_CASE("emu workspace: apicall reports a direct call target") {
+TEST_CASE("emu workspace: maxhit and the step cap bound a run that would not end") {
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> code;
+        std::uint32_t             maxhit;
+        std::size_t               steps;
+    };
+    const std::vector<Row> rows{
+        // jmp -2 (to itself): executed once, and the second visit hits the cap
+        {"an infinite self-loop is bounded by maxhit", {0xEB, 0xFE}, 1, 1},
+        // A nop sled far longer than the step cap
+        {"a long run is bounded by the step cap", std::vector<std::uint8_t>(0x10000, 0x90),
+         emu::kDefaultMaxHit, emu::kMaxEmuSteps},
+    };
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // call 0x402000 / ret  (E8 imm32, imm32 = 0x402000 - (0x401000 + 5) = 0x0FFB)
-    static const std::array<std::uint8_t, 6> code = {
-        0xE8, 0xFB, 0x0F, 0x00, 0x00, 0xC3};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    ApiCallRecorder rec;
-    we.run_function(kBase, &rec);
-
-    REQUIRE(rec.calls.size() == 1);
-    CHECK(rec.calls[0].site == kBase);
-    CHECK(rec.calls[0].target == 0x00402000);
-}
-
-TEST_CASE("emu workspace: an infinite self-loop is bounded by maxhit") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // jmp -2 (to itself)
-    static const std::array<std::uint8_t, 2> code = {0xEB, 0xFE};
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(kBase);
-
-    const std::size_t steps = we.run_function(kBase, nullptr, /*maxhit=*/1);
-    CHECK(steps == 1);  // executed once, second visit hit the cap
-}
-
-TEST_CASE("emu workspace: a long run is bounded by the step cap") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    emu::WorkspaceEmulator we(disasm);
-    // A nop sled far longer than the step cap
-    static const std::array<std::uint8_t, 0x10000> sled = [] {
-        std::array<std::uint8_t, 0x10000> a{};
-        a.fill(0x90);
-        return a;
-    }();
-    we.add_map(kBase, emu::kMemRead | emu::kMemExec, sled);
-    we.prepare(kBase);
-
-    const std::size_t steps = we.run_function(kBase);
-    CHECK(steps == emu::kMaxEmuSteps);
-    CHECK(steps < sled.size());
-}
-
-// amd64: the workspace emulator must build the 64-bit register model, seed the
-// 64-bit stack band, taint rax..r9, and run 64-bit code
-
-TEST_CASE("emu workspace amd64: prepare taints entry registers and seeds the 64-bit stack") {
-    const pn::Disassembler disasm(/*is_64bit=*/true);
-    emu::WorkspaceEmulator we(disasm);
-    we.prepare(0x140001000ULL);
-    CHECK(we.emu().regs().is_tainted(emu::kRegRax));
-    CHECK(we.emu().regs().is_tainted(emu::kRegR9));   // r9 is an amd64 arg/taint reg
-    const std::uint64_t rsp = we.emu().regs().get_register(emu::kRegRsp);
-    CHECK(we.emu().memory().is_valid_pointer(rsp));   // rsp points into the stack
-    CHECK(rsp > 0xFFFFFFFF00000000ULL);               // the sign-extended 64-bit band
-}
-
-TEST_CASE("emu workspace amd64: a 64-bit function runs to its ret") {
-    const pn::Disassembler disasm(/*is_64bit=*/true);
-    emu::WorkspaceEmulator we(disasm);
-    // xor rax, rax / ret  (REX.W 31 C0 / C3)
-    static const std::array<std::uint8_t, 4> code = {0x48, 0x31, 0xC0, 0xC3};
-    const std::uint64_t base = 0x140001000ULL;
-    we.add_map(base, emu::kMemRead | emu::kMemExec, code);
-    we.prepare(base);
-    Recorder rec;
-    const std::size_t steps = we.run_function(base, &rec);
-    CHECK(rec.saw(base));        // xor rax, rax
-    CHECK(rec.saw(base + 3));    // ret
-    CHECK(steps == 2);
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::WorkspaceEmulator we(disasm);
+        we.add_map(kBase, emu::kMemRead | emu::kMemExec, row.code);
+        we.prepare(kBase);
+        const std::size_t steps = we.run_function(kBase, nullptr, row.maxhit);
+        CHECK(steps == row.steps);
+        CHECK(steps < row.code.size());
+    }
 }

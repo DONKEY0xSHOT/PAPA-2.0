@@ -18,8 +18,11 @@
 #include "test_support.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -56,56 +59,55 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("emu discovery: discover_call_targets collects an executable indirect call target") {
+TEST_CASE("emu discovery: discover_call_targets keeps an executable call target other than the function itself") {
+    struct Row {
+        std::string_view           label;
+        std::vector<std::uint8_t>  caller;
+        std::vector<std::uint8_t>  callee;
+        std::vector<std::uint64_t> seeds;
+    };
+    const std::vector<Row> rows{
+        // 0x401000: mov eax, 0x00402000 / call eax / ret    callee 0x402000: ret
+        {"an executable indirect call target is collected",
+         {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3}, {0xC3}, {0x402000}},
+        // call target 0x402000 is not mapped, so it is not executable code
+        {"a non-executable target is ignored", {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3}, {},
+         {}},
+        // 0x401000: mov eax, 0x00401000 / call eax / ret  (pc == funcva)
+        {"a recursive self-call is ignored", {0xB8, 0x00, 0x10, 0x40, 0x00, 0xFF, 0xD0, 0xC3}, {},
+         {}},
+    };
     const pn::Disassembler disasm(/*is_64bit=*/false);
-    // 0x401000: mov eax, 0x00402000 / call eax / ret    callee 0x402000: ret
-    const emu::ImageMaps maps = make_maps(
-        0x401000, {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3},
-        0x402000, {0xC3});
-    const std::vector<std::uint64_t> seeds =
-        emu::discover_call_targets(maps, disasm, 0x401000);
-    CHECK(seeds == std::vector<std::uint64_t>{0x402000});
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const emu::ImageMaps maps = make_maps(0x401000, row.caller, 0x402000, row.callee);
+        CHECK(emu::discover_call_targets(maps, disasm, 0x401000) == row.seeds);
+    }
 }
 
-TEST_CASE("emu discovery: discover_call_targets ignores a non-executable target") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    // call target 0x402000 is not mapped, so it is not executable code
-    const emu::ImageMaps maps = make_maps(
-        0x401000, {0xB8, 0x00, 0x20, 0x40, 0x00, 0xFF, 0xD0, 0xC3});
-    const std::vector<std::uint64_t> seeds =
-        emu::discover_call_targets(maps, disasm, 0x401000);
-    CHECK(seeds.empty());
-}
-
-TEST_CASE("emu discovery: discover_call_targets ignores a recursive self-call") {
-    const pn::Disassembler disasm(/*is_64bit=*/false);
-    // 0x401000: mov eax, 0x00401000 / call eax / ret  (pc == funcva)
-    const emu::ImageMaps maps = make_maps(
-        0x401000, {0xB8, 0x00, 0x10, 0x40, 0x00, 0xFF, 0xD0, 0xC3});
-    const std::vector<std::uint64_t> seeds =
-        emu::discover_call_targets(maps, disasm, 0x401000);
-    CHECK(seeds.empty());
-}
-
-TEST_CASE("emu discovery: emulate_to_read_register reads a base register set by a lea") {
+TEST_CASE("emu discovery: emulate_to_read_register reads a register at the target, or nothing if it is unreached") {
+    struct Row {
+        std::string_view             label;
+        std::vector<std::uint8_t>    code;
+        std::optional<std::uint64_t> value;
+    };
+    const std::vector<Row> rows{
+        // 0x401000: lea r12, [rip+0xff9], so r12 = 0x401007 + 0xff9 = 0x402000
+        // 0x401007: ret, the target address whose register state is read
+        {"a base register set by a lea", {0x4c, 0x8d, 0x25, 0xf9, 0x0f, 0x00, 0x00, 0xc3},
+         0x402000},
+        // 0x401000: ret immediately, so 0x401007 is never reached
+        {"an unreached target", {0xc3}, std::nullopt},
+    };
     const pn::Disassembler disasm(/*is_64bit=*/true);
-    // 0x401000: lea r12, [rip+0xff9]  -> r12 = 0x401007 + 0xff9 = 0x402000
-    // 0x401007: ret  (the target address whose register state we read)
-    const emu::ImageMaps maps = make_maps(
-        0x401000, {0x4c, 0x8d, 0x25, 0xf9, 0x0f, 0x00, 0x00, 0xc3});
-    const auto value = emu::emulate_to_read_register(
-        maps, disasm, /*funcva=*/0x401000, /*target_va=*/0x401007, ZYDIS_REGISTER_R12);
-    REQUIRE(value.has_value());
-    CHECK(*value == 0x402000);
-}
-
-TEST_CASE("emu discovery: emulate_to_read_register returns nullopt when the target is unreached") {
-    const pn::Disassembler disasm(/*is_64bit=*/true);
-    // 0x401000: ret immediately, so 0x401007 is never reached
-    const emu::ImageMaps maps = make_maps(0x401000, {0xc3});
-    const auto value = emu::emulate_to_read_register(
-        maps, disasm, /*funcva=*/0x401000, /*target_va=*/0x401007, ZYDIS_REGISTER_R12);
-    CHECK_FALSE(value.has_value());
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const emu::ImageMaps maps = make_maps(0x401000, row.code);
+        const auto value = emu::emulate_to_read_register(
+            maps, disasm, /*funcva=*/0x401000, /*target_va=*/0x401007, ZYDIS_REGISTER_R12);
+        CHECK(value.has_value() == row.value.has_value());
+        if (value.has_value() && row.value.has_value()) { CHECK(*value == *row.value); }
+    }
 }
 
 TEST_CASE("emu discovery: find_pointer_candidates keeps the reloc and aligned data pointers that reach code") {
@@ -152,34 +154,33 @@ TEST_CASE("emu discovery: find_pointer_candidates keeps the reloc and aligned da
     }
 }
 
-TEST_CASE("emu discovery: riprel_lea_target computes the lea [rip+disp] pointer") {
+TEST_CASE("emu discovery: riprel_lea_target yields the pointer of a lea [rip+disp] and nothing else") {
+    struct Row {
+        std::string_view             label;
+        std::vector<std::byte>       bytes;
+        std::optional<std::uint64_t> target;
+    };
+    const std::vector<Row> rows{
+        // lea rdx, [rip + 0xFF8], length 7, so target = va + length + disp
+        {"a lea [rip+disp]", papa_tests::byte_vec({0x48, 0x8D, 0x15, 0xF8, 0x0F, 0x00, 0x00}),
+         0x1000ULL + 7ULL + 0xFF8ULL},
+        // mov rdx, [rip + 0xFF8] is a dereference, not an address
+        {"a non-lea rip-relative load",
+         papa_tests::byte_vec({0x48, 0x8B, 0x15, 0xF8, 0x0F, 0x00, 0x00}),
+         std::nullopt},
+        // lea rdx, [rax + 8] depends on run time, so it is not a static pointer
+        {"a lea with a register base", papa_tests::byte_vec({0x48, 0x8D, 0x50, 0x08}),
+         std::nullopt},
+    };
     const pn::Disassembler disasm(/*is_64bit=*/true);
-    // lea rdx, [rip + 0xFF8]  (48 8D 15 F8 0F 00 00), length 7.
-    // target = va + length + disp
-    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x15, 0xF8, 0x0F, 0x00, 0x00);
-    auto lea = disasm.decode(bytes, 0x1000);
-    REQUIRE(lea.has_value());
-    const auto target = emu::riprel_lea_target(*lea);
-    REQUIRE(target.has_value());
-    CHECK(*target == 0x1000ULL + 7ULL + 0xFF8ULL);
-}
-
-TEST_CASE("emu discovery: riprel_lea_target ignores a non-lea rip-relative load") {
-    const pn::Disassembler disasm(/*is_64bit=*/true);
-    // mov rdx, [rip + 0xFF8]  (48 8B 15 ...): a dereference, not an address
-    const auto bytes = papa_tests::bytes(0x48, 0x8B, 0x15, 0xF8, 0x0F, 0x00, 0x00);
-    auto mov = disasm.decode(bytes, 0x1000);
-    REQUIRE(mov.has_value());
-    CHECK_FALSE(emu::riprel_lea_target(*mov).has_value());
-}
-
-TEST_CASE("emu discovery: riprel_lea_target ignores a lea with a register base") {
-    const pn::Disassembler disasm(/*is_64bit=*/true);
-    // lea rdx, [rax + 8]  (48 8D 50 08): runtime-dependent, not a static pointer
-    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x50, 0x08);
-    auto lea = disasm.decode(bytes, 0x1000);
-    REQUIRE(lea.has_value());
-    CHECK_FALSE(emu::riprel_lea_target(*lea).has_value());
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto ins = disasm.decode(row.bytes, 0x1000);
+        REQUIRE(ins.has_value());
+        const auto target = emu::riprel_lea_target(*ins);
+        CHECK(target.has_value() == row.target.has_value());
+        if (target.has_value() && row.target.has_value()) { CHECK(*target == *row.target); }
+    }
 }
 
 TEST_CASE("emu discovery: an x64 function only a lea [rip+] reaches is recovered") {

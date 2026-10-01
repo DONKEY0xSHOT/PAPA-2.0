@@ -6,7 +6,10 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
+#include <vector>
 
 namespace emu = papa::features::extractors::papa_native::emu;
 namespace pn = papa::features::extractors::papa_native;
@@ -55,71 +58,58 @@ bool has_target(const std::vector<emu::Branch>& bs, std::uint64_t va) {
 
 }  // namespace
 
-TEST_CASE("emu branches: a normal instruction has a single fall-through edge") {
-    emu::IntelEmulator e;
-    const std::vector<emu::Branch> bs = e.get_branches(normal_insn(0x1000, 2));
-    REQUIRE(bs.size() == 1);
-    CHECK(bs[0].va == 0x1002ULL);
-    CHECK((bs[0].flags & emu::kBrFall) != 0);
-}
+TEST_CASE("emu branches: get_branches yields each successor edge with its envi flags") {
+    pn::DecodedInsn jmp = normal_insn(0x1000, 2);
+    jmp.zyd_mnem = ZYDIS_MNEMONIC_JMP;
+    jmp.is_jump = true;
+    jmp.is_fallthrough = false;
+    jmp.operand_count = 1;
 
-TEST_CASE("emu branches: an unconditional direct jmp has one target and no fall-through") {
-    emu::IntelEmulator e;
-    pn::DecodedInsn insn;
-    insn.va = 0x1000;
-    insn.length = 2;
-    insn.zyd_mnem = ZYDIS_MNEMONIC_JMP;
-    insn.is_jump = true;
-    insn.is_fallthrough = false;
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kPcRel;
-    op.width_bytes = 4;
-    insn.operands[0] = op;
-    insn.operand_count = 1;
-    insn.branch_target = 0x2000;
-    const std::vector<emu::Branch> bs = e.get_branches(insn);
-    REQUIRE(bs.size() == 1);
-    CHECK(bs[0].va == 0x2000ULL);
-}
+    pn::DecodedInsn jmp_direct = jmp;
+    jmp_direct.operands[0].kind = pn::OperandKind::kPcRel;
+    jmp_direct.operands[0].width_bytes = 4;
+    jmp_direct.branch_target = 0x2000;
 
-TEST_CASE("emu branches: a conditional jump has both a fall-through and a target") {
-    emu::IntelEmulator e;
-    const std::vector<emu::Branch> bs = e.get_branches(jcc_insn(0x2000, 0x1000, 2));
-    REQUIRE(bs.size() == 2);
-    CHECK(has_target(bs, 0x1002));  // fall-through
-    CHECK(has_target(bs, 0x2000));  // taken target
-}
+    pn::DecodedInsn jmp_eax = jmp;
+    jmp_eax.operands[0].kind = pn::OperandKind::kReg;
+    jmp_eax.operands[0].base_reg = ZYDIS_REGISTER_EAX;
+    jmp_eax.operands[0].width_bytes = 4;
 
-TEST_CASE("emu branches: an indirect jmp through a register resolves the register value") {
-    emu::IntelEmulator e;
-    e.regs().set_register(emu::kRegEax, 0x00404000U);
-    pn::DecodedInsn insn;
-    insn.va = 0x1000;
-    insn.length = 2;
-    insn.zyd_mnem = ZYDIS_MNEMONIC_JMP;
-    insn.is_jump = true;
-    insn.is_fallthrough = false;
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kReg;
-    op.base_reg = ZYDIS_REGISTER_EAX;
-    op.width_bytes = 4;
-    insn.operands[0] = op;
-    insn.operand_count = 1;
-    const std::vector<emu::Branch> bs = e.get_branches(insn);
-    REQUIRE(bs.size() == 1);
-    CHECK(bs[0].va == 0x00404000ULL);
-}
+    pn::DecodedInsn ret = normal_insn(0x1000, 1);
+    ret.zyd_mnem = ZYDIS_MNEMONIC_RET;
+    ret.is_return = true;
+    ret.is_fallthrough = false;
+    ret.operand_count = 0;
 
-TEST_CASE("emu branches: a return has no branches") {
-    emu::IntelEmulator e;
-    pn::DecodedInsn insn;
-    insn.va = 0x1000;
-    insn.length = 1;
-    insn.zyd_mnem = ZYDIS_MNEMONIC_RET;
-    insn.is_return = true;
-    insn.is_fallthrough = false;
-    insn.operand_count = 0;
-    CHECK(e.get_branches(insn).empty());
+    struct Row {
+        std::string_view         label;
+        pn::DecodedInsn          ins;
+        std::vector<emu::Branch> edges;
+    };
+    const std::vector<Row> rows{
+        {"a normal instruction has a single fall-through edge", normal_insn(0x1000, 2),
+         {{0x1002, emu::kBrFall}}},
+        {"an unconditional direct jmp has one target and no fall-through", jmp_direct,
+         {{0x2000, 0}}},
+        {"a conditional jump has a conditional fall-through and a conditional target",
+         jcc_insn(0x2000, 0x1000, 2),
+         {{0x1002, emu::kBrCond | emu::kBrFall}, {0x2000, emu::kBrCond}}},
+        {"an indirect jmp through a register resolves the register value", jmp_eax,
+         {{0x00404000, 0}}},
+        {"a return has no branches", ret, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::IntelEmulator e;
+        e.regs().set_register(emu::kRegEax, 0x00404000U);
+        const std::vector<emu::Branch> bs = e.get_branches(row.ins);
+        CHECK(bs.size() == row.edges.size());
+        for (std::size_t i = 0; i < bs.size() && i < row.edges.size(); ++i) {
+            CAPTURE(i);
+            CHECK(bs[i].va == row.edges[i].va);
+            CHECK(bs[i].flags == row.edges[i].flags);
+        }
+    }
 }
 
 TEST_CASE("emu branches: a SIB scale-4 jump table walks the pointer array") {
