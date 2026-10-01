@@ -372,6 +372,25 @@ TEST_CASE("Single-string features hash the tag mixed into the value hash") {
     }
 }
 
+TEST_CASE("Number and OperandNumber hash the payload with its alternative index folded in") {
+    using papa::util::hashing::hash_combine;
+    // One value per alternative, each paired with the hash of its payload alone
+    const std::pair<Number::Value, std::size_t> rows[] = {
+        {Number::Value{std::uint64_t{0x40}}, std::hash<std::uint64_t>{}(0x40)},
+        {Number::Value{std::int64_t{-8}}, std::hash<std::int64_t>{}(-8)},
+        {Number::Value{2.5}, papa::util::hashing::hash_double_bits(2.5)},
+    };
+    for (const auto& [v, payload] : rows) {
+        CAPTURE(v.index());
+        const std::size_t value_hash = hash_combine(payload, v.index());
+        CHECK(make<Number>(v)->hash() ==
+              hash_combine(static_cast<std::size_t>(FeatureTag::kNumber), value_hash));
+        CHECK(make<OperandNumber>(std::size_t{1}, v)->hash() ==
+              hash_combine(static_cast<std::size_t>(FeatureTag::kOperandNumber),
+                           hash_combine(std::hash<std::size_t>{}(1), value_hash)));
+    }
+}
+
 }  // TEST_SUITE
 
 TEST_CASE("feature semantics: matches agrees with evaluate success for every kind") {
