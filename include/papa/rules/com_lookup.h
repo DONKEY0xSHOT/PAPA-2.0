@@ -57,7 +57,6 @@ struct ComEntry {
 [[nodiscard]] const ComEntry* lookup_com(ComKind kind, std::string_view name) noexcept;
 
 // Test-facing accessors for the underlying tables
-// Defined in com_classes.cpp and com_interfaces.cpp respectively
 [[nodiscard]] std::span<const ComEntry> com_class_table()     noexcept;
 [[nodiscard]] std::span<const ComEntry> com_interface_table() noexcept;
 

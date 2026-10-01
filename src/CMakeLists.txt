@@ -72,8 +72,6 @@ set(PAPA_LIB_SOURCES
     rules/parser.cpp
     rules/ruleset.cpp
     rules/com_lookup.cpp
-    rules/com_classes.cpp
-    rules/com_interfaces.cpp
 )
 
 # The vendored capa-rules, compiled in as generated source. Hidden entries are
