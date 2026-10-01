@@ -23,7 +23,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "in-source builds are not permitted; use cmake -S . -B build")
 endif()
 
@@ -40,7 +40,7 @@ option(PAPA_ENABLE_HARDENING    "Enable hardening compiler/linker flags" ON)
 # PAPA's release version, stamped into the binary. CI sets it to the release tag
 set(PAPA_VERSION "0.1.0-dev" CACHE STRING "PAPA release version")
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 include(Hardening)
@@ -53,11 +53,11 @@ papa_set_hardening(papa_project_options)
 
 if(MSVC)
     target_compile_options(papa_project_options INTERFACE
-        "/d1trimfile:${CMAKE_SOURCE_DIR}/")
+        "/d1trimfile:${PROJECT_SOURCE_DIR}/")
 else()
     target_compile_options(papa_project_options INTERFACE
-        "-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/="
-        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
+        "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/="
+        "-ffile-prefix-map=${PROJECT_SOURCE_DIR}/=")
 endif()
 
 # The gcc/clang half of the static-runtime option. CMAKE_MSVC_RUNTIME_LIBRARY

@@ -76,7 +76,7 @@ set(PAPA_LIB_SOURCES
 
 # The vendored capa-rules, compiled in as generated source. Hidden entries are
 # left out, the same as the rule loader does
-set(PAPA_RULES_DIR "${CMAKE_SOURCE_DIR}/third_party/capa-rules")
+set(PAPA_RULES_DIR "${PROJECT_SOURCE_DIR}/third_party/capa-rules")
 file(GLOB_RECURSE PAPA_RULE_GLOB CONFIGURE_DEPENDS "${PAPA_RULES_DIR}/*.yml")
 set(PAPA_RULE_FILES "")
 set(PAPA_RULE_PATHS "")
@@ -91,12 +91,12 @@ list(SORT PAPA_RULE_PATHS)
 
 # The paths reach the generator through a file, as a thousand of them would overflow
 # a Windows command line. It is replaced only on change, so a reconfigure alone is free
-set(PAPA_RULE_LIST "${CMAKE_BINARY_DIR}/generated/embedded_rules.list")
+set(PAPA_RULE_LIST "${PROJECT_BINARY_DIR}/generated/embedded_rules.list")
 file(WRITE "${PAPA_RULE_LIST}.tmp" "${PAPA_RULE_PATHS}")
 file(COPY_FILE "${PAPA_RULE_LIST}.tmp" "${PAPA_RULE_LIST}" ONLY_IF_DIFFERENT)
 file(REMOVE "${PAPA_RULE_LIST}.tmp")
 
-set(PAPA_EMBEDDED_RULES "${CMAKE_BINARY_DIR}/generated/embedded_rules.cpp")
+set(PAPA_EMBEDDED_RULES "${PROJECT_BINARY_DIR}/generated/embedded_rules.cpp")
 add_custom_command(
     OUTPUT "${PAPA_EMBEDDED_RULES}"
     COMMAND "${CMAKE_COMMAND}"
@@ -107,8 +107,8 @@ add_custom_command(
         -DNAMESPACE=papa::rules
         -DTYPE=EmbeddedRule
         -DFUNCTION=embedded_rules
-        -P "${CMAKE_SOURCE_DIR}/cmake/EmbedFiles.cmake"
-    DEPENDS ${PAPA_RULE_FILES} "${PAPA_RULE_LIST}" "${CMAKE_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+        -P "${PROJECT_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+    DEPENDS ${PAPA_RULE_FILES} "${PAPA_RULE_LIST}" "${PROJECT_SOURCE_DIR}/cmake/EmbedFiles.cmake"
     COMMENT "Embedding the vendored capa-rules"
     VERBATIM
 )
@@ -123,14 +123,14 @@ set_source_files_properties(version.cpp PROPERTIES
 
 target_include_directories(papa_lib
     PUBLIC
-        "${CMAKE_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/include"
 )
 
 # embedded_sigs.cpp includes the FLIRT resource id header on MSVC.
 if(MSVC)
     target_include_directories(papa_lib
         PRIVATE
-            "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs"
+            "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs"
     )
 endif()
 

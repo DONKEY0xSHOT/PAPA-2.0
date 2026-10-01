@@ -77,16 +77,16 @@ target_link_libraries(papa_unit_tests
 # so the unit-test binary must carry the same RCDATA resources as papa.exe.
 if(MSVC)
     target_sources(papa_unit_tests PRIVATE
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
     set_source_files_properties(
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
         PROPERTIES COMPILE_OPTIONS
-        "/I${CMAKE_SOURCE_DIR}/third_party/flirt_sigs")
+        "/I${PROJECT_SOURCE_DIR}/third_party/flirt_sigs")
 endif()
 
 # Run from the source root so tests can read the vendored files by relative path
 add_test(NAME papa_unit_tests COMMAND papa_unit_tests
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
 # `papa --version` prints the program file name and the release version, like argparse
 add_test(
