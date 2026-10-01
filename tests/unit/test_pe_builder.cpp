@@ -1,5 +1,5 @@
-// The synthetic-PE builder is the foundation the fixture-free tests stand on, so it
-// is verified against the real parser first
+// Every test that reads a PE stands on the synthetic-PE builder, so it is verified
+// against the real parser first
 
 #include <ostream>
 

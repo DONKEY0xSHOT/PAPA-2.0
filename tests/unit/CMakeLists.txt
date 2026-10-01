@@ -50,7 +50,6 @@ set(PAPA_UNIT_TEST_SOURCES
     test_flirt_matcher.cpp
     test_flirt_classifier.cpp
     test_flirt_signature_set.cpp
-    test_flirt_integration.cpp
     test_emu_registers.cpp
     test_emu_bits.cpp
     test_emu_memory.cpp

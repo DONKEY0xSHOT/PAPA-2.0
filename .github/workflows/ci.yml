@@ -120,8 +120,6 @@ jobs:
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
-      # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so
-      # the suite runs green in CI without the (non-redistributed) samples
       - name: Test (Release)
         run: ctest --test-dir build --output-on-failure -C Release
 
