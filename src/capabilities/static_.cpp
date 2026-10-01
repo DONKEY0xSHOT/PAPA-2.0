@@ -1,5 +1,6 @@
 #include "papa/capabilities/static_.h"
 
+#include "papa/capabilities/common.h"
 #include "papa/engine.h"
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
@@ -99,23 +100,6 @@ void merge_into(::papa::engine::MatchResults& dst,
     }
 }
 
-// Append every (feature, address) pair from src into the target FeatureSet
-// add() handles structural deduplication so the resulting sets remain valid
-void absorb_into(features::FeatureSet&             dst,
-                 std::vector<base::FeatureWithAddress> src) {
-    for (auto& [feat, addr] : src) {
-        dst.add(std::move(feat), addr);
-    }
-}
-
-// Globals (Os, Arch, Format) are constant for the whole image
-void absorb_globals(features::FeatureSet& dst,
-                    const std::vector<base::FeatureWithAddress>& globals) {
-    for (const auto& [feat, addr] : globals) {
-        dst.add(feat, addr);
-    }
-}
-
 // Walk every match in matches and inject MatchedRule features for every rule at every
 // recorded address
 void inject_match_features(features::FeatureSet&                fs,
@@ -141,8 +125,8 @@ find_instruction_capabilities_inner(
     const base::InsnHandle&                        ih,
     const std::vector<base::FeatureWithAddress>&   globals) {
     features::FeatureSet fs;
-    absorb_into(fs, extractor.extract_insn_features(fh, bbh, ih));
-    absorb_globals(fs, globals);
+    fs.add_all(extractor.extract_insn_features(fh, bbh, ih));
+    fs.add_all(globals);
 
     auto [merged_fs, matches] =
         rules.match(::papa::rules::Scope::kInstruction, std::move(fs), ih.addr);
@@ -166,8 +150,8 @@ find_basic_block_capabilities_inner(
         merge_into(insn_matches_acc, std::move(insn_caps.matches));
     }
 
-    absorb_into(bb_fs, extractor.extract_basic_block_features(fh, bbh));
-    absorb_globals(bb_fs, globals);
+    bb_fs.add_all(extractor.extract_basic_block_features(fh, bbh));
+    bb_fs.add_all(globals);
 
     auto [merged_fs, bb_matches] =
         rules.match(::papa::rules::Scope::kBasicBlock, std::move(bb_fs), bbh.addr);
@@ -196,8 +180,8 @@ find_code_capabilities_inner(
         merge_into(insn_matches_acc, std::move(bb_caps.insn_matches));
     }
 
-    absorb_into(fn_fs, extractor.extract_function_features(fh));
-    absorb_globals(fn_fs, globals);
+    fn_fs.add_all(extractor.extract_function_features(fh));
+    fn_fs.add_all(globals);
 
     auto [merged_fs, fn_matches] =
         rules.match(::papa::rules::Scope::kFunction, std::move(fn_fs), fh.addr);
@@ -265,17 +249,8 @@ find_static_capabilities(
 
     // Build the file-scope feature set from extractor-provided features plus
     // injected MatchedRule features for every match seen below file scope
-    features::FeatureSet file_fs;
-    if (cached_file_features != nullptr) {
-        // Shares the immutable feature objects rather than carving the file a
-        // second time. The pre-pass derived them from the same image
-        for (const auto& [feat, addr] : *cached_file_features) {
-            file_fs.add(feat, addr);
-        }
-    } else {
-        absorb_into(file_fs, extractor.extract_file_features());
-    }
-    absorb_into(file_fs, extractor.extract_global_features());
+    features::FeatureSet file_fs =
+        file_scope_feature_set(extractor, cached_file_features, globals);
     inject_match_features(file_fs, rules, all_fn_matches);
     inject_match_features(file_fs, rules, all_bb_matches);
     inject_match_features(file_fs, rules, all_insn_matches);

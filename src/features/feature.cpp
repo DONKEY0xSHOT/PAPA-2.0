@@ -5,7 +5,10 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace papa::features {
 
@@ -60,6 +63,14 @@ void FeatureSet::add(FeaturePtr f, const Address& a) {
             bytes_.push_back(it->first);
         }
     }
+}
+
+void FeatureSet::add_all(std::span<const std::pair<FeaturePtr, Address>> batch) {
+    for (const auto& [f, a] : batch) { add(f, a); }
+}
+
+void FeatureSet::add_all(std::vector<std::pair<FeaturePtr, Address>>&& batch) {
+    for (auto& [f, a] : batch) { add(std::move(f), a); }
 }
 
 void FeatureSet::merge_in(const FeatureSet& other) {

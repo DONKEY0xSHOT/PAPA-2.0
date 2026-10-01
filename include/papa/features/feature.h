@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -76,6 +77,12 @@ public:
 
     void add(FeaturePtr f, const Address& a);
     void merge_in(const FeatureSet& other);
+
+    /// Add every (feature, address) pair, sharing the feature objects with the caller
+    void add_all(std::span<const std::pair<FeaturePtr, Address>> batch);
+
+    /// Add every pair of a batch the caller hands over, moving its feature pointers
+    void add_all(std::vector<std::pair<FeaturePtr, Address>>&& batch);
 
     /// Snapshot of all String features ever inserted into this set
     [[nodiscard]] const std::vector<FeaturePtr>& strings() const noexcept {

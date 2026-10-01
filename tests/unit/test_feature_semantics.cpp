@@ -69,6 +69,27 @@ TEST_CASE("FeatureSet deduplicates structurally equal features") {
     CHECK(it->second.size() == 2);
 }
 
+TEST_CASE("FeatureSet add_all copies or moves a batch and keeps the string index in order") {
+    const std::vector<std::pair<FeaturePtr, Address>> shared = {
+        {make<String>(std::string("foo")), va(0x1)},
+        {make<Section>(std::string(".text")), va(0x2)},
+    };
+    std::vector<std::pair<FeaturePtr, Address>> handed_over = {
+        {make<String>(std::string("bar")), va(0x3)},
+        {make<String>(std::string("foo")), va(0x4)},
+    };
+
+    FeatureSet fs;
+    fs.add_all(shared);
+    fs.add_all(std::move(handed_over));
+    CHECK(shared[0].first != nullptr);
+    CHECK(fs.size() == 3);
+    CHECK(fs.find(make<String>(std::string("foo")))->second.size() == 2);
+    REQUIRE(fs.strings().size() == 2);
+    CHECK(fs.strings()[0].get() == shared[0].first.get());
+    CHECK(fs.strings()[1]->equals(String{"bar"}));
+}
+
 TEST_CASE("Default evaluate is structural membership") {
     FeatureSet fs;
     fs.add(make<Api>(std::string("kernel32.CreateFileA")), va(0x401000));
