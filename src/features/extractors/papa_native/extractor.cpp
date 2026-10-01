@@ -11,7 +11,6 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/function.h"
 #include "papa/features/extractors/papa_native/insn.h"
-#include "papa/features/extractors/papa_native/library_signatures.h"
 #include "papa/pe/pe_image.h"
 
 #include <cstdint>
@@ -211,7 +210,7 @@ bool PapaNativeStaticExtractor::is_library_function(
     const Function& fn = backend_.functions()[it->second];
 
     // Structural thunks are library code regardless of any signature
-    if (is_thunk(fn)) { return true; }
+    if (function_::is_thunk(fn)) { return true; }
 
     // FLIRT identified the library functions during analysis, so this is a lookup into
     // that result rather than a second matching pass

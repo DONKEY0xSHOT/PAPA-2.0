@@ -37,4 +37,8 @@ extract_function_name(const Function& fn, std::string_view symbol);
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_function_features(const Function& fn, std::string_view symbol);
 
+/// True when fn is structurally a thunk: a single basic block whose one
+/// instruction is an unconditional jmp or call through a memory operand
+[[nodiscard]] bool is_thunk(const Function& fn) noexcept;
+
 }  // namespace papa::features::extractors::papa_native::function_

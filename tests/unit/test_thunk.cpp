@@ -4,7 +4,7 @@
 
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/library_signatures.h"
+#include "papa/features/extractors/papa_native/function.h"
 
 #include <Zydis/Zydis.h>
 
@@ -14,7 +14,7 @@ using papa::features::extractors::papa_native::BasicBlock;
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::DecodedOperand;
 using papa::features::extractors::papa_native::Function;
-using papa::features::extractors::papa_native::is_thunk;
+using papa::features::extractors::papa_native::function_::is_thunk;
 using papa::features::extractors::papa_native::OperandKind;
 
 namespace {
@@ -45,12 +45,12 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("library_signatures: is_thunk flags single-block jmp [iat] functions") {
+TEST_CASE("is_thunk: flags single-block jmp [iat] functions") {
     const auto fn = make_single_insn_function(make_jmp_iat(0x1000));
     CHECK(is_thunk(fn));
 }
 
-TEST_CASE("library_signatures: is_thunk rejects multi-block functions") {
+TEST_CASE("is_thunk: rejects multi-block functions") {
     auto fn = make_single_insn_function(make_jmp_iat(0x1000));
     BasicBlock bb2;
     bb2.va = 0x2000;
@@ -58,7 +58,7 @@ TEST_CASE("library_signatures: is_thunk rejects multi-block functions") {
     CHECK_FALSE(is_thunk(fn));
 }
 
-TEST_CASE("library_signatures: is_thunk rejects multi-instruction blocks") {
+TEST_CASE("is_thunk: rejects multi-instruction blocks") {
     DecodedInsn extra;
     extra.va = 0x1006;
     extra.length = 1;
@@ -67,7 +67,7 @@ TEST_CASE("library_signatures: is_thunk rejects multi-instruction blocks") {
     CHECK_FALSE(is_thunk(fn));
 }
 
-TEST_CASE("library_signatures: is_thunk rejects conditional jumps and register operands") {
+TEST_CASE("is_thunk: rejects conditional jumps and register operands") {
     {
         auto cond = make_jmp_iat(0x1000);
         cond.is_conditional = true;

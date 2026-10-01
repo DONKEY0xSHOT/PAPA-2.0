@@ -42,7 +42,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_regex_prefilter.cpp
     test_render.cpp
     test_render_table.cpp
-    test_library_signatures.cpp
+    test_thunk.cpp
     test_flirt_format.cpp
     test_flirt_crc16.cpp
     test_flirt_decompress.cpp
