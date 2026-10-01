@@ -104,50 +104,87 @@ namespace {
     return papa_tests::rule_yaml(name, "file", {"match: " + std::string(ref)}, ns);
 }
 
+// A limitation rule that fires on .data unless the decoy rule matched
+constexpr std::string_view kLimitationUnlessDecoy =
+    "rule:\n"
+    "  meta:\n"
+    "    name: lim-not\n"
+    "    namespace: internal/limitation/static\n"
+    "    scopes:\n"
+    "      static: file\n"
+    "      dynamic: unsupported\n"
+    "  features:\n"
+    "    - and:\n"
+    "      - section: .data\n"
+    "      - not:\n"
+    "        - match: decoy\n";
+
+// The RuleSet of the rules parsed from yamls, which must parse and link
+[[nodiscard]] papa::rules::RuleSet ruleset_of(const std::vector<std::string>& yamls) {
+    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
+    for (const std::string& yaml : yamls) { rules.push_back(papa_tests::rule(yaml)); }
+    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
+    REQUIRE(rs);
+    return std::move(*rs);
+}
+
+[[nodiscard]] papa::features::FeaturePtr section(std::string_view n) {
+    return std::make_shared<const papa::features::Section>(std::string(n));
+}
+
 }  // namespace
 
-TEST_CASE("limitation gate: closure follows a reference by rule name") {
-    const auto rs = papa_tests::ruleset({
-        section_rule("packer-sig", "anti-analysis/packer/upx", ".upx0"),
-        match_rule("lim", "internal/limitation/static", "packer-sig"),
-        section_rule("unrelated", "host-interaction/file", ".text")
-    });
-
-    const auto gate = papa::capabilities::limitation_gate_rules(rs);
-    CHECK(gate_contains(gate, "lim"));
-    CHECK(gate_contains(gate, "packer-sig"));
-    CHECK_FALSE(gate_contains(gate, "unrelated"));
-}
-
-TEST_CASE("limitation gate: closure expands a namespace reference to every rule beneath it") {
-    // This is how every real limitation rule is written, so getting it wrong
-    // would silently stop packed samples from being detected
-    const auto rs = papa_tests::ruleset({
-        section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
-        section_rule("aspack", "anti-analysis/packer/aspack", ".aspack"),
-        section_rule("deep", "anti-analysis/packer/x/y/z", ".deep"),
-        section_rule("sibling", "anti-analysis/obfuscation", ".obf"),
-        match_rule("lim", "internal/limitation/static", "anti-analysis/packer")
-    });
-
-    const auto gate = papa::capabilities::limitation_gate_rules(rs);
-    CHECK(gate_contains(gate, "upx"));
-    CHECK(gate_contains(gate, "aspack"));
-    CHECK(gate_contains(gate, "deep"));      // nested below the referenced prefix
-    CHECK_FALSE(gate_contains(gate, "sibling"));  // shares a parent, not the prefix
-}
-
-TEST_CASE("limitation gate: closure is transitive") {
-    const auto rs = papa_tests::ruleset({
-        section_rule("leaf", "a/leaf", ".leaf"),
-        match_rule("mid", "a/mid", "leaf"),
-        match_rule("lim", "internal/limitation/static", "mid")
-    });
-
-    const auto gate = papa::capabilities::limitation_gate_rules(rs);
-    CHECK(gate_contains(gate, "lim"));
-    CHECK(gate_contains(gate, "mid"));
-    CHECK(gate_contains(gate, "leaf"));
+TEST_CASE("limitation gate: the closure holds the limitation rules and every rule they reach, by name, namespace or negation") {
+    struct Row {
+        std::string_view              label;
+        std::vector<std::string>      rules;
+        std::vector<std::string_view> in_gate;
+        std::vector<std::string_view> not_in_gate;
+    };
+    const std::vector<Row> rows{
+        {"a reference by rule name",
+         {section_rule("packer-sig", "anti-analysis/packer/upx", ".upx0"),
+          match_rule("lim", "internal/limitation/static", "packer-sig"),
+          section_rule("unrelated", "host-interaction/file", ".text")},
+         {"lim", "packer-sig"}, {"unrelated"}},
+        // This is how every real limitation rule is written, so getting it wrong would
+        // silently stop packed samples from being detected
+        {"a namespace reference expands to every rule beneath it, however deep",
+         {section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
+          section_rule("aspack", "anti-analysis/packer/aspack", ".aspack"),
+          section_rule("deep", "anti-analysis/packer/x/y/z", ".deep"),
+          section_rule("sibling", "anti-analysis/obfuscation", ".obf"),
+          match_rule("lim", "internal/limitation/static", "anti-analysis/packer")},
+         {"lim", "upx", "aspack", "deep"}, {"sibling"}},
+        {"the closure is transitive",
+         {section_rule("leaf", "a/leaf", ".leaf"), match_rule("mid", "a/mid", "leaf"),
+          match_rule("lim", "internal/limitation/static", "mid")},
+         {"lim", "mid", "leaf"}, {}},
+        {"a corpus with no limitation rule produces an empty gate",
+         {section_rule("a", "host-interaction/file", ".text"),
+          section_rule("b", "anti-analysis/packer/upx", ".upx0")},
+         {}, {"a", "b"}},
+        {"a near-miss namespace is not a limitation",
+         {section_rule("x", "internal/limitation/static_other", ".text")}, {}, {"x"}},
+        // Monotonicity does not hold through a negation
+        {"a reference under not: is still in the closure",
+         {section_rule("decoy", "misc/decoy", ".text"), std::string(kLimitationUnlessDecoy)},
+         {"lim-not", "decoy"}, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto rs   = ruleset_of(row.rules);
+        const auto gate = papa::capabilities::limitation_gate_rules(rs);
+        CHECK(gate.size() == row.in_gate.size());
+        for (const std::string_view name : row.in_gate) {
+            CAPTURE(name);
+            CHECK(gate_contains(gate, name));
+        }
+        for (const std::string_view name : row.not_in_gate) {
+            CAPTURE(name);
+            CHECK_FALSE(gate_contains(gate, name));
+        }
+    }
 }
 
 TEST_CASE("limitation gate: closure keeps topological order") {
@@ -170,169 +207,58 @@ TEST_CASE("limitation gate: closure keeps topological order") {
     CHECK(i_mid < i_lim);
 }
 
-TEST_CASE("limitation gate: a corpus with no limitation rule produces an empty gate") {
-    const auto rs = papa_tests::ruleset({
-        section_rule("a", "host-interaction/file", ".text"),
-        section_rule("b", "anti-analysis/packer/upx", ".upx0")
-    });
-    CHECK(papa::capabilities::limitation_gate_rules(rs).empty());
-}
-
-TEST_CASE("limitation gate: a near-miss namespace is not treated as a limitation") {
-    const auto rs = papa_tests::ruleset({
-        section_rule("x", "internal/limitation/static_other", ".text")
-    });
-    CHECK(papa::capabilities::limitation_gate_rules(rs).empty());
-}
-
-TEST_CASE("limitation gate: verdict always agrees with the full file-scope pass") {
+TEST_CASE("limitation gate: the verdict always agrees with the full file-scope pass") {
     // The gate exists only to answer has_static_limitation
-    auto build = [] {
-        return papa_tests::ruleset({
-            section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
-            section_rule("noise1", "host-interaction/file", ".text"),
-            section_rule("noise2", "communication/http", ".data"),
-            match_rule("lim", "internal/limitation/static", "anti-analysis/packer")
-        });
+    using Corpus = papa::rules::RuleSet (*)();
+    const Corpus packer = [] {
+        return ruleset_of({section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
+                           section_rule("noise1", "host-interaction/file", ".text"),
+                           section_rule("noise2", "communication/http", ".data"),
+                           match_rule("lim", "internal/limitation/static", "anti-analysis/packer")});
     };
-
-    const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
-        return std::make_shared<const papa::features::Section>(std::string(n));
+    const Corpus negation = [] {
+        return ruleset_of({section_rule("decoy", "misc/decoy", ".text"),
+                           section_rule("noise", "host-interaction/file", ".rsrc"),
+                           std::string(kLimitationUnlessDecoy)});
     };
-
-    struct Case {
-        const char*                             label;
+    const Corpus direct = [] {
+        return ruleset_of({section_rule("noise", "host-interaction/file", ".text"),
+                           section_rule("lim-direct", "internal/limitation/static", ".packed")});
+    };
+    struct Row {
+        std::string_view                        label;
+        Corpus                                  corpus;
         std::vector<papa::features::FeaturePtr> feats;
-        bool                                    expect_limited;
+        bool                                    limited;
     };
-    const std::vector<Case> cases = {
-        {"packed sample",            {section(".upx0"), section(".text")}, true},
-        {"clean sample",             {section(".text"), section(".data")}, false},
-        {"no features at all",       {},                                   false},
-        {"only unrelated matches",   {section(".data")},                   false},
-    };
-
-    for (const auto& c : cases) {
-        CAPTURE(c.label);
-        const auto rs = build();
-        papa_tests::FakeExtractor extractor(c.feats);
-
-        auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
-        REQUIRE(gate_caps);
-        auto full_caps = papa::capabilities::find_file_capabilities(rs, extractor);
-        REQUIRE(full_caps);
-
-        const bool via_gate = papa::capabilities::has_static_limitation(rs, *gate_caps);
-        const bool via_full = papa::capabilities::has_static_limitation(rs, *full_caps);
-        CHECK(via_gate == via_full);
-        CHECK(via_gate == c.expect_limited);
-    }
-}
-
-TEST_CASE("limitation gate: a reference under not: is still in the closure") {
-    // Monotonicity does not hold through a negation
-    const auto rs = papa_tests::ruleset({
-        section_rule("decoy", "misc/decoy", ".text"),
-        "rule:\n"
-        "  meta:\n"
-        "    name: lim-not\n"
-        "    namespace: internal/limitation/static\n"
-        "    scopes:\n"
-        "      static: file\n"
-        "      dynamic: unsupported\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - section: .data\n"
-        "      - not:\n"
-        "        - match: decoy\n"
-    });
-
-    const auto gate = papa::capabilities::limitation_gate_rules(rs);
-    CHECK(gate_contains(gate, "lim-not"));
-    CHECK(gate_contains(gate, "decoy"));
-}
-
-TEST_CASE("limitation gate: verdict agrees with the full pass through a negation") {
-    auto build = [] {
-        return papa_tests::ruleset({
-            section_rule("decoy", "misc/decoy", ".text"),
-            section_rule("noise", "host-interaction/file", ".rsrc"),
-            "rule:\n"
-            "  meta:\n"
-            "    name: lim-not\n"
-            "    namespace: internal/limitation/static\n"
-            "    scopes:\n"
-            "      static: file\n"
-            "      dynamic: unsupported\n"
-            "  features:\n"
-            "    - and:\n"
-            "      - section: .data\n"
-            "      - not:\n"
-            "        - match: decoy\n"
-        });
-    };
-
-    const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
-        return std::make_shared<const papa::features::Section>(std::string(n));
-    };
-
-    struct Case {
-        const char*                             label;
-        std::vector<papa::features::FeaturePtr> feats;
-        bool                                    expect_limited;
-    };
-    const std::vector<Case> cases = {
+    const std::vector<Row> rows{
+        {"a packed sample", packer, {section(".upx0"), section(".text")}, true},
+        {"a clean sample", packer, {section(".text"), section(".data")}, false},
+        {"no features at all", packer, {}, false},
+        {"only unrelated matches", packer, {section(".data")}, false},
         // .data present and decoy absent, so the negation holds and it fires
-        {".data only",          {section(".data")},                  true},
-        // decoy matches, so the negation fails and it must not fire. This is
-        // the case that breaks if a negated reference is left out of the gate
-        {".data and .text",     {section(".data"), section(".text")}, false},
-        {".text only",          {section(".text")},                  false},
-        {"nothing",             {},                                  false},
+        {".data only, through a negation", negation, {section(".data")}, true},
+        // decoy matches, so the negation fails and it must not fire. This is the case
+        // that breaks if a negated reference is left out of the gate
+        {".data and .text, through a negation", negation, {section(".data"), section(".text")},
+         false},
+        {".text only, through a negation", negation, {section(".text")}, false},
+        {"nothing, through a negation", negation, {}, false},
+        {"a limitation rule with no match reference fires", direct,
+         {section(".text"), section(".packed")}, true},
+        {"a limitation rule with no match reference stays quiet", direct, {section(".text")},
+         false},
     };
-
-    for (const auto& c : cases) {
-        CAPTURE(c.label);
-        const auto rs = build();
-        papa_tests::FakeExtractor extractor(c.feats);
-        auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto rs = row.corpus();
+        const papa_tests::FakeExtractor extractor(row.feats);
+        const auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
         REQUIRE(gate_caps);
-        auto full_caps = papa::capabilities::find_file_capabilities(rs, extractor);
+        const auto full_caps = papa::capabilities::find_file_capabilities(rs, extractor);
         REQUIRE(full_caps);
         const bool via_gate = papa::capabilities::has_static_limitation(rs, *gate_caps);
-        const bool via_full = papa::capabilities::has_static_limitation(rs, *full_caps);
-        CHECK(via_gate == via_full);
-        CHECK(via_gate == c.expect_limited);
-    }
-}
-
-TEST_CASE("limitation gate: a limitation rule with no match reference still fires") {
-    auto build = [] {
-        return papa_tests::ruleset({
-            section_rule("noise", "host-interaction/file", ".text"),
-            section_rule("lim-direct", "internal/limitation/static", ".packed")
-        });
-    };
-    const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
-        return std::make_shared<const papa::features::Section>(std::string(n));
-    };
-
-    for (const bool packed : {true, false}) {
-        CAPTURE(packed);
-        const auto rs = build();
-        // Built whole rather than by push_back, which trips a GCC 13 -O2 array-bounds
-        // false positive
-        const std::vector<papa::features::FeaturePtr> feats =
-            packed ? std::vector<papa::features::FeaturePtr>{section(".text"), section(".packed")}
-                   : std::vector<papa::features::FeaturePtr>{section(".text")};
-        papa_tests::FakeExtractor extractor(feats);
-
-        auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
-        REQUIRE(gate_caps);
-        auto full_caps = papa::capabilities::find_file_capabilities(rs, extractor);
-        REQUIRE(full_caps);
-        CHECK(papa::capabilities::has_static_limitation(rs, *gate_caps) ==
-              papa::capabilities::has_static_limitation(rs, *full_caps));
-        CHECK(papa::capabilities::has_static_limitation(rs, *gate_caps) == packed);
+        CHECK(via_gate == papa::capabilities::has_static_limitation(rs, *full_caps));
+        CHECK(via_gate == row.limited);
     }
 }

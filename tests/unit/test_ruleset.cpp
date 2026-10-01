@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -98,110 +99,57 @@ TEST_CASE("ruleset: rules_by_scope groups rules by their static scope") {
     CHECK(bb_rules.empty());
 }
 
-TEST_CASE("ruleset: duplicate rule names are rejected") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(papa_tests::rule(
-        "rule:\n"
-        "  meta:\n"
-        "    name: dup\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: a\n"));
-    rules.push_back(papa_tests::rule(
-        "rule:\n"
-        "  meta:\n"
-        "    name: dup\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: b\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE_FALSE(rs);
-    CHECK(rs.error().kind == ErrorKind::kInvalidRule);
-}
-
-TEST_CASE("ruleset: rule with unresolved match reference is dropped, not failed") {
-    // Real CAPA corpora always contain a few rules whose match: targets were skipped
-    // earlier in the load (irregular YAML, COM lookups, etc.)
-    const auto rs = papa_tests::ruleset({
-        "rule:\n"
-        "  meta:\n"
-        "    name: needs-other\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - match: not-a-real-rule\n"
-    });
-    CHECK(rs.find("needs-other") == nullptr);
-    CHECK(rs.size() == 0U);
-}
-
-TEST_CASE("ruleset: known match reference is accepted and ordered") {
-    const auto rs = papa_tests::ruleset({
-        "rule:\n"
-        "  meta:\n"
-        "    name: depends-on-a\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - match: rule-a\n",
-        "rule:\n"
-        "  meta:\n"
-        "    name: rule-a\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: foo\n"
-    });
-    auto topo = rs.rules_by_scope(Scope::kFunction);
-    CHECK(precedes(topo, "rule-a", "depends-on-a"));
-}
-
-TEST_CASE("ruleset: namespace match reference resolves to every namespace member") {
-    const auto rs = papa_tests::ruleset({
-        "rule:\n"
-        "  meta:\n"
-        "    name: depends-on-ns\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - match: anti-analysis/vm\n",
-        "rule:\n"
-        "  meta:\n"
-        "    name: vm-probe-1\n"
-        "    namespace: anti-analysis/vm\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: kernel32.IsDebuggerPresent\n",
-        "rule:\n"
-        "  meta:\n"
-        "    name: vm-probe-2\n"
-        "    namespace: anti-analysis/vm\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: kernel32.GetTickCount\n"
-    });
-    auto topo = rs.rules_by_scope(Scope::kFunction);
-    CHECK(precedes(topo, "vm-probe-1", "depends-on-ns"));
-    CHECK(precedes(topo, "vm-probe-2", "depends-on-ns"));
-}
-
-TEST_CASE("ruleset: match cycle is rejected") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(papa_tests::rule(
-        "rule:\n"
-        "  meta:\n"
-        "    name: a\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - match: b\n"));
-    rules.push_back(papa_tests::rule(
-        "rule:\n"
-        "  meta:\n"
-        "    name: b\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - match: a\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE_FALSE(rs);
-    CHECK(rs.error().kind == ErrorKind::kCycle);
+TEST_CASE("ruleset: from_rules drops a rule with an unresolved match, orders the rest after what they match, and rejects duplicate names and cycles") {
+    const auto yaml = [](std::string_view name, std::string_view feature,
+                         std::string_view ns = {}) {
+        return papa_tests::rule_yaml(name, "function", {std::string(feature)}, ns);
+    };
+    // A pair of rules where the first comes before the second in topological order
+    using Order = std::pair<std::string_view, std::string_view>;
+    struct Row {
+        std::string_view              label;
+        std::vector<std::string>      rules;
+        std::optional<ErrorKind>      error;
+        std::size_t                   size;
+        std::vector<std::string_view> absent;
+        std::vector<Order>            before;
+    };
+    const std::vector<Row> rows{
+        {"duplicate rule names are rejected", {yaml("dup", "api: a"), yaml("dup", "api: b")},
+         ErrorKind::kInvalidRule, 0, {}, {}},
+        // Real capa corpora always contain a few rules whose match: targets were skipped
+        // earlier in the load (irregular YAML, COM lookups, etc.)
+        {"a rule with an unresolved match reference is dropped, not failed",
+         {yaml("needs-other", "match: not-a-real-rule")}, std::nullopt, 0, {"needs-other"}, {}},
+        {"a known match reference is accepted and ordered",
+         {yaml("depends-on-a", "match: rule-a"), yaml("rule-a", "api: foo")}, std::nullopt, 2, {},
+         {{"rule-a", "depends-on-a"}}},
+        {"a namespace match reference resolves to every namespace member",
+         {yaml("depends-on-ns", "match: anti-analysis/vm"),
+          yaml("vm-probe-1", "api: kernel32.IsDebuggerPresent", "anti-analysis/vm"),
+          yaml("vm-probe-2", "api: kernel32.GetTickCount", "anti-analysis/vm")},
+         std::nullopt, 3, {}, {{"vm-probe-1", "depends-on-ns"}, {"vm-probe-2", "depends-on-ns"}}},
+        {"a match cycle is rejected", {yaml("a", "match: b"), yaml("b", "match: a")},
+         ErrorKind::kCycle, 0, {}, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        std::vector<std::unique_ptr<Rule>> rules;
+        for (const std::string& y : row.rules) { rules.push_back(papa_tests::rule(y)); }
+        const auto rs = RuleSet::from_rules(std::move(rules));
+        CHECK(rs.has_value() == !row.error.has_value());
+        if (!rs) {
+            if (row.error.has_value()) { CHECK(rs.error().kind == *row.error); }
+            continue;
+        }
+        CHECK(rs->size() == row.size);
+        for (const std::string_view name : row.absent) { CHECK(rs->find(name) == nullptr); }
+        const auto topo = rs->rules_by_scope(Scope::kFunction);
+        for (const auto& [first, then] : row.before) {
+            CAPTURE(first);
+            CHECK(precedes(topo, first, then));
+        }
+    }
 }
 
 TEST_CASE("ruleset: subscope is extracted into a synthetic lib rule") {
