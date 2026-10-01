@@ -94,32 +94,35 @@ TEST_CASE("pe_builder: imports come back with normalized dll names and symbols")
     papa_tests::PeBuilder b;
     b.code    = sample_x64_code();
     b.imports = {
-        {"kernel32.dll", {"WriteFile", "CreateFileW", "ExitProcess"}},
-        {"advapi32.dll", {"RegOpenKeyExW"}},
+        {"KERNEL32.DLL", {"WriteFile", "CreateFileW", "ExitProcess"}},
+        {"winspool.DRV", {"OpenPrinterW"}},
+        {"ws2_32", {"getsockname"}},
     };
 
     const auto bytes = b.build();
     auto       img   = papa::pe::PeParser::parse(bytes);
     REQUIRE(img.has_value());
 
-    const auto imps = img->imports();
-    REQUIRE(imps.size() == 4);
-
-    const auto has = [&imps](std::string_view dll, std::string_view fn) {
-        return std::any_of(imps.begin(), imps.end(),
-                           [&](const papa::pe::ParsedImport& p) {
-                               return p.dll == dll && p.name == fn;
-                           });
+    // The parser lowercases the DLL and strips a known extension
+    struct Row {
+        std::string_view dll_spec;
+        std::string_view name;
+        std::string_view dll;
     };
-    // The parser lowercases the DLL and strips the extension
-    CHECK(has("kernel32", "WriteFile"));
-    CHECK(has("kernel32", "CreateFileW"));
-    CHECK(has("kernel32", "ExitProcess"));
-    CHECK(has("advapi32", "RegOpenKeyExW"));
-
-    // Every import has a distinct IAT slot inside the image
-    for (const papa::pe::ParsedImport& p : imps) {
-        CHECK(p.iat_va > img->image_base());
+    const std::array<Row, 5> rows{{
+        {"KERNEL32.DLL", "WriteFile", "kernel32"},
+        {"KERNEL32.DLL", "CreateFileW", "kernel32"},
+        {"KERNEL32.DLL", "ExitProcess", "kernel32"},
+        {"winspool.DRV", "OpenPrinterW", "winspool"},
+        {"ws2_32", "getsockname", "ws2_32"},
+    }};
+    const auto imps = img->imports();
+    REQUIRE(imps.size() == rows.size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        CAPTURE(rows[i].name);
+        CHECK(imps[i].dll == rows[i].dll);
+        CHECK(imps[i].name == rows[i].name);
+        CHECK(imps[i].iat_va == b.iat_va(rows[i].dll_spec, rows[i].name));
     }
 }
 

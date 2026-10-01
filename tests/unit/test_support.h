@@ -8,7 +8,9 @@
 #include "papa/engine.h"
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
+#include "papa/features/common.h"
 #include "papa/features/feature.h"
+#include "papa/features/insn.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
@@ -32,11 +34,13 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 /// Helpers shared by the unit tests
@@ -140,6 +144,84 @@ template <typename T, typename... Args>
     std::initializer_list<std::pair<papa::features::FeaturePtr, papa::features::Address>> items) {
     papa::features::FeatureSet out;
     for (const auto& [f, a] : items) { out.add(f, a); }
+    return out;
+}
+
+/// One line naming a feature, its value and its address. Comparing these compares
+/// extractor output exactly, and a failed check prints both sides readably
+[[nodiscard]] inline std::string describe(const papa::features::extractors::FeatureWithAddress& fa) {
+    namespace pf = papa::features;
+    static constexpr std::array<std::string_view, 23> kTags{
+        "string", "substring", "regex", "bytes", "number", "offset", "mnemonic", "api",
+        "import", "export", "section", "function-name", "class", "namespace", "property",
+        "characteristic", "match", "os", "arch", "format", "operand number",
+        "operand offset", "basic block"};
+    std::ostringstream out;
+    const auto number = [&out](const pf::Number::Value& v) {
+        if (const auto* u = std::get_if<std::uint64_t>(&v)) {
+            out << " 0x" << std::hex << *u << std::dec;
+        } else if (const auto* i = std::get_if<std::int64_t>(&v)) {
+            out << " int " << *i;
+        } else {
+            out << " double " << std::get<double>(v);
+        }
+    };
+
+    const pf::Feature& f = *fa.first;
+    out << kTags.at(static_cast<std::size_t>(f.tag()));
+    switch (f.tag()) {
+        case pf::FeatureTag::kBytes:
+            out << ' ' << std::hex;
+            for (const std::byte b : static_cast<const pf::Bytes&>(f).value()) {
+                out << (std::to_integer<unsigned>(b) >> 4U) << (std::to_integer<unsigned>(b) & 0xFU);
+            }
+            out << std::dec;
+            break;
+        case pf::FeatureTag::kNumber:
+            number(static_cast<const pf::Number&>(f).value());
+            break;
+        case pf::FeatureTag::kOperandNumber:
+            out << ' ' << static_cast<const pf::OperandNumber&>(f).index();
+            number(static_cast<const pf::OperandNumber&>(f).value());
+            break;
+        case pf::FeatureTag::kOffset:
+            out << ' ' << static_cast<const pf::Offset&>(f).value();
+            break;
+        case pf::FeatureTag::kOperandOffset:
+            out << ' ' << static_cast<const pf::OperandOffset&>(f).index() << ' '
+                << static_cast<const pf::OperandOffset&>(f).value();
+            break;
+        case pf::FeatureTag::kProperty:
+            out << ' ' << static_cast<const pf::Property&>(f).value() << ' '
+                << static_cast<int>(static_cast<const pf::Property&>(f).access());
+            break;
+        case pf::FeatureTag::kBasicBlock:
+            break;
+        default:
+            out << ' ' << static_cast<const pf::ValueFeature&>(f).value();
+            break;
+    }
+
+    out << " @ " << std::hex;
+    if (const auto* v = std::get_if<pf::AbsoluteVirtualAddress>(&fa.second)) {
+        out << "va 0x" << v->v;
+    } else if (const auto* o = std::get_if<pf::FileOffsetAddress>(&fa.second)) {
+        out << "file 0x" << o->v;
+    } else if (const auto* r = std::get_if<pf::RelativeVirtualAddress>(&fa.second)) {
+        out << "rva 0x" << r->v;
+    } else if (std::holds_alternative<pf::NoAddress>(fa.second)) {
+        out << "none";
+    } else {
+        out << "token 0x" << pf::linearize(fa.second);
+    }
+    return out.str();
+}
+
+/// The describe() line of every entry, in order
+[[nodiscard]] inline std::string
+describe(const std::vector<papa::features::extractors::FeatureWithAddress>& list) {
+    std::string out;
+    for (const auto& fa : list) { out.append(describe(fa)).append("\n"); }
     return out;
 }
 
