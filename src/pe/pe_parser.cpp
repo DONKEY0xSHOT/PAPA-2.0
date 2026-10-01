@@ -8,26 +8,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
 #include <fstream>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <vector>
 
 namespace papa::pe {
 
 namespace {
-
-template <typename T>
-[[nodiscard]] bool read_le(std::span<const std::byte> buf, std::size_t off, T& out) noexcept {
-    static_assert(std::is_trivially_copyable_v<T>);
-    if (off > buf.size() || sizeof(T) > buf.size() - off) {
-        return false;
-    }
-    std::memcpy(&out, buf.data() + off, sizeof(T));
-    return true;
-}
 
 [[nodiscard]] std::string short_name_to_string(const std::array<std::uint8_t, 8>& n) {
     std::string s;

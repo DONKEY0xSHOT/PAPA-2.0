@@ -4,12 +4,25 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace papa::pe {
+
+/// Copy a little-endian T out of buf at off, or return false when it does not fit
+template <typename T>
+[[nodiscard]] bool read_le(std::span<const std::byte> buf, std::size_t off, T& out) noexcept {
+    static_assert(std::is_trivially_copyable_v<T>);
+    if (off > buf.size() || sizeof(T) > buf.size() - off) {
+        return false;
+    }
+    std::memcpy(&out, buf.data() + off, sizeof(T));
+    return true;
+}
 
 struct ParsedSection {
     std::string   name;

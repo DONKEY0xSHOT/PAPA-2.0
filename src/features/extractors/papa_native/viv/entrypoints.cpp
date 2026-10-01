@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 #include <span>
 #include <vector>
@@ -14,16 +13,6 @@
 namespace papa::features::extractors::papa_native::viv {
 
 namespace {
-
-// Read a little-endian scalar from a byte span with full bounds checks
-template <typename T>
-[[nodiscard]] bool read_le(std::span<const std::byte> buf, std::size_t off, T& out) noexcept {
-    if (off > buf.size() || sizeof(T) > buf.size() - off) {
-        return false;
-    }
-    std::memcpy(&out, buf.data() + off, sizeof(T));
-    return true;
-}
 
 // True when va lies within the image's virtual footprint
 [[nodiscard]] bool va_in_image(const pe::PeImage& image, std::uint64_t va) noexcept {
@@ -102,8 +91,8 @@ std::vector<std::uint64_t> pdata_function_begins(const pe::PeImage& image) {
         if (!bytes) { break; }
         std::uint32_t begin_rva  = 0;
         std::uint32_t unwind_rva = 0;
-        if (!read_le<std::uint32_t>(*bytes, 0, begin_rva))  { break; }
-        if (!read_le<std::uint32_t>(*bytes, 8, unwind_rva)) { break; }
+        if (!pe::read_le<std::uint32_t>(*bytes, 0, begin_rva))  { break; }
+        if (!pe::read_le<std::uint32_t>(*bytes, 8, unwind_rva)) { break; }
         // Read the UNWIND_INFO VerFlags byte and classify the entry the way vivisect
         // parsers/pe.py does
         std::optional<std::uint8_t> verflags;
