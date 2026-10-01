@@ -32,6 +32,15 @@ struct ExportSpec {
     std::string   forwarder;
 };
 
+/// One extra section placed after the standard ones. A virtual_size of 0 means the
+/// size of bytes, and a larger one leaves the tail unbacked by file data
+struct SectionSpec {
+    std::string               name;
+    std::vector<std::uint8_t> bytes;
+    std::uint32_t             characteristics{0};
+    std::uint32_t             virtual_size{0};
+};
+
 /// File offsets of the header structures in the image build() returns
 struct HeaderLayout {
     std::size_t e_lfanew{0};          // the DOS header field that points at nt_headers
@@ -55,7 +64,7 @@ struct HeaderLayout {
 };
 
 /// A synthetic PE image that papa::pe::PeParser::parse accepts. Its sections sit back
-/// to back on 0x1000 boundaries: .text, .rdata, .pdata, .reloc
+/// to back on 0x1000 boundaries: .text, .rdata, .data, .pdata, the extras, .reloc
 class PeBuilder {
 public:
     static constexpr std::uint32_t kSectionAlign = 0x1000;
@@ -64,6 +73,7 @@ public:
 
     static constexpr std::uint32_t kScnCode              = 0x00000020U;
     static constexpr std::uint32_t kScnInitializedData   = 0x00000040U;
+    static constexpr std::uint32_t kScnUninitializedData = 0x00000080U;
     static constexpr std::uint32_t kScnExecute           = 0x20000000U;
     static constexpr std::uint32_t kScnRead              = 0x40000000U;
     static constexpr std::uint32_t kScnWrite             = 0x80000000U;
@@ -78,6 +88,9 @@ public:
     // Imports bound through the delay-load directory instead of the import directory
     std::vector<ImportSpec>   delay_imports;
     std::vector<ExportSpec>   exports;
+    // Contents of a read-write .data section, left out when empty
+    std::vector<std::uint8_t> data;
+    std::vector<SectionSpec>  extra_sections;
     // Code offsets whose 4 or 8 byte slot holds an absolute address to relocate
     std::vector<std::uint32_t> reloc_code_offsets;
     // (begin, end) code offsets forming x64 .pdata RUNTIME_FUNCTION records
@@ -97,8 +110,17 @@ public:
         return base() + kTextRva + offset;
     }
 
+    /// Appends one function to the code on a 16-byte boundary, padding with int3, and
+    /// records its .pdata row, which build() emits on x64. Returns its code offset
+    std::uint32_t add_function(const std::vector<std::uint8_t>& bytes);
+
     /// RVA where the named section lands, 0 when there is none
     [[nodiscard]] std::uint32_t section_rva(std::string_view name) const;
+
+    /// Virtual address of an offset into the .data section
+    [[nodiscard]] std::uint64_t data_va(std::uint32_t offset) const {
+        return base() + section_rva(".data") + offset;
+    }
 
     /// Virtual address of the IAT slot for fn of dll as spelled in imports or
     /// delay_imports, 0 when absent. It holds until a section changes size
@@ -168,6 +190,16 @@ void poke(std::vector<std::uint8_t>& buf, std::size_t off, T value) {
 }
 
 }  // namespace detail
+
+inline std::uint32_t PeBuilder::add_function(const std::vector<std::uint8_t>& bytes) {
+    while (code.size() % 16U != 0U) {
+        code.push_back(0xCC);
+    }
+    const auto offset = static_cast<std::uint32_t>(code.size());
+    code.insert(code.end(), bytes.begin(), bytes.end());
+    pdata_functions.emplace_back(offset, static_cast<std::uint32_t>(code.size()));
+    return offset;
+}
 
 inline std::uint32_t PeBuilder::section_rva(std::string_view name) const {
     for (const Section& s : assemble().sections) {
@@ -399,6 +431,10 @@ inline PeBuilder::Image PeBuilder::assemble() const {
     }
     place(".rdata", rdata.bytes, size_of(rdata.bytes), kScnInitializedData | kScnRead);
 
+    if (!data.empty()) {
+        place(".data", data, size_of(data), kScnInitializedData | kScnRead | kScnWrite);
+    }
+
     // .pdata, the x64 exception table. Each record needs an UNWIND_INFO whose
     // version is 1, or the walk stops at it
     if (x64 && !pdata_functions.empty()) {
@@ -417,6 +453,11 @@ inline PeBuilder::Image PeBuilder::assemble() const {
         pdata.put(std::uint8_t{0});  // FrameRegister / FrameOffset
         image.dirs[3] = {pdata.rva, rows * 12U};
         place(".pdata", pdata.bytes, size_of(pdata.bytes), kScnInitializedData | kScnRead);
+    }
+
+    for (const SectionSpec& s : extra_sections) {
+        place(s.name, s.bytes, s.virtual_size != 0U ? s.virtual_size : size_of(s.bytes),
+              s.characteristics);
     }
 
     // .reloc, one block per code page, each padded to a 4-byte multiple with an

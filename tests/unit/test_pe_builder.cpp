@@ -353,6 +353,78 @@ TEST_CASE("pe_builder: a forwarded export carries its forwarder and no address")
     REQUIRE(exps[1].forwarder.has_value());
     CHECK(*exps[1].forwarder == "ntdll.RtlAllocateHeap");
 }
+
+TEST_CASE("pe_builder: the data section is read-write and data_va addresses its bytes") {
+    papa_tests::PeBuilder b;
+    b.code = sample_x64_code();
+    b.data = {0x10, 0x20, 0x30, 0x40, 0x50};
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+
+    const auto* data = img->section_containing_rva(b.data_va(0) - img->image_base());
+    REQUIRE(data != nullptr);
+    CHECK(data->name == ".data");
+    CHECK(data->virtual_address == 0x3000);
+    CHECK((data->characteristics & papa_tests::PeBuilder::kScnWrite) != 0);
+    CHECK((data->characteristics & papa_tests::PeBuilder::kScnRead) != 0);
+    CHECK((data->characteristics & papa_tests::PeBuilder::kScnExecute) == 0);
+
+    const auto read = img->read_at_rva(b.data_va(2) - img->image_base(), 3);
+    REQUIRE(read.has_value());
+    CHECK(static_cast<std::uint8_t>((*read)[0]) == 0x30);
+    CHECK(static_cast<std::uint8_t>((*read)[2]) == 0x50);
+}
+
+TEST_CASE("pe_builder: an extra section keeps its name, flags and a virtual size past raw") {
+    using papa_tests::PeBuilder;
+    PeBuilder b;
+    b.code           = sample_x64_code();
+    b.extra_sections = {{".upx0", std::vector<std::uint8_t>(0x10, 0xAB),
+                         PeBuilder::kScnUninitializedData | PeBuilder::kScnRead |
+                             PeBuilder::kScnWrite | PeBuilder::kScnExecute,
+                         0x3000}};
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    REQUIRE(img->sections().size() == 3);
+
+    const papa::pe::ParsedSection& upx = img->sections()[2];
+    CHECK(upx.name == ".upx0");
+    CHECK(upx.virtual_address == b.section_rva(".upx0"));
+    CHECK(upx.virtual_size == 0x3000);
+    CHECK(upx.raw_size == PeBuilder::kFileAlign);
+    CHECK(upx.characteristics == (PeBuilder::kScnUninitializedData | PeBuilder::kScnRead |
+                                  PeBuilder::kScnWrite | PeBuilder::kScnExecute));
+    CHECK(img->size_of_image() == upx.virtual_address + 0x3000);
+
+    // Readable bytes stop where the raw data does, though the section maps on
+    CHECK(img->readable_bytes_at_rva(upx.virtual_address + 0x10) == PeBuilder::kFileAlign - 0x10);
+    CHECK(img->section_containing_rva(upx.virtual_address + 0x2000) == &upx);
+    CHECK(img->readable_bytes_at_rva(upx.virtual_address + 0x2000) == 0);
+}
+
+TEST_CASE("pe_builder: add_function places functions on 16-byte boundaries with .pdata rows") {
+    papa_tests::PeBuilder b;
+    std::vector<std::uint32_t> offsets;
+    for (int i = 0; i < 300; ++i) {
+        offsets.push_back(b.add_function({0x33, 0xC0, 0xC3}));  // xor eax,eax / ret
+    }
+    std::vector<std::uint32_t> aligned;
+    std::vector<std::uint64_t> expected;
+    for (std::uint32_t i = 0; i < 300; ++i) {
+        aligned.push_back(i * 16U);
+        expected.push_back(b.code_va(i * 16U));
+    }
+    CHECK(offsets == aligned);
+    REQUIRE(b.code.size() > 0x1000);  // the code spans pages
+    CHECK(b.code[0x13] == 0xCC);       // padding between functions is int3
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    CHECK(papa::features::extractors::papa_native::viv::pdata_function_begins(*img) == expected);
+}
+
 TEST_CASE("pe_builder: the header layout locates the headers build writes") {
     for (const bool x64 : {true, false}) {
         CAPTURE(x64);
