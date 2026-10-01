@@ -154,54 +154,6 @@ std::vector<std::uint64_t> cfg::pdata_function_begins(const pe::PeImage& image) 
     return begins;
 }
 
-// Public: build a reader that decodes through a PE image's virtual space
-InsnReader cfg::make_image_reader(const pe::PeImage& image, const Disassembler& disasm) {
-    // The caller is responsible for keeping the image and disassembler alive
-    // for the lifetime of the returned reader
-    const pe::PeImage* img = &image;
-    const Disassembler* dis = &disasm;
-    return [img, dis](std::uint64_t va) -> Expected<DecodedInsn> {
-        if (va < img->image_base()) {
-            return Unexpected{make_error(ErrorKind::kOutOfBounds, "va below image base")};
-        }
-        const std::uint64_t rva = va - img->image_base();
-        // Read up to one full x86 instruction
-        // Near a section's end the returned span is shorter than that cap
-        std::size_t want = constants::kMaxInsnBytes;
-        auto bytes = img->read_at_rva(rva, want);
-        while (!bytes && want > 0) {
-            --want;
-            bytes = img->read_at_rva(rva, want);
-        }
-        if (!bytes || bytes->empty()) {
-            return Unexpected{make_error(ErrorKind::kOutOfBounds, "no bytes at va")};
-        }
-        return dis->decode(*bytes, va);
-    };
-}
-
-// Public: build a reader over a fixed region
-// Used by unit tests to feed synthetic instruction byte sequences
-InsnReader cfg::make_span_reader(std::span<const std::byte> region,
-                                 std::uint64_t base_va,
-                                 const Disassembler& disasm) {
-    const Disassembler* dis = &disasm;
-    // Copy the span into the closure
-    // The pointed-to buffer must outlive the returned reader
-    return [region, base_va, dis](std::uint64_t va) -> Expected<DecodedInsn> {
-        if (va < base_va) {
-            return Unexpected{make_error(ErrorKind::kOutOfBounds, "va below region base")};
-        }
-        const std::uint64_t off = va - base_va;
-        if (off >= region.size()) {
-            return Unexpected{make_error(ErrorKind::kOutOfBounds, "va past region end")};
-        }
-        const std::size_t avail = std::min<std::size_t>(
-            constants::kMaxInsnBytes, region.size() - static_cast<std::size_t>(off));
-        return dis->decode(region.subspan(static_cast<std::size_t>(off), avail), va);
-    };
-}
-
 std::vector<std::uint64_t> cfg::find_function_prologues(
     std::span<const std::uint8_t> code, std::uint64_t base_va,
     std::span<const std::uint8_t> covered) {

@@ -10,12 +10,10 @@
 #include "papa/pe/pe_parser.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
-#include <span>
 #include <vector>
 #include "fixture_paths.h"
 #include "test_support.h"
@@ -30,12 +28,6 @@ namespace {
 
 const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
-// Helper to construct a byte array from an integer list
-template <typename... B>
-constexpr auto make_bytes(B... bs) {
-    return std::array<std::byte, sizeof...(B)>{ std::byte{static_cast<std::uint8_t>(bs)}... };
-}
-
 }  // namespace
 
 TEST_CASE("classify_pdata_unwind seeds v1, skips chained, stops on v2 or unreadable") {
@@ -48,14 +40,6 @@ TEST_CASE("classify_pdata_unwind seeds v1, skips chained, stops on v2 or unreada
     CHECK(cfg::classify_pdata_unwind(std::uint8_t{0x02}) == PdataEntryKind::kStop);
     // An unreadable or invalid unwind pointer also bails the walk
     CHECK(cfg::classify_pdata_unwind(std::nullopt) == PdataEntryKind::kStop);
-}
-
-TEST_CASE("make_span_reader rejects out-of-range VAs") {
-    const auto bytes = make_bytes(0xC3);
-    Disassembler d(true);
-    const auto reader = cfg::make_span_reader(std::span<const std::byte>(bytes), 0x1000, d);
-    CHECK_FALSE(reader(0x0FFFU).has_value());     // below base
-    CHECK_FALSE(reader(0x1100U).has_value());     // past end
 }
 
 TEST_CASE("find_function_prologues finds vivisect i386 prologues in gaps only") {

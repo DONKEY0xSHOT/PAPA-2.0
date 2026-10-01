@@ -16,6 +16,7 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/viv/cf_context.h"
 #include "papa/features/extractors/papa_native/viv/xref_db.h"
+#include "test_support.h"
 
 namespace pn = papa::features::extractors::papa_native;
 namespace pv = papa::features::extractors::papa_native::viv;
@@ -33,11 +34,19 @@ constexpr auto make_bytes(B... bs) {
 
 }  // namespace
 
+TEST_CASE("make_span_reader rejects out-of-range VAs") {
+    const auto bytes = make_bytes(0xC3);
+    Disassembler d(true);
+    const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
+    CHECK_FALSE(reader(0x0FFFU).has_value());     // below base
+    CHECK_FALSE(reader(0x1100U).has_value());     // past end
+}
+
 TEST_CASE("CodeFlowContext decodes a straight-line run once (decode-once gate)") {
     const Disassembler d(/*is_64bit=*/false);
     // 0x1000: 90 nop / 0x1001: 90 nop / 0x1002: c3 ret
     const auto bytes  = make_bytes(0x90, 0x90, 0xC3);
-    const auto reader = pn::cfg::make_span_reader(bytes, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     std::vector<std::uint64_t>        decoded;
@@ -64,7 +73,7 @@ TEST_CASE("CodeFlowContext explores both edges of a conditional branch and recor
     // A conditional jump at 0x1000 with its fall-through at 0x1002, padding, and the
     // branch target at 0x1005, both ending in a ret
     const auto bytes  = make_bytes(0x74, 0x03, 0xC3, 0x90, 0x90, 0xC3);
-    const auto reader = pn::cfg::make_span_reader(bytes, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     std::vector<std::uint64_t>        decoded;
@@ -111,7 +120,7 @@ TEST_CASE("CodeFlowContext descends into a call to completion before the caller'
     region[0x005] = std::byte{0x90};  // nop, the fall-through after the call
     region[0x006] = std::byte{0xC3};  // ret
     region[0x1000] = std::byte{0xC3};  // 0x2000: ret, the callee
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
 
     // The event log interleaves opcodes and completed functions. A function
     // event is tagged with the high bit so the two can be told apart
@@ -159,7 +168,7 @@ TEST_CASE("CodeFlowContext delays a function that tail-jumps into an in-analysis
     region[0x1002] = std::byte{0xEF};
     region[0x1003] = std::byte{0xFF};
     region[0x1004] = std::byte{0xFF};
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     std::vector<std::uint64_t>        fn_order;
@@ -189,7 +198,7 @@ TEST_CASE("CodeFlowContext explores jump-table cases intra-procedurally, not as 
     region[0x001] = std::byte{0xE0};
     region[0x100] = std::byte{0xC3};  // 0x1100: ret  (case 0)
     region[0x200] = std::byte{0xC3};  // 0x1200: ret  (case 1)
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
 
     const pn::JumpTableResolver resolve =
         [](std::span<const DecodedInsn>) -> std::optional<pn::JumpTableTargets> {
@@ -233,7 +242,7 @@ TEST_CASE("CodeFlowContext suppresses the fall-through after a call to a no-retu
     region[0x005] = std::byte{0x90};   // 0x1005: nop, the fall-through after the call
     region[0x006] = std::byte{0xC3};   // 0x1006: ret
     region[0x1000] = std::byte{0xC3};  // 0x2000: ret, the no-return callee
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     std::unordered_set<std::uint64_t> decoded;
@@ -276,7 +285,7 @@ TEST_CASE("CodeFlowContext caps call-descent depth over a crafted deep chain") {
         region[off + 5] = std::byte{0xC3};  // ret
     }
     const std::uint64_t base   = 0x1000;
-    const auto          reader = pn::cfg::make_span_reader(region, base, d);
+    const auto          reader = papa_tests::make_span_reader(region, base, d);
 
     std::unordered_set<std::uint64_t> defined;
     int                               function_events = 0;
@@ -305,7 +314,7 @@ TEST_CASE("CodeFlowContext reports each resolved jump-table case to on_branch_ta
     region[0x001] = std::byte{0xE0};
     region[0x100] = std::byte{0xC3};  // 0x1100: ret
     region[0x200] = std::byte{0xC3};  // 0x1200: ret
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
     const pn::JumpTableResolver resolve =
         [](std::span<const DecodedInsn>) -> std::optional<pn::JumpTableTargets> {
         pn::JumpTableTargets jt;
@@ -348,7 +357,7 @@ TEST_CASE("CodeFlowContext does not descend into a call already on the active pa
     region[0x003] = std::byte{0xFF};
     region[0x004] = std::byte{0xFF};
     region[0x005] = std::byte{0xC3};  // ret
-    const auto reader = pn::cfg::make_span_reader(region, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(region, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     int                               function_events = 0;
@@ -379,7 +388,7 @@ TEST_CASE("CodeFlowContext bounds the number of functions in one image") {
     const Disassembler d(/*is_64bit=*/false);
     const std::size_t  over = papa::constants::kMaxFunctionsPerImage + 64U;
     std::vector<std::byte> rets(over, std::byte{0xC3});
-    const auto reader = pn::cfg::make_span_reader(rets, 0x1000, d);
+    const auto reader = papa_tests::make_span_reader(rets, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
     std::size_t                       functions = 0;

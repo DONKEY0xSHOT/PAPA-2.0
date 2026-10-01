@@ -79,15 +79,6 @@ namespace cfg {
 [[nodiscard]] std::vector<std::uint64_t>
     pdata_function_begins(const pe::PeImage& image);
 
-/// Build an InsnReader that decodes through a PE image
-[[nodiscard]] InsnReader
-    make_image_reader(const pe::PeImage& image, const Disassembler& disasm);
-
-/// Build an InsnReader over a contiguous region starting at base_va
-[[nodiscard]] InsnReader
-    make_span_reader(std::span<const std::byte> region, std::uint64_t base_va,
-                     const Disassembler& disasm);
-
 }  // namespace cfg
 
 }  // namespace papa::features::extractors::papa_native

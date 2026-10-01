@@ -7,6 +7,7 @@
 #include <span>
 
 #include "papa/constants.h"
+#include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
 #include "papa/features/extractors/papa_native/imports.h"
@@ -51,6 +52,32 @@ std::optional<std::uint64_t> read_le_va(const pe::PeImage& image,
              << (8 * i);
     }
     return v;
+}
+
+// An InsnReader that decodes through the image's virtual space. The image and the
+// disassembler must outlive it
+[[nodiscard]] InsnReader make_image_reader(const pe::PeImage& image,
+                                           const Disassembler& disasm) {
+    const pe::PeImage* img = &image;
+    const Disassembler* dis = &disasm;
+    return [img, dis](std::uint64_t va) -> Expected<DecodedInsn> {
+        if (va < img->image_base()) {
+            return Unexpected{make_error(ErrorKind::kOutOfBounds, "va below image base")};
+        }
+        const std::uint64_t rva = va - img->image_base();
+        // Read up to one full x86 instruction
+        // Near a section's end the returned span is shorter than that cap
+        std::size_t want = constants::kMaxInsnBytes;
+        auto bytes = img->read_at_rva(rva, want);
+        while (!bytes && want > 0) {
+            --want;
+            bytes = img->read_at_rva(rva, want);
+        }
+        if (!bytes || bytes->empty()) {
+            return Unexpected{make_error(ErrorKind::kOutOfBounds, "no bytes at va")};
+        }
+        return dis->decode(*bytes, va);
+    };
 }
 
 // Resolve a switch dispatch straight from the image
@@ -182,7 +209,7 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm,
                    const ImportTable& imports, const flirt::FlirtSignatureSet& sigs) {
     const std::uint64_t ptr_size = image.is_64bit() ? 8U : 4U;
     const emu::ImageMaps maps    = emu::build_image_maps(image);
-    const InsnReader     reader  = cfg::make_image_reader(image, disasm);
+    const InsnReader     reader  = make_image_reader(image, disasm);
 
     // The API no-return oracle: a call whose resolved import is an exit/abort family
     // function does not return
