@@ -12,7 +12,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
@@ -68,8 +67,10 @@ std::string relative_utf8(const fs::path& p) {
 }
 
 std::string read_bytes(const fs::path& p) {
+    std::string out(static_cast<std::size_t>(fs::file_size(p)), '\0');
     std::ifstream in(p, std::ios::binary);
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    in.read(out.data(), static_cast<std::streamsize>(out.size()));
+    return out;
 }
 
 // Every .yml file on disk keyed by relative path, skipping hidden entries like the loader
