@@ -464,8 +464,11 @@ TEST_CASE("limitation gate: a limitation rule with no match reference still fire
     for (const bool packed : {true, false}) {
         CAPTURE(packed);
         const auto rs = build();
-        std::vector<papa::features::FeaturePtr> feats{section(".text")};
-        if (packed) { feats.push_back(section(".packed")); }
+        // Built whole rather than by push_back, which trips a GCC 13 -O2 array-bounds
+        // false positive
+        const std::vector<papa::features::FeaturePtr> feats =
+            packed ? std::vector<papa::features::FeaturePtr>{section(".text"), section(".packed")}
+                   : std::vector<papa::features::FeaturePtr>{section(".text")};
         FakeFileExtractor extractor(feats);
 
         auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
