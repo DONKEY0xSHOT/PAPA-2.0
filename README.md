@@ -9,7 +9,7 @@ PAPA keeps CAPA's rule semantics and report format, but it's much faster!
 - **Full CAPA rule syntax** - every feature, statement, subscope, and
   `count(...)` range, including `or fewer` / `or more`, plus COM class and
   interface lookups.
-- **Byte-identical text report** and a **JSON report** that is
+- **Byte-identical default text report** and a **JSON report** that is
   field-compatible with `capa.exe --json`, so any tool that already consumes
   CAPA reports works unchanged.
 - **No runtime** - a single native executable that imports only `kernel32.dll`,
