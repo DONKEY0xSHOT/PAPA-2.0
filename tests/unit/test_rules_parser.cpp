@@ -458,13 +458,129 @@ TEST_CASE("rules: com/class and com/interface expand to Or(Bytes, String)") {
     }
 }
 
-TEST_CASE("rules: a rule missing its name, a feature outside its scope or an unknown COM name is rejected") {
+TEST_CASE("rules: each malformed rule is rejected as an invalid rule that names its fault") {
+    using papa_tests::rule_yaml;
+    // A whole rule with the given meta and features blocks, each line indented for its place
+    const auto doc = [](std::string_view meta, std::string_view features) {
+        return std::string{"rule:\n"}.append(meta).append(features);
+    };
+    constexpr std::string_view kMeta =
+        "  meta:\n"
+        "    name: r\n"
+        "    scopes:\n"
+        "      static: function\n"
+        "      dynamic: unsupported\n";
+    constexpr std::string_view kFeatures =
+        "  features:\n"
+        "    - api: foo\n";
     struct Row {
         std::string_view label;
         std::string      text;
         std::string_view detail;
     };
     const std::vector<Row> rows{
+        // Document shape
+        {"a document that is a sequence", "- a\n", "rule document must have a top-level mapping"},
+        {"a document without rule", "foo: bar\n", "missing top-level 'rule:'"},
+        {"a rule that is a scalar", "rule: x\n", "'rule:' must be a mapping"},
+        {"a rule without meta", doc("", kFeatures), "rule is missing 'meta:'"},
+        {"a meta that is a scalar", doc("  meta: x\n", kFeatures), "'meta:' must be a mapping"},
+        {"a rule without features", doc(kMeta, ""), "rule is missing 'features:'"},
+        {"a features block that is a scalar", doc(kMeta, "  features: x\n"),
+         "'features:' must be a sequence"},
+        {"a feature item that is a scalar", doc(kMeta, "  features:\n    - just text\n"),
+         "feature item must be a mapping"},
+        // Meta fields
+        {"a name that is a list",
+         doc("  meta:\n    name:\n      - a\n    scopes:\n      static: function\n", kFeatures),
+         "'meta.name' must be scalar"},
+        {"a namespace that is a list",
+         doc(std::string{kMeta}.append("    namespace:\n      - a\n"), kFeatures),
+         "'meta.namespace' must be scalar"},
+        {"a legacy scope that is a list", doc("  meta:\n    name: r\n    scope:\n      - file\n", kFeatures),
+         "'meta.scope' must be scalar"},
+        {"a scopes value that is a scalar", doc("  meta:\n    name: r\n    scopes: function\n", kFeatures),
+         "'meta.scopes' must be a mapping"},
+        {"a scopes entry that is a list",
+         doc("  meta:\n    name: r\n    scopes:\n      static:\n        - function\n", kFeatures),
+         "'meta.scopes' entries must be scalar"},
+        {"an unknown scopes key",
+         doc(std::string{kMeta}.append("      other: file\n"), kFeatures), "unknown scopes key: other"},
+        {"an unknown static scope", rule_yaml("r", "bogus", {"api: foo"}), "unknown scope name: bogus"},
+        {"an att&ck mapping that is not a list",
+         doc(std::string{kMeta}.append("    att&ck: T1082\n"), kFeatures),
+         "meta.att&ck must be a sequence"},
+        // Statements
+        {"an and whose value is a scalar", rule_yaml("r", "function", {"and: x"}),
+         "expected a sequence of child statements"},
+        {"a not with two children",
+         rule_yaml("r", "function", {"not:\n      - api: a\n      - api: b"}),
+         "'not' takes exactly one child"},
+        {"an N or more without an integer", rule_yaml("r", "function", {"x or more:\n      - api: a"}),
+         "malformed N-or-more: x or more"},
+        {"an unknown feature key", rule_yaml("r", "function", {"bogus: x"}),
+         "unknown feature key: bogus"},
+        {"a feature value that is a list", rule_yaml("r", "function", {"api:\n      - a"}),
+         "feature 'api' expects a scalar value"},
+        {"a feature with a description and another sibling key",
+         rule_yaml("r", "function", {"api: foo\n      description: d\n      bogus: x"}),
+         "unexpected sibling key in feature mapping: bogus"},
+        {"a characteristic outside its scope", rule_yaml("r", "basic block", {"characteristic: loop"}),
+         "characteristic 'loop' not allowed at scope basic block"},
+        // Numbers and operands
+        {"an invalid float literal", rule_yaml("r", "function", {"number: 1.5x"}), "invalid float: 1.5x"},
+        {"a bare 0x", rule_yaml("r", "function", {"number: 0x"}), "invalid integer: 0x"},
+        {"an integer with trailing junk", rule_yaml("r", "function", {"number: 12zz"}),
+         "invalid integer: 12zz"},
+        {"an empty operand number", rule_yaml("r", "function", {"operand[0].number:"}),
+         "empty number literal"},
+        {"an operand key without its closing bracket", rule_yaml("r", "function", {"operand[0.number: 1"}),
+         "malformed operand key: operand[0.number"},
+        {"an operand index that is not an integer", rule_yaml("r", "function", {"operand[x].number: 1"}),
+         "operand index out of range: operand[x].number"},
+        {"an unknown operand suffix", rule_yaml("r", "function", {"operand[0].bogus: 1"}),
+         "unknown operand suffix: operand[0].bogus"},
+        {"a floating point operand offset", rule_yaml("r", "function", {"operand[0].offset: 1.5"}),
+         "operand offset cannot be floating point"},
+        {"an unknown property access", rule_yaml("r", "instruction", {"property/bogus: x"}),
+         "unknown property access: property/bogus"},
+        // Bytes
+        {"a bytes value with a wildcard", rule_yaml("r", "function", {"bytes: 01 ?? 02"}),
+         "bytes wildcards are not yet supported in v1"},
+        {"a bytes value with an odd nibble count", rule_yaml("r", "function", {"bytes: ABC"}),
+         "bytes literal has odd nibble count"},
+        {"a bytes value with a pair that is not hex", rule_yaml("r", "function", {"bytes: ZZ"}),
+         "bytes literal has invalid hex pair: ZZ"},
+        {"an empty bytes value", rule_yaml("r", "function", {"bytes:"}), "bytes literal is empty"},
+        // COM
+        {"a com/class value that is a list", rule_yaml("r", "instruction", {"com/class:\n      - ShellDesktop"}),
+         "'com/class' value must be scalar"},
+        {"a com/class at global scope", rule_yaml("r", "global", {"com/class: ShellDesktop"}),
+         "'com/class' not allowed at scope global"},
+        {"an unknown com/interface name", rule_yaml("r", "instruction", {"com/interface: NotAnInterface"}),
+         "unknown COM interface name: NotAnInterface"},
+        // Counts
+        {"a count(basic blocks) value that is a list",
+         rule_yaml("r", "function", {"count(basic blocks):\n      - 1"}),
+         "count(basic blocks) value must be a scalar range"},
+        {"a count of a feature whose value is a list",
+         rule_yaml("r", "function", {"count(api(a)):\n      - 1"}), "count(...) value must be a scalar range"},
+        {"a count of a file feature at function scope",
+         rule_yaml("r", "function", {"count(section(.text)): 1"}),
+         "feature in count(): section not allowed at scope function"},
+        {"a count tuple without a comma", rule_yaml("r", "function", {"count(api(a)): (1 3)"}),
+         "count range tuple missing comma: (1 3)"},
+        {"a count tuple with a part that is not an integer",
+         rule_yaml("r", "function", {"count(api(a)): (a, 3)"}),
+         "count range tuple parts not integral: (a, 3)"},
+        {"a count tuple whose min is above its max", rule_yaml("r", "function", {"count(api(a)): (3, 1)"}),
+         "count range min > max: (3, 1)"},
+        {"an N or more count without an integer", rule_yaml("r", "function", {"count(api(a)): x or more"}),
+         "count range 'N or more' lacks integer: x or more"},
+        {"an N or fewer count without an integer", rule_yaml("r", "function", {"count(api(a)): x or fewer"}),
+         "count range 'N or fewer' lacks integer: x or fewer"},
+        {"a count that is not a number", rule_yaml("r", "function", {"count(api(a)): many"}),
+         "count range value not integral: many"},
         {"a missing name",
          "rule:\n"
          "  meta:\n"

@@ -2,6 +2,7 @@
 
 #include "doctest.h"
 
+#include "papa/exceptions.h"
 #include "papa/util/yaml.h"
 
 #include <cstddef>
@@ -157,25 +158,70 @@ TEST_CASE("yaml: a literal block scalar keeps its newlines unless chomped, and t
     }
 }
 
-TEST_CASE("yaml: tabs, anchors, aliases, flow collections, unterminated quotes and bad escapes are parse errors") {
+TEST_CASE("yaml: each malformed document is a parse error that names its fault, and a wrong-kind accessor throws") {
+    // Parse expects a parse error, and the others parse and then call that accessor on the root
+    enum class Call { kParse, kScalar, kSequence, kMapping };
     struct Row {
         std::string_view label;
         std::string_view text;
+        std::string_view detail;
+        Call             call = Call::kParse;
     };
+    constexpr std::string_view kUnsupported =
+        "anchors, aliases, tags, and flow collections are not supported";
     const std::vector<Row> rows{
-        {"a tab in indentation", "a:\n\tb: 1\n"},
-        {"an anchor and an alias", "a: &x foo\nb: *x\n"},
-        {"a flow sequence", "a: [1, 2, 3]\n"},
-        {"a flow mapping", "a: {x: 1}\n"},
-        {"an unterminated double-quoted string", "a: \"unterminated\n"},
-        {"an unterminated single-quoted string", "a: 'unterminated\n"},
-        {"an invalid hex escape", "a: \"bad\\xZZ\"\n"},
+        {"a tab in indentation", "a:\n\tb: 1\n", "tab in indentation is not allowed"},
+        {"an anchor and an alias", "a: &x foo\nb: *x\n", kUnsupported},
+        {"a flow sequence", "a: [1, 2, 3]\n", kUnsupported},
+        {"a flow mapping", "a: {x: 1}\n", kUnsupported},
+        {"an unterminated double-quoted string", "a: \"unterminated\n",
+         "unterminated double-quoted string"},
+        {"an unterminated single-quoted string", "a: 'unterminated\n",
+         "unterminated single-quoted string"},
+        {"an invalid hex escape", "a: \"bad\\xZZ\"\n", "invalid hex digit in \\xNN escape"},
+        {"a truncated hex escape", "a: \"\\x4\"\n", "truncated \\xNN escape in double-quoted string"},
+        {"a truncated unicode escape", "a: \"\\u12\"\n",
+         "truncated \\uNNNN escape in double-quoted string"},
+        {"an invalid unicode escape digit", "a: \"\\u12G4\"\n", "invalid hex digit in \\uNNNN escape"},
+        {"a surrogate unicode escape", "a: \"\\uD800\"\n", "surrogate code point in \\uNNNN escape"},
+        {"an unknown escape", "a: \"\\q\"\n", "unknown escape in double-quoted string"},
+        {"a value that is no sequence, mapping or scalar", "a:\n  @x\n",
+         "expected a sequence, mapping, or scalar value"},
+        {"a mapping indented under a sequence item", "a:\n  - x\n    b: c\n",
+         "unexpected indent inside sequence"},
+        {"a key indented under a mapping value", "a: 1\n  b: 2\n", "unexpected indent inside mapping"},
+        {"text after a double-quoted key", "\"ab\"c: v\n", "unterminated double-quoted key"},
+        {"text after a single-quoted key", "'ab'c: v\n", "unterminated single-quoted key"},
+        {"a sequence item after the root mapping", "a: 1\n- b\n", "extra content after document end"},
+        {"a second document", "a: 1\n---\nb: 2\n", "extra content after document end"},
+        {"scalar() on a mapping", "a: 1\n", "scalar called on non-scalar node", Call::kScalar},
+        {"sequence() on a mapping", "a: 1\n", "sequence called on non-sequence node",
+         Call::kSequence},
+        {"mapping() on a scalar", "", "mapping called on non-mapping node", Call::kMapping},
     };
     for (const Row& row : rows) {
         CAPTURE(row.label);
         const auto r = parse(row.text);
-        CHECK_FALSE(r);
-        if (!r) { CHECK(r.error().kind == papa::ErrorKind::kYamlParseError); }
+        if (row.call == Call::kParse) {
+            CHECK_FALSE(r);
+            if (r) { continue; }
+            CHECK(r.error().kind == papa::ErrorKind::kYamlParseError);
+            CHECK(r.error().detail.find(row.detail) != std::string::npos);
+            continue;
+        }
+        REQUIRE(r);
+        std::string thrown;
+        try {
+            switch (row.call) {
+                case Call::kScalar:   (void)r->scalar();   break;
+                case Call::kSequence: (void)r->sequence(); break;
+                case Call::kMapping:  (void)r->mapping();  break;
+                case Call::kParse:    break;
+            }
+        } catch (const papa::PapaInvariantError& e) {
+            thrown = e.what();
+        }
+        CHECK(thrown.find(row.detail) != std::string::npos);
     }
 }
 
