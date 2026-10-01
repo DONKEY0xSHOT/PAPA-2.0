@@ -5,6 +5,8 @@
 #include "papa/features/extractors/papa_native/emu/intel_emulator.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 
+#include "test_support.h"
+
 #include <array>
 #include <cstdint>
 
@@ -13,6 +15,10 @@ namespace pn = papa::features::extractors::papa_native;
 
 // The operand-access layer bridges Zydis-decoded operands to register and memory
 // state. Synthetic instructions drive the tests, so no real PE is needed
+
+using papa_tests::imm;
+using papa_tests::mem;
+using papa_tests::reg;
 
 namespace {
 
@@ -27,38 +33,26 @@ pn::DecodedInsn make_insn(pn::DecodedOperand op, std::uint64_t va = 0x1000,
     return insn;
 }
 
-pn::DecodedOperand reg_oper(ZydisRegister r, std::size_t width) {
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kReg;
-    op.base_reg = r;
-    op.width_bytes = width;
-    return op;
-}
-
 }  // namespace
 
 TEST_CASE("emu operands: get_oper_value reads a 32-bit register") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0xDEADBEEFU);
-    const pn::DecodedInsn insn = make_insn(reg_oper(ZYDIS_REGISTER_EAX, 4));
+    const pn::DecodedInsn insn = make_insn(reg(ZYDIS_REGISTER_EAX, 4));
     CHECK(e.get_oper_value(insn, 0) == 0xDEADBEEFULL);
 }
 
 TEST_CASE("emu operands: get_oper_value reads a sub-register lane") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x11223344U);
-    CHECK(e.get_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_AL, 1)), 0) == 0x44ULL);
-    CHECK(e.get_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_AH, 1)), 0) == 0x33ULL);
-    CHECK(e.get_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_AX, 2)), 0) == 0x3344ULL);
+    CHECK(e.get_oper_value(make_insn(reg(ZYDIS_REGISTER_AL, 1)), 0) == 0x44ULL);
+    CHECK(e.get_oper_value(make_insn(reg(ZYDIS_REGISTER_AH, 1)), 0) == 0x33ULL);
+    CHECK(e.get_oper_value(make_insn(reg(ZYDIS_REGISTER_AX, 2)), 0) == 0x3344ULL);
 }
 
 TEST_CASE("emu operands: get_oper_value returns an immediate") {
     emu::IntelEmulator e;
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kImm;
-    op.imm = 0x12345678U;
-    op.width_bytes = 4;
-    CHECK(e.get_oper_value(make_insn(op), 0) == 0x12345678ULL);
+    CHECK(e.get_oper_value(make_insn(imm(0x12345678U, 4)), 0) == 0x12345678ULL);
 }
 
 TEST_CASE("emu operands: get_oper_value on a pc-relative operand is the absolute target") {
@@ -76,23 +70,13 @@ TEST_CASE("emu operands: get_oper_value on a pc-relative operand is the absolute
 TEST_CASE("emu operands: get_oper_addr of [reg + disp]") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x2000U);
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_EAX;
-    op.disp = 0x10;
-    op.width_bytes = 4;
-    CHECK(e.get_oper_addr(make_insn(op), 0) == 0x2010ULL);
+    CHECK(e.get_oper_addr(make_insn(mem(ZYDIS_REGISTER_EAX, 0x10, 4)), 0) == 0x2010ULL);
 }
 
 TEST_CASE("emu operands: get_oper_addr of [reg - disp] handles a negative displacement") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEbp, 0x3000U);
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_EBP;
-    op.disp = -0x8;
-    op.width_bytes = 4;
-    CHECK(e.get_oper_addr(make_insn(op), 0) == 0x2FF8ULL);
+    CHECK(e.get_oper_addr(make_insn(mem(ZYDIS_REGISTER_EBP, -0x8, 4)), 0) == 0x2FF8ULL);
 }
 
 TEST_CASE("emu operands: get_oper_value of [reg + disp] reads memory") {
@@ -100,12 +84,7 @@ TEST_CASE("emu operands: get_oper_value of [reg + disp] reads memory") {
     static constexpr std::array<std::uint8_t, 4> data = {0xEF, 0xBE, 0xAD, 0xDE};
     e.memory().add_map(0x2000, emu::kMemRead, data);
     e.regs().set_register(emu::kRegEax, 0x2000U);
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_EAX;
-    op.disp = 0;
-    op.width_bytes = 4;
-    CHECK(e.get_oper_value(make_insn(op), 0) == 0xDEADBEEFULL);
+    CHECK(e.get_oper_value(make_insn(mem(ZYDIS_REGISTER_EAX, 0, 4)), 0) == 0xDEADBEEFULL);
 }
 
 TEST_CASE("emu operands: get_oper_addr of a SIB [base + index*scale + disp]") {
@@ -134,14 +113,14 @@ TEST_CASE("emu operands: get_oper_addr of an absolute [imm]") {
 
 TEST_CASE("emu operands: set_oper_value writes a register") {
     emu::IntelEmulator e;
-    e.set_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_EDX, 4)), 0, 0xCAFEBABEULL);
+    e.set_oper_value(make_insn(reg(ZYDIS_REGISTER_EDX, 4)), 0, 0xCAFEBABEULL);
     CHECK(e.regs().get_register(emu::kRegEdx) == 0xCAFEBABEULL);
 }
 
 TEST_CASE("emu operands: set_oper_value on a sub-register splices the lane") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEbx, 0x11223344U);
-    e.set_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_BL, 1)), 0, 0xFFULL);
+    e.set_oper_value(make_insn(reg(ZYDIS_REGISTER_BL, 1)), 0, 0xFFULL);
     CHECK(e.regs().get_register(emu::kRegEbx) == 0x112233FFULL);
 }
 
@@ -149,24 +128,15 @@ TEST_CASE("emu operands: set_oper_value writes memory at [reg + disp]") {
     emu::IntelEmulator e;
     e.memory().init_stack();
     e.regs().set_register(emu::kRegEsp, static_cast<std::uint32_t>(emu::kStackBase));
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_ESP;
-    op.disp = 0x20;
-    op.width_bytes = 4;
-    e.set_oper_value(make_insn(op), 0, 0x12345678ULL);
+    e.set_oper_value(make_insn(mem(ZYDIS_REGISTER_ESP, 0x20, 4)), 0, 0x12345678ULL);
     CHECK(e.memory().read_value(emu::kStackBase + 0x20, 4) == 0x12345678ULL);
 }
 
 TEST_CASE("emu operands: get_oper_addr masks the computed address to 32 bits") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0xFFFFFFF0U);
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_EAX;
-    op.disp = 0x20;  // 0xFFFFFFF0 + 0x20 = 0x1'00000010 -> wraps to 0x10
-    op.width_bytes = 4;
-    CHECK(e.get_oper_addr(make_insn(op), 0) == 0x10ULL);
+    // 0xFFFFFFF0 + 0x20 = 0x1'00000010 wraps to 0x10
+    CHECK(e.get_oper_addr(make_insn(mem(ZYDIS_REGISTER_EAX, 0x20, 4)), 0) == 0x10ULL);
 }
 
 // amd64 addressing: rip is 64-bit and addresses are not truncated, so near branches
@@ -201,31 +171,26 @@ TEST_CASE("emu operands amd64: an absolute [imm] address keeps its high bits") {
 TEST_CASE("emu operands amd64: get_oper_value reads a 64-bit register (rax)") {
     emu::IntelEmulator e(/*is_64bit=*/true);
     e.regs().set_register(emu::kRegRax, 0x1122334455667788ULL);
-    CHECK(e.get_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_RAX, 8)), 0)
+    CHECK(e.get_oper_value(make_insn(reg(ZYDIS_REGISTER_RAX, 8)), 0)
           == 0x1122334455667788ULL);
 }
 
 TEST_CASE("emu operands amd64: get_oper_value reads an extended register (r8)") {
     emu::IntelEmulator e(/*is_64bit=*/true);
     e.regs().set_register(emu::kRegR8, 0xAABBCCDDEEFF0011ULL);
-    CHECK(e.get_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_R8, 8)), 0)
+    CHECK(e.get_oper_value(make_insn(reg(ZYDIS_REGISTER_R8, 8)), 0)
           == 0xAABBCCDDEEFF0011ULL);
 }
 
 TEST_CASE("emu operands amd64: writing the eax operand zero-extends rax") {
     emu::IntelEmulator e(/*is_64bit=*/true);
     e.regs().set_register(emu::kRegRax, 0x1122334455667788ULL);
-    e.set_oper_value(make_insn(reg_oper(ZYDIS_REGISTER_EAX, 4)), 0, 0xDEADBEEFULL);
+    e.set_oper_value(make_insn(reg(ZYDIS_REGISTER_EAX, 4)), 0, 0xDEADBEEFULL);
     CHECK(e.regs().get_register(emu::kRegRax) == 0x00000000DEADBEEFULL);
 }
 
 TEST_CASE("emu operands amd64: a base register in [rax + disp] resolves 64-bit") {
     emu::IntelEmulator e(/*is_64bit=*/true);
     e.regs().set_register(emu::kRegRax, 0x140002000ULL);
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kRegMem;
-    op.base_reg = ZYDIS_REGISTER_RAX;
-    op.disp = 0x10;
-    op.width_bytes = 8;
-    CHECK(e.get_oper_addr(make_insn(op), 0) == 0x140002010ULL);
+    CHECK(e.get_oper_addr(make_insn(mem(ZYDIS_REGISTER_RAX, 0x10, 8)), 0) == 0x140002010ULL);
 }

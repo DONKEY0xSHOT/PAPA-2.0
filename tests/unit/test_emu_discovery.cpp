@@ -17,7 +17,6 @@
 #include "test_support.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <unordered_map>
@@ -134,9 +133,7 @@ TEST_CASE("emu discovery: riprel_lea_target computes the lea [rip+disp] pointer"
     const pn::Disassembler disasm(/*is_64bit=*/true);
     // lea rdx, [rip + 0xFF8]  (48 8D 15 F8 0F 00 00), length 7.
     // target = va + length + disp
-    const std::array<std::byte, 7> bytes{
-        std::byte{0x48}, std::byte{0x8D}, std::byte{0x15},
-        std::byte{0xF8}, std::byte{0x0F}, std::byte{0x00}, std::byte{0x00}};
+    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x15, 0xF8, 0x0F, 0x00, 0x00);
     auto lea = disasm.decode(bytes, 0x1000);
     REQUIRE(lea.has_value());
     const auto target = emu::riprel_lea_target(*lea);
@@ -147,9 +144,7 @@ TEST_CASE("emu discovery: riprel_lea_target computes the lea [rip+disp] pointer"
 TEST_CASE("emu discovery: riprel_lea_target ignores a non-lea rip-relative load") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
     // mov rdx, [rip + 0xFF8]  (48 8B 15 ...): a dereference, not an address
-    const std::array<std::byte, 7> bytes{
-        std::byte{0x48}, std::byte{0x8B}, std::byte{0x15},
-        std::byte{0xF8}, std::byte{0x0F}, std::byte{0x00}, std::byte{0x00}};
+    const auto bytes = papa_tests::bytes(0x48, 0x8B, 0x15, 0xF8, 0x0F, 0x00, 0x00);
     auto mov = disasm.decode(bytes, 0x1000);
     REQUIRE(mov.has_value());
     CHECK_FALSE(emu::riprel_lea_target(*mov).has_value());
@@ -158,8 +153,7 @@ TEST_CASE("emu discovery: riprel_lea_target ignores a non-lea rip-relative load"
 TEST_CASE("emu discovery: riprel_lea_target ignores a lea with a register base") {
     const pn::Disassembler disasm(/*is_64bit=*/true);
     // lea rdx, [rax + 8]  (48 8D 50 08): runtime-dependent, not a static pointer
-    const std::array<std::byte, 4> bytes{
-        std::byte{0x48}, std::byte{0x8D}, std::byte{0x50}, std::byte{0x08}};
+    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x50, 0x08);
     auto lea = disasm.decode(bytes, 0x1000);
     REQUIRE(lea.has_value());
     CHECK_FALSE(emu::riprel_lea_target(*lea).has_value());

@@ -6,6 +6,8 @@
 
 #include "papa/constants.h"
 
+#include "test_support.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -21,11 +23,6 @@ using papa::features::extractors::strings::is_in_repeat_fill_region;
 
 namespace {
 
-[[nodiscard]] std::span<const std::byte> as_bytes(const std::string& s) {
-    return std::span<const std::byte>(
-        reinterpret_cast<const std::byte*>(s.data()), s.size());
-}
-
 [[nodiscard]] bool contains_value(const std::vector<ExtractedString>& v, std::string_view s) {
     return std::any_of(v.begin(), v.end(),
         [&](const ExtractedString& e) { return e.value == s; });
@@ -35,7 +32,7 @@ namespace {
 
 TEST_CASE("strings: extract_ascii_strings finds runs above min_len") {
     const std::string buf = std::string("\x01HelloWorld\x00", 12) + "ab" + std::string("\x00Greetings", 10);
-    auto found = extract_ascii_strings(as_bytes(buf));
+    auto found = extract_ascii_strings(papa_tests::text_bytes(buf));
     CHECK(contains_value(found, "HelloWorld"));
     CHECK(contains_value(found, "Greetings"));
     // "ab" is below the default min length of 4
@@ -44,7 +41,7 @@ TEST_CASE("strings: extract_ascii_strings finds runs above min_len") {
 
 TEST_CASE("strings: extract_ascii_strings honors a custom minimum length") {
     const std::string buf = std::string("\x00", 1) + "abc" + std::string("\x00", 1);
-    auto found = extract_ascii_strings(as_bytes(buf), 3);
+    auto found = extract_ascii_strings(papa_tests::text_bytes(buf), 3);
     REQUIRE(found.size() == 1);
     CHECK(found[0].value == "abc");
     CHECK(found[0].offset == 1);
@@ -52,7 +49,7 @@ TEST_CASE("strings: extract_ascii_strings honors a custom minimum length") {
 
 TEST_CASE("strings: extract_ascii_strings recovers a trailing run at EOB") {
     const std::string buf = std::string("\x00prefix") + "TailString";
-    auto found = extract_ascii_strings(as_bytes(buf));
+    auto found = extract_ascii_strings(papa_tests::text_bytes(buf));
     CHECK(contains_value(found, "TailString"));
 }
 

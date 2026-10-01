@@ -16,20 +16,10 @@ namespace pv = papa::features::extractors::papa_native::viv;
 
 using pn::Disassembler;
 
-namespace {
-
-template <typename... B>
-constexpr auto make_bytes(B... bs) {
-    return std::array<std::byte, sizeof...(B)>{
-        std::byte{static_cast<std::uint8_t>(bs)}...};
-}
-
-}  // namespace
-
 TEST_CASE("Discovery make_function defines the function's code and builds its blocks inline") {
     const Disassembler d(/*is_64bit=*/false);
     // 0x1000: 90 nop / 0x1001: 90 nop / 0x1002: c3 ret
-    const auto bytes  = make_bytes(0x90, 0x90, 0xC3);
+    const auto bytes  = papa_tests::bytes(0x90, 0x90, 0xC3);
     const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
 
     pv::Discovery disc(reader, [](std::uint64_t) { return true; });
@@ -114,7 +104,7 @@ TEST_CASE("Discovery's FLIRT fmod creates a sub-function when a function is made
 
 TEST_CASE("Discovery make_pointer follows a reloc pointer to make its target a function") {
     const Disassembler d(/*is_64bit=*/false);
-    const auto code   = make_bytes(0xC3);  // ret at 0x2000, the pointer's target
+    const auto code   = papa_tests::bytes(0xC3);  // ret at 0x2000, the pointer's target
     const auto reader = papa_tests::make_span_reader(code, 0x2000, d);
 
     const pv::Discovery::ReadPtr read_ptr =

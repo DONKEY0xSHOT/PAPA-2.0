@@ -5,6 +5,8 @@
 #include "papa/features/extractors/papa_native/emu/intel_emulator.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 
+#include "test_support.h"
+
 #include <cstdint>
 
 namespace emu = papa::features::extractors::papa_native::emu;
@@ -12,6 +14,10 @@ namespace pn = papa::features::extractors::papa_native;
 
 // Control-flow handlers and shifts ported from envi/archs/i386/emu.py. These are
 // what let an emulated function body run to its ret
+
+using papa_tests::imm;
+using papa_tests::insn;
+using papa_tests::reg;
 
 namespace {
 
@@ -27,43 +33,6 @@ pn::DecodedInsn branch_insn(ZydisMnemonic m, std::uint64_t target,
     insn.operands[0] = op;
     insn.operand_count = 1;
     insn.branch_target = target;
-    return insn;
-}
-
-pn::DecodedInsn no_oper_insn(ZydisMnemonic m, std::uint64_t va = 0x1000,
-                             std::size_t length = 1) {
-    pn::DecodedInsn insn;
-    insn.va = va;
-    insn.length = length;
-    insn.zyd_mnem = m;
-    insn.operand_count = 0;
-    return insn;
-}
-
-pn::DecodedOperand reg_oper(ZydisRegister r, std::size_t width) {
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kReg;
-    op.base_reg = r;
-    op.width_bytes = width;
-    return op;
-}
-
-pn::DecodedOperand imm_oper(std::uint64_t v, std::size_t width) {
-    pn::DecodedOperand op;
-    op.kind = pn::OperandKind::kImm;
-    op.imm = v;
-    op.width_bytes = width;
-    return op;
-}
-
-pn::DecodedInsn insn2(ZydisMnemonic m, pn::DecodedOperand a, pn::DecodedOperand b) {
-    pn::DecodedInsn insn;
-    insn.va = 0x1000;
-    insn.length = 3;
-    insn.zyd_mnem = m;
-    insn.operands[0] = a;
-    insn.operands[1] = b;
-    insn.operand_count = 2;
     return insn;
 }
 
@@ -112,7 +81,7 @@ TEST_CASE("emu cf: ret pops the return address into the program counter") {
     emu::IntelEmulator e = stacked();
     const std::uint64_t sp0 = e.regs().get_register(emu::kRegEsp);
     e.memory().write_value(sp0, 0x401005ULL, 4);
-    e.execute_opcode(no_oper_insn(ZYDIS_MNEMONIC_RET));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_RET));
     CHECK(e.program_counter() == 0x401005ULL);
     CHECK(e.regs().get_register(emu::kRegEsp) == sp0 + 4U);
 }
@@ -125,7 +94,7 @@ TEST_CASE("emu cf: ret imm also adjusts the stack pointer by the immediate") {
     insn.va = 0x2000;
     insn.length = 3;
     insn.zyd_mnem = ZYDIS_MNEMONIC_RET;
-    insn.operands[0] = imm_oper(0x8U, 2);
+    insn.operands[0] = imm(0x8U, 2);
     insn.operand_count = 1;
     e.execute_opcode(insn);
     CHECK(e.program_counter() == 0x401005ULL);
@@ -228,7 +197,7 @@ TEST_CASE("emu cf: an indirect jmp through a register targets the register value
     insn.va = 0x1000;
     insn.length = 2;
     insn.zyd_mnem = ZYDIS_MNEMONIC_JMP;
-    insn.operands[0] = reg_oper(ZYDIS_REGISTER_EAX, 4);
+    insn.operands[0] = reg(ZYDIS_REGISTER_EAX, 4);
     insn.operand_count = 1;
     e.execute_opcode(insn);
     CHECK(e.program_counter() == 0x00405000ULL);
@@ -239,7 +208,7 @@ TEST_CASE("emu cf: leave restores ESP from EBP and pops EBP") {
     const std::uint32_t frame = static_cast<std::uint32_t>(emu::kStackBase) + 0x200U;
     e.regs().set_register(emu::kRegEbp, frame);
     e.memory().write_value(frame, 0xAABBCCDDULL, 4);  // saved EBP
-    e.execute_opcode(no_oper_insn(ZYDIS_MNEMONIC_LEAVE));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_LEAVE));
     CHECK(e.regs().get_register(emu::kRegEbp) == 0xAABBCCDDULL);
     CHECK(e.regs().get_register(emu::kRegEsp) == frame + 4U);
 }
@@ -247,8 +216,8 @@ TEST_CASE("emu cf: leave restores ESP from EBP and pops EBP") {
 TEST_CASE("emu cf: shl shifts left and sets the carry out") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x1U);
-    e.execute_opcode(insn2(ZYDIS_MNEMONIC_SHL, reg_oper(ZYDIS_REGISTER_EAX, 4),
-                           imm_oper(4U, 1)));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_SHL, reg(ZYDIS_REGISTER_EAX, 4),
+                          imm(4U, 1)));
     CHECK(e.regs().get_register(emu::kRegEax) == 0x10ULL);
 }
 
@@ -256,8 +225,8 @@ TEST_CASE("emu cf: shl by zero leaves flags unchanged") {
     emu::IntelEmulator e;
     e.regs().set_flag(emu::kEflagsCf, true);
     e.regs().set_register(emu::kRegEax, 0x1U);
-    e.execute_opcode(insn2(ZYDIS_MNEMONIC_SHL, reg_oper(ZYDIS_REGISTER_EAX, 4),
-                           imm_oper(0U, 1)));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_SHL, reg(ZYDIS_REGISTER_EAX, 4),
+                          imm(0U, 1)));
     CHECK(e.regs().get_register(emu::kRegEax) == 0x1ULL);
     CHECK(e.regs().get_flag(emu::kEflagsCf));  // unchanged
 }
@@ -265,24 +234,24 @@ TEST_CASE("emu cf: shl by zero leaves flags unchanged") {
 TEST_CASE("emu cf: shr shifts right") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x10U);
-    e.execute_opcode(insn2(ZYDIS_MNEMONIC_SHR, reg_oper(ZYDIS_REGISTER_EAX, 4),
-                           imm_oper(4U, 1)));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_SHR, reg(ZYDIS_REGISTER_EAX, 4),
+                          imm(4U, 1)));
     CHECK(e.regs().get_register(emu::kRegEax) == 0x1ULL);
 }
 
 TEST_CASE("emu cf: sar shifts right with sign fill") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x80000000U);
-    e.execute_opcode(insn2(ZYDIS_MNEMONIC_SAR, reg_oper(ZYDIS_REGISTER_EAX, 4),
-                           imm_oper(4U, 1)));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_SAR, reg(ZYDIS_REGISTER_EAX, 4),
+                          imm(4U, 1)));
     CHECK(e.regs().get_register(emu::kRegEax) == 0xF8000000ULL);
 }
 
 TEST_CASE("emu cf: shl producing zero sets ZF") {
     emu::IntelEmulator e;
     e.regs().set_register(emu::kRegEax, 0x80000000U);
-    e.execute_opcode(insn2(ZYDIS_MNEMONIC_SHL, reg_oper(ZYDIS_REGISTER_EAX, 4),
-                           imm_oper(1U, 1)));
+    e.execute_opcode(insn(ZYDIS_MNEMONIC_SHL, reg(ZYDIS_REGISTER_EAX, 4),
+                          imm(1U, 1)));
     CHECK(e.regs().get_register(emu::kRegEax) == 0ULL);
     CHECK(e.regs().get_flag(emu::kEflagsZf));
 }

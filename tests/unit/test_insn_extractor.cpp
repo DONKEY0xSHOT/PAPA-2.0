@@ -19,13 +19,13 @@
 
 #include <filesystem>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
 #include <variant>
 #include "fixture_paths.h"
+#include "test_support.h"
 
 using papa::features::AbsoluteVirtualAddress;
 using papa::features::Characteristic;
@@ -35,7 +35,6 @@ using papa::features::Number;
 using papa::features::Offset;
 using papa::features::OperandNumber;
 using papa::features::OperandOffset;
-using papa::features::extractors::papa_native::BasicBlock;
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::DecodedOperand;
 using papa::features::extractors::papa_native::Function;
@@ -496,10 +495,7 @@ TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
     // mov rax, gs:[0x30]. capa treats the SIB displacement as an offset only, so
     // extract_number must stay silent and extract_offset must surface Offset(0x30)
     papa::features::extractors::papa_native::Disassembler dis(true);
-    const std::array<std::byte, 9> bytes{
-        std::byte{0x65}, std::byte{0x48}, std::byte{0x8B}, std::byte{0x04},
-        std::byte{0x25}, std::byte{0x30}, std::byte{0x00}, std::byte{0x00},
-        std::byte{0x00}};
+    const auto bytes = papa_tests::bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
     REQUIRE(ins.has_value());
     CHECK(ins->operands[1].kind == OperandKind::kSib);
@@ -522,9 +518,7 @@ TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number"
     // lea rcx, [r12 + 0xB8]. r12 forces a SIB byte, so capa emits no number from it and
     // only the non-SIB lea surfaces the displacement as a number
     papa::features::extractors::papa_native::Disassembler dis(true);
-    const std::array<std::byte, 8> bytes{
-        std::byte{0x49}, std::byte{0x8D}, std::byte{0x8C}, std::byte{0x24},
-        std::byte{0xB8}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    const auto bytes = papa_tests::bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00);
     const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
     REQUIRE(ins.has_value());
     REQUIRE(ins->zyd_mnem == ZYDIS_MNEMONIC_LEA);
@@ -557,8 +551,7 @@ TEST_CASE("insn: lea with a non-SIB base surfaces the displacement as a number")
     }
     // 48 8D 4B 10 : lea rcx, [rbx + 0x10]  (rbx needs no SIB byte)
     papa::features::extractors::papa_native::Disassembler dis(true);
-    const std::array<std::byte, 4> bytes{
-        std::byte{0x48}, std::byte{0x8D}, std::byte{0x4B}, std::byte{0x10}};
+    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x4B, 0x10);
     const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
     REQUIRE(ins.has_value());
     REQUIRE(ins->zyd_mnem == ZYDIS_MNEMONIC_LEA);
@@ -604,21 +597,6 @@ TEST_CASE("insn: extract_string returns empty when target is unreadable") {
     CHECK(out.empty());
 }
 
-namespace {
-
-// Build a one-block function used as nzxor security-cookie test scaffold
-[[nodiscard]] Function make_function_with_block(std::vector<DecodedInsn> insns) {
-    Function fn;
-    fn.va = insns.empty() ? 0U : insns.front().va;
-    BasicBlock bb;
-    bb.va = fn.va;
-    bb.instructions = std::move(insns);
-    fn.basic_blocks.push_back(std::move(bb));
-    return fn;
-}
-
-}  // namespace
-
 TEST_CASE("insn: extract_nzxor fires on xor of distinct registers") {
     DecodedInsn xor_insn = make_insn(0x4000, "xor");
     xor_insn.zyd_mnem = ZYDIS_MNEMONIC_XOR;
@@ -628,7 +606,7 @@ TEST_CASE("insn: extract_nzxor fires on xor of distinct registers") {
     xor_insn.operands[1].kind = OperandKind::kReg;
     xor_insn.operands[1].base_reg = ZYDIS_REGISTER_EBX;
 
-    Function fn = make_function_with_block({xor_insn});
+    Function fn = papa_tests::single_block_function({xor_insn});
     auto r = extract_nzxor(fn, fn.basic_blocks[0], xor_insn, /*is_64bit=*/false);
     REQUIRE(r.has_value());
     CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "nzxor");
@@ -643,7 +621,7 @@ TEST_CASE("insn: extract_nzxor suppresses xor reg, reg with the same register") 
     ins.operands[1].kind = OperandKind::kReg;
     ins.operands[1].base_reg = ZYDIS_REGISTER_EAX;
 
-    Function fn = make_function_with_block({ins});
+    Function fn = papa_tests::single_block_function({ins});
     CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], ins, false).has_value());
 }
 
@@ -658,7 +636,7 @@ TEST_CASE("insn: extract_nzxor suppresses prologue cookie xor") {
     cookie.operands[1].kind = OperandKind::kReg;
     cookie.operands[1].base_reg = ZYDIS_REGISTER_EBP;
 
-    Function fn = make_function_with_block({cookie});
+    Function fn = papa_tests::single_block_function({cookie});
     fn.basic_blocks[0].va = 0x4000;       // prologue starts here
     CHECK(is_security_cookie(fn, fn.basic_blocks[0], cookie, false));
     CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], cookie, false).has_value());
@@ -673,7 +651,7 @@ TEST_CASE("insn: extract_nzxor ignores non-xor mnemonics") {
     ins.operands[1].kind = OperandKind::kReg;
     ins.operands[1].base_reg = ZYDIS_REGISTER_EBX;
 
-    Function fn = make_function_with_block({ins});
+    Function fn = papa_tests::single_block_function({ins});
     CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], ins, false).has_value());
 }
 
@@ -711,7 +689,7 @@ TEST_CASE("indirect_calls: find_definition recovers mov reg, imm") {
     auto def_insn  = make_mov_reg_imm(0x4000, ZYDIS_REGISTER_EAX, 0xCAFEBABE);
     auto call_insn = make_call_reg(0x4005, ZYDIS_REGISTER_EAX);
 
-    Function fn = make_function_with_block({def_insn, call_insn});
+    Function fn = papa_tests::single_block_function({def_insn, call_insn});
     auto def = papa::features::extractors::papa_native::find_definition(
         fn, 0x4005U, ZYDIS_REGISTER_EAX, /*is_64bit=*/false);
     REQUIRE(def.has_value());
@@ -725,7 +703,7 @@ TEST_CASE("indirect_calls: find_definition resolves enclosing register aliases")
     auto def_insn  = make_mov_reg_imm(0x4000, ZYDIS_REGISTER_RAX, 0x1000);
     auto call_insn = make_call_reg(0x4007, ZYDIS_REGISTER_EAX);
 
-    Function fn = make_function_with_block({def_insn, call_insn});
+    Function fn = papa_tests::single_block_function({def_insn, call_insn});
     auto def = papa::features::extractors::papa_native::find_definition(
         fn, 0x4007U, ZYDIS_REGISTER_EAX, /*is_64bit=*/true);
     REQUIRE(def.has_value());
@@ -745,7 +723,7 @@ TEST_CASE("indirect_calls: find_definition rejects partial-width writes") {
     partial.operands[1].imm  = 0x10;
 
     auto call_insn = make_call_reg(0x4002, ZYDIS_REGISTER_RAX);
-    Function fn = make_function_with_block({partial, call_insn});
+    Function fn = papa_tests::single_block_function({partial, call_insn});
     auto def = papa::features::extractors::papa_native::find_definition(
         fn, 0x4002U, ZYDIS_REGISTER_RAX, /*is_64bit=*/true);
     CHECK_FALSE(def.has_value());
@@ -753,7 +731,7 @@ TEST_CASE("indirect_calls: find_definition rejects partial-width writes") {
 
 TEST_CASE("indirect_calls: find_definition returns nullopt with no preceding write") {
     auto call_insn = make_call_reg(0x4000, ZYDIS_REGISTER_EAX);
-    Function fn = make_function_with_block({call_insn});
+    Function fn = papa_tests::single_block_function({call_insn});
     auto def = papa::features::extractors::papa_native::find_definition(
         fn, 0x4000U, ZYDIS_REGISTER_EAX, false);
     CHECK_FALSE(def.has_value());
@@ -812,7 +790,7 @@ TEST_CASE("insn: extract_api_features ignores non-call instructions") {
     DecodedInsn ins = make_insn(0x401000, "mov");
     ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
     ins.is_call  = false;
-    Function fn = make_function_with_block({ins});
+    Function fn = papa_tests::single_block_function({ins});
 
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
         fn, ins, *img, table, disasm);
@@ -840,7 +818,7 @@ TEST_CASE("insn: extract_api_features yields names when target hits the IAT") {
     ins.operands[0].kind = OperandKind::kImmMem;
     ins.operands[0].disp = static_cast<std::int64_t>(iat_va);
 
-    Function fn = make_function_with_block({ins});
+    Function fn = papa_tests::single_block_function({ins});
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
         fn, ins, *img, table, disasm);
     CHECK_FALSE(out.empty());
@@ -866,7 +844,7 @@ TEST_CASE("insn: extract_api_features returns nothing when no IAT match found") 
     ins.operands[0].kind = OperandKind::kImmMem;
     ins.operands[0].disp = 0xDEADBEEF;             // no IAT lives there
 
-    Function fn = make_function_with_block({ins});
+    Function fn = papa_tests::single_block_function({ins});
     auto out = papa::features::extractors::papa_native::insn::extract_api_features(
         fn, ins, *img, table, disasm);
     CHECK(out.empty());

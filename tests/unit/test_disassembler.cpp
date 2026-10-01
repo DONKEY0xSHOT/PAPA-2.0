@@ -8,13 +8,13 @@
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string_view>
 #include "fixture_paths.h"
+#include "test_support.h"
 
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::Disassembler;
@@ -23,12 +23,6 @@ using papa::features::extractors::papa_native::OperandKind;
 namespace {
 
 const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-// Small helper to turn a list of byte-integers into std::array<std::byte, N>
-template <typename... B>
-constexpr auto make_bytes(B... bs) {
-    return std::array<std::byte, sizeof...(B)>{ std::byte{static_cast<std::uint8_t>(bs)}... };
-}
 
 }  // namespace
 
@@ -42,7 +36,7 @@ TEST_CASE("decode rejects an empty buffer") {
 TEST_CASE("decode rejects a garbage byte stream") {
     Disassembler d(true);
     // 0x06 is invalid in long mode (legacy PUSH ES)
-    const auto bytes = make_bytes(0x06);
+    const auto bytes = papa_tests::bytes(0x06);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     CHECK_FALSE(r.has_value());
     CHECK(r.error().kind == papa::ErrorKind::kDisassemblyFailed);
@@ -52,7 +46,7 @@ TEST_CASE("decode flags a SIB-encoded base+disp memory operand") {
     Disassembler d(true);
     // 49 8D 8C 24 B8 00 00 00 : lea rcx, [r12 + 0xB8]
     // r12 as a base forces a SIB byte, which vivisect splits into i386SibOper
-    const auto bytes = make_bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     REQUIRE(r->operand_count == 2);
@@ -65,7 +59,7 @@ TEST_CASE("decode flags a SIB-encoded base+disp memory operand") {
 TEST_CASE("decode does not flag a non-SIB base+disp memory operand") {
     Disassembler d(true);
     // 48 8D 4B 10 : lea rcx, [rbx + 0x10]  (rbx needs no SIB byte)
-    const auto bytes = make_bytes(0x48, 0x8D, 0x4B, 0x10);
+    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x4B, 0x10);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     REQUIRE(r->operand_count == 2);
@@ -75,7 +69,7 @@ TEST_CASE("decode does not flag a non-SIB base+disp memory operand") {
 TEST_CASE("decode classifies kReg on mov eax, ebx") {
     Disassembler d(true);
     // 89 D8 : mov eax, ebx
-    const auto bytes = make_bytes(0x89, 0xD8);
+    const auto bytes = papa_tests::bytes(0x89, 0xD8);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -91,7 +85,7 @@ TEST_CASE("decode classifies kReg on mov eax, ebx") {
 TEST_CASE("decode classifies kImm on mov eax, 0x1234") {
     Disassembler d(true);
     // B8 34 12 00 00 : mov eax, 0x1234
-    const auto bytes = make_bytes(0xB8, 0x34, 0x12, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0xB8, 0x34, 0x12, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -103,7 +97,7 @@ TEST_CASE("decode classifies kImm on mov eax, 0x1234") {
 TEST_CASE("decode classifies kPcRel on near call") {
     Disassembler d(true);
     // E8 00 00 00 00 : call +0  -> target is next_va (0x1005)
-    const auto bytes = make_bytes(0xE8, 0x00, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0xE8, 0x00, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->is_call);
@@ -118,7 +112,7 @@ TEST_CASE("decode classifies kPcRel on near call") {
 TEST_CASE("decode classifies kRipRel on x64 RIP-relative load") {
     Disassembler d(true);
     // 48 8B 05 00 00 00 00 : mov rax, [rip+0x0]  (target == next_va)
-    const auto bytes = make_bytes(0x48, 0x8B, 0x05, 0x00, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x48, 0x8B, 0x05, 0x00, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x2000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -130,7 +124,7 @@ TEST_CASE("decode classifies kRipRel on x64 RIP-relative load") {
 TEST_CASE("decode classifies kImmMem on 32-bit absolute memory access") {
     Disassembler d(false);
     // A1 78 56 34 12 : mov eax, [0x12345678]  (x86)
-    const auto bytes = make_bytes(0xA1, 0x78, 0x56, 0x34, 0x12);
+    const auto bytes = papa_tests::bytes(0xA1, 0x78, 0x56, 0x34, 0x12);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -142,7 +136,7 @@ TEST_CASE("decode classifies kImmMem on 32-bit absolute memory access") {
 TEST_CASE("decode classifies kRegMem on [rbx+8]") {
     Disassembler d(true);
     // 8B 43 08 : mov eax, [rbx+8]
-    const auto bytes = make_bytes(0x8B, 0x43, 0x08);
+    const auto bytes = papa_tests::bytes(0x8B, 0x43, 0x08);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -155,7 +149,7 @@ TEST_CASE("decode classifies kRegMem on [rbx+8]") {
 TEST_CASE("decode classifies kSib on [rbx+rcx*4+0x10]") {
     Disassembler d(true);
     // 8B 44 8B 10 : mov eax, [rbx+rcx*4+0x10]
-    const auto bytes = make_bytes(0x8B, 0x44, 0x8B, 0x10);
+    const auto bytes = papa_tests::bytes(0x8B, 0x44, 0x8B, 0x10);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -170,7 +164,7 @@ TEST_CASE("decode classifies kSib on an x64 SIB-encoded absolute address") {
     Disassembler d(true);
     // 8B 04 25 30 00 00 00 : mov eax, [0x30]. On x64 a non-RIP absolute address must be
     // SIB-encoded (mod=00, rm=100, base=101)
-    const auto bytes = make_bytes(0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -183,7 +177,7 @@ TEST_CASE("decode classifies kSib on an x64 SIB-encoded absolute address") {
 TEST_CASE("decode classifies kSib on a gs segment-relative SIB access") {
     Disassembler d(true);
     // 65 48 8B 04 25 30 00 00 00 : mov rax, gs:[0x30] (TEB self-pointer read)
-    const auto bytes = make_bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->operand_count == 2);
@@ -195,7 +189,7 @@ TEST_CASE("decode classifies kSib on a gs segment-relative SIB access") {
 TEST_CASE("decode flags ret as returning, not fallthrough") {
     Disassembler d(true);
     // C3 : ret
-    const auto bytes = make_bytes(0xC3);
+    const auto bytes = papa_tests::bytes(0xC3);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->is_return);
@@ -207,7 +201,7 @@ TEST_CASE("decode flags ret as returning, not fallthrough") {
 TEST_CASE("decode flags conditional jump") {
     Disassembler d(true);
     // 74 02 : jz +2
-    const auto bytes = make_bytes(0x74, 0x02);
+    const auto bytes = papa_tests::bytes(0x74, 0x02);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->is_jump);
@@ -220,7 +214,7 @@ TEST_CASE("decode flags conditional jump") {
 TEST_CASE("decode flags unconditional jmp as not falling through") {
     Disassembler d(true);
     // EB 05 : jmp +5
-    const auto bytes = make_bytes(0xEB, 0x05);
+    const auto bytes = papa_tests::bytes(0xEB, 0x05);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->is_jump);
@@ -235,7 +229,7 @@ TEST_CASE("decode flags unconditional jmp as not falling through") {
 TEST_CASE("decode flags int3 as not falling through") {
     Disassembler d(true);
     // CC : int3
-    const auto bytes = make_bytes(0xCC);
+    const auto bytes = papa_tests::bytes(0xCC);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_call);
@@ -247,7 +241,7 @@ TEST_CASE("decode flags int3 as not falling through") {
 TEST_CASE("decode flags hlt as not falling through") {
     Disassembler d(true);
     // F4 : hlt
-    const auto bytes = make_bytes(0xF4);
+    const auto bytes = papa_tests::bytes(0xF4);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_fallthrough);
@@ -256,7 +250,7 @@ TEST_CASE("decode flags hlt as not falling through") {
 TEST_CASE("decode flags ud2 as not falling through") {
     Disassembler d(true);
     // 0F 0B : ud2
-    const auto bytes = make_bytes(0x0F, 0x0B);
+    const auto bytes = papa_tests::bytes(0x0F, 0x0B);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_fallthrough);
@@ -265,7 +259,7 @@ TEST_CASE("decode flags ud2 as not falling through") {
 TEST_CASE("decode flags into as not falling through") {
     Disassembler d(false);  // into is only valid in 32-bit mode
     // CE : into
-    const auto bytes = make_bytes(0xCE);
+    const auto bytes = papa_tests::bytes(0xCE);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_fallthrough);
@@ -274,7 +268,7 @@ TEST_CASE("decode flags into as not falling through") {
 TEST_CASE("decode flags iret as not falling through") {
     Disassembler d(false);
     // CF : iret
-    const auto bytes = make_bytes(0xCF);
+    const auto bytes = papa_tests::bytes(0xCF);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_fallthrough);
@@ -283,7 +277,7 @@ TEST_CASE("decode flags iret as not falling through") {
 TEST_CASE("decode flags int 0x29 fastfail as not falling through") {
     Disassembler d(true);
     // CD 29 : int 0x29 (RtlFailFast, does not return)
-    const auto bytes = make_bytes(0xCD, 0x29);
+    const auto bytes = papa_tests::bytes(0xCD, 0x29);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK_FALSE(r->is_fallthrough);
@@ -293,7 +287,7 @@ TEST_CASE("decode keeps int 0x2e (syscall gate) falling through") {
     // vivisect treats the Windows syscall interrupt as a returning call
     Disassembler d(true);
     // CD 2E : int 0x2e
-    const auto bytes = make_bytes(0xCD, 0x2E);
+    const auto bytes = papa_tests::bytes(0xCD, 0x2E);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->is_fallthrough);
@@ -302,7 +296,7 @@ TEST_CASE("decode keeps int 0x2e (syscall gate) falling through") {
 TEST_CASE("decode detects fs segment prefix") {
     Disassembler d(true);
     // 64 48 8B 04 25 30 00 00 00 : mov rax, fs:[0x30]
-    const auto bytes = make_bytes(0x64, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x64, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->has_prefix_fs);
@@ -312,7 +306,7 @@ TEST_CASE("decode detects fs segment prefix") {
 TEST_CASE("decode detects gs segment prefix for x64 PEB access") {
     Disassembler d(true);
     // 65 48 8B 04 25 60 00 00 00 : mov rax, gs:[0x60]  (PEB)
-    const auto bytes = make_bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     REQUIRE(r.has_value());
     CHECK(r->has_prefix_gs);
@@ -323,7 +317,7 @@ TEST_CASE("decode does not over-read past buffer end") {
     Disassembler d(true);
     // E8 needs 4 more bytes
     // Provide only 3 so decoder must fail gracefully
-    const auto bytes = make_bytes(0xE8, 0x00, 0x00, 0x00);
+    const auto bytes = papa_tests::bytes(0xE8, 0x00, 0x00, 0x00);
     const auto r = d.decode(std::span<const std::byte>(bytes), 0x1000);
     CHECK_FALSE(r.has_value());
     CHECK(r.error().kind == papa::ErrorKind::kDisassemblyFailed);

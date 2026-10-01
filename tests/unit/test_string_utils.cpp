@@ -4,8 +4,8 @@
 
 #include "papa/util/string_utils.h"
 
-#include <array>
-#include <cstddef>
+#include "test_support.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -39,23 +39,13 @@ TEST_CASE("string_utils: is_ascii_printable accepts only fully-printable strings
 }
 
 TEST_CASE("string_utils: is_utf16le_printable detects ASCII-encoded UTF-16LE") {
-    const std::array<std::byte, 10> hello{
-        std::byte{'h'}, std::byte{0x00},
-        std::byte{'e'}, std::byte{0x00},
-        std::byte{'l'}, std::byte{0x00},
-        std::byte{'l'}, std::byte{0x00},
-        std::byte{'o'}, std::byte{0x00},
-    };
+    const auto hello = papa_tests::bytes('h', 0x00, 'e', 0x00, 'l', 0x00, 'l', 0x00, 'o', 0x00);
     CHECK(is_utf16le_printable(hello));
 
-    const std::array<std::byte, 4> non_ascii{
-        std::byte{'h'}, std::byte{0x00},
-        std::byte{0x00}, std::byte{0x01},   // high byte non-zero
-    };
+    // The second unit's high byte is non-zero
+    const auto non_ascii = papa_tests::bytes('h', 0x00, 0x00, 0x01);
     CHECK_FALSE(is_utf16le_printable(non_ascii));
 
-    const std::array<std::byte, 3> odd_len{
-        std::byte{'h'}, std::byte{0x00}, std::byte{'i'},
-    };
+    const auto odd_len = papa_tests::bytes('h', 0x00, 'i');
     CHECK_FALSE(is_utf16le_printable(odd_len));
 }

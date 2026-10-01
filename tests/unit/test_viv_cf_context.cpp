@@ -24,18 +24,8 @@ namespace pv = papa::features::extractors::papa_native::viv;
 using pn::DecodedInsn;
 using pn::Disassembler;
 
-namespace {
-
-template <typename... B>
-constexpr auto make_bytes(B... bs) {
-    return std::array<std::byte, sizeof...(B)>{
-        std::byte{static_cast<std::uint8_t>(bs)}...};
-}
-
-}  // namespace
-
 TEST_CASE("make_span_reader rejects out-of-range VAs") {
-    const auto bytes = make_bytes(0xC3);
+    const auto bytes = papa_tests::bytes(0xC3);
     Disassembler d(true);
     const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
     CHECK_FALSE(reader(0x0FFFU).has_value());     // below base
@@ -45,7 +35,7 @@ TEST_CASE("make_span_reader rejects out-of-range VAs") {
 TEST_CASE("CodeFlowContext decodes a straight-line run once (decode-once gate)") {
     const Disassembler d(/*is_64bit=*/false);
     // 0x1000: 90 nop / 0x1001: 90 nop / 0x1002: c3 ret
-    const auto bytes  = make_bytes(0x90, 0x90, 0xC3);
+    const auto bytes  = papa_tests::bytes(0x90, 0x90, 0xC3);
     const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
@@ -72,7 +62,7 @@ TEST_CASE("CodeFlowContext explores both edges of a conditional branch and recor
     const Disassembler d(/*is_64bit=*/false);
     // A conditional jump at 0x1000 with its fall-through at 0x1002, padding, and the
     // branch target at 0x1005, both ending in a ret
-    const auto bytes  = make_bytes(0x74, 0x03, 0xC3, 0x90, 0x90, 0xC3);
+    const auto bytes  = papa_tests::bytes(0x74, 0x03, 0xC3, 0x90, 0x90, 0xC3);
     const auto reader = papa_tests::make_span_reader(bytes, 0x1000, d);
 
     std::unordered_set<std::uint64_t> defined;
