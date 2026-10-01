@@ -35,7 +35,6 @@ set(PAPA_UNIT_TEST_SOURCES
     test_pefile_extractor.cpp
     test_insn_extractor.cpp
     test_bb_function_extractors.cpp
-    test_backend.cpp
     test_capabilities.cpp
     test_hash.cpp
     test_json_writer.cpp

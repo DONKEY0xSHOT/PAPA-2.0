@@ -9,141 +9,79 @@
 #include "papa/features/common.h"
 #include "papa/features/file.h"
 #include "papa/features/extractors/base_extractor.h"
-#include "papa/features/extractors/papa_native/backend.h"
-#include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/global_.h"
+#include "papa/features/extractors/pefile.h"
 #include "papa/features/extractors/pefile_extractor.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 
-#include <filesystem>
+#include <array>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
-#include "fixture_paths.h"
+#include "pe_builder.h"
 #include "test_support.h"
 
-namespace {
-
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-}  // namespace
-
-TEST_CASE("capabilities: find_file_capabilities matches a section feature on notepad") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
+TEST_CASE("capabilities: find_file_capabilities runs file rules over a PE through PefileFeatureExtractor") {
+    papa_tests::PeBuilder b;
+    b.code    = {0x33, 0xC0, 0xC3};
+    b.imports = {{"kernel32.dll", {"CreateFileW"}}};
+    const auto img = papa::pe::PeParser::parse(b.build());
     REQUIRE(img.has_value());
-    papa::features::extractors::PefileFeatureExtractor extractor(*img);
+    const papa::features::extractors::PefileFeatureExtractor extractor(*img);
+
+    // The extractor hands over the image's base, file and global features unchanged
+    CHECK(extractor.get_base_address() == papa_tests::va(img->image_base()));
+    CHECK(papa_tests::describe(extractor.extract_file_features()) ==
+          papa_tests::describe(papa::features::extractors::pefile::extract_file_features(*img)));
+    CHECK(papa_tests::describe(extractor.extract_global_features()) ==
+          papa_tests::describe(papa::features::extractors::extract_global_features(*img)));
 
     const auto rs = papa_tests::ruleset({
-        "rule:\n"
-        "  meta:\n"
-        "    name: has-text-section\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - section: .text\n"
+        papa_tests::rule_yaml("has-text-section", "file", {"section: .text"}),
+        papa_tests::rule_yaml("has-data-section", "file", {"section: .data"}),
     });
-
     auto file_caps = papa::capabilities::find_file_capabilities(rs, extractor);
     REQUIRE(file_caps);
-    CHECK(file_caps->matches.count("has-text-section") == 1);
-    CHECK(file_caps->feature_count > 0U);
+    REQUIRE(file_caps->matches.size() == 1);
+    REQUIRE(file_caps->matches.count("has-text-section") == 1);
+    const auto& hits = file_caps->matches.at("has-text-section");
+    REQUIRE(hits.size() == 1);
+    CHECK(hits[0].first == papa_tests::va(img->image_base()));
+
+    // The distinct file and global features, plus the match the rule injected
+    papa::features::FeatureSet distinct;
+    distinct.add_all(extractor.extract_file_features());
+    distinct.add_all(extractor.extract_global_features());
+    CHECK(file_caps->feature_count == distinct.size() + 1U);
 }
 
-TEST_CASE("capabilities: has_static_limitation only fires on the limitation namespace") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(img.has_value());
-    papa::features::extractors::PefileFeatureExtractor extractor(*img);
-
-    SUBCASE("regular rule does not trigger limitation") {
-        const auto rs = papa_tests::ruleset({
-            "rule:\n"
-            "  meta:\n"
-            "    name: r1\n"
-            "    scope: file\n"
-            "  features:\n"
-            "    - section: .text\n"
-        });
-        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
+TEST_CASE("capabilities: has_static_limitation fires at or below internal/limitation/static only") {
+    struct Row {
+        std::string_view ns;
+        bool             limited;
+    };
+    const std::array<Row, 4> rows{{
+        {"host-interaction/file", false},
+        {"internal/limitation/static", true},
+        {"internal/limitation/static/dotnet", true},
+        {"internal/limitation/staticy-thing", false},
+    }};
+    for (const Row& row : rows) {
+        CAPTURE(row.ns);
+        const auto rs = papa_tests::ruleset(
+            {papa_tests::rule_yaml("r", "file", {"section: .text"}, row.ns)});
+        const papa_tests::FakeExtractor extractor(
+            {papa_tests::feat<papa::features::Section>(".text")});
+        const auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
         REQUIRE(caps);
-        CHECK_FALSE(papa::capabilities::has_static_limitation(rs, *caps));
+        REQUIRE(caps->matches.count("r") == 1);
+        CHECK(papa::capabilities::has_static_limitation(rs, *caps) == row.limited);
     }
-
-    SUBCASE("rule under internal/limitation/static triggers limitation") {
-        const auto rs = papa_tests::ruleset({
-            "rule:\n"
-            "  meta:\n"
-            "    name: limit-rule\n"
-            "    namespace: internal/limitation/static/dotnet\n"
-            "    scope: file\n"
-            "  features:\n"
-            "    - section: .text\n"
-        });
-        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
-        REQUIRE(caps);
-        CHECK(papa::capabilities::has_static_limitation(rs, *caps));
-    }
-
-    SUBCASE("similar but distinct namespace prefix does not trigger") {
-        const auto rs = papa_tests::ruleset({
-            "rule:\n"
-            "  meta:\n"
-            "    name: not-limit\n"
-            "    namespace: internal/limitation/staticy-thing\n"
-            "    scope: file\n"
-            "  features:\n"
-            "    - section: .text\n"
-        });
-        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
-        REQUIRE(caps);
-        CHECK_FALSE(papa::capabilities::has_static_limitation(rs, *caps));
-    }
-}
-
-TEST_CASE("capabilities: find_static_capabilities runs end-to-end on notepad") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(img.has_value());
-
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
-        *img, papa_tests::shared_flirt_sigs());
-    REQUIRE(backend);
-    papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
-        std::move(*backend));
-
-    const auto rs = papa_tests::ruleset({
-        "rule:\n"
-        "  meta:\n"
-        "    name: has-mov\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - mnemonic: mov\n",
-        "rule:\n"
-        "  meta:\n"
-        "    name: has-text\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - section: .text\n"
-    });
-
-    auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
-    REQUIRE(caps);
-    CHECK(caps->all_matches.count("has-text") == 1);
-    CHECK(caps->all_matches.count("has-mov")  == 1);
-    CHECK(caps->feature_count > 0U);
 }
 
 namespace {

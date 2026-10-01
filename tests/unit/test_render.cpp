@@ -7,6 +7,7 @@
 #include "papa/features/insn.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/loader.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
@@ -15,24 +16,19 @@
 #include "papa/render/text.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
+#include "papa/util/hash.h"
 #include "papa/version.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
-#include "fixture_paths.h"
 #include "pe_builder.h"
 #include "test_support.h"
-
-namespace {
-
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-}  // namespace
 
 TEST_CASE("render: build_document filters synthetic subscope rules") {
     const auto rs = papa_tests::ruleset({
@@ -221,42 +217,96 @@ TEST_CASE("render: json emits capa's meta and match-tree schema") {
     CHECK(js.find("\"captures\":{}") != std::string::npos);
 }
 
-TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
+TEST_CASE("render: end-to-end JSON over a builder PE carries its hashes, matches and library thunk") {
+    papa_tests::PeBuilder b;
+    b.imports = {{"kernel32.dll", {"ExitProcess"}}};
+    b.data.assign(0x40, 0);
+    for (std::uint8_t i = 0; i < 16U; ++i) { b.data[i] = static_cast<std::uint8_t>(0xF0U + i); }
+    const std::string_view text = "hello world";
+    std::copy(text.begin(), text.end(), b.data.begin() + 0x20);
+    // jmp [rip+ExitProcess], a thunk the library check skips
+    const std::uint32_t thunk = b.add_function({0xFF, 0x25, 0, 0, 0, 0});
+    // lea rcx and r8, [rip+blob] / lea rdx, [rip+text] / mov eax, 3 / L: dec eax / xor ecx, esp
+    // / jnz L / M: dec edx / jz N / jmp M / N: call self / xor rcx, rsp / ret
+    const std::uint32_t fn = b.add_function(
+        {0x48, 0x8D, 0x0D, 0, 0, 0, 0, 0x4C, 0x8D, 0x05, 0, 0, 0, 0, 0x48, 0x8D, 0x15, 0, 0, 0, 0,
+         0xB8, 0x03, 0x00, 0x00, 0x00, 0xFF, 0xC8, 0x33, 0xCC, 0x75, 0xFA,
+         0xFF, 0xCA, 0x74, 0x02, 0xEB, 0xFA,
+         0xE8, 0, 0, 0, 0, 0x48, 0x33, 0xCC, 0xC3});
+    const auto rel = [&b](std::uint32_t disp_at, std::uint32_t end, std::uint64_t target) {
+        papa_tests::detail::poke(b.code, disp_at,
+                                 static_cast<std::int32_t>(target - b.code_va(end)));
+    };
+    rel(thunk + 2U, thunk + 6U, b.iat_va("kernel32.dll", "ExitProcess"));
+    rel(fn + 3U, fn + 7U, b.data_va(0));
+    rel(fn + 10U, fn + 14U, b.data_va(0));
+    rel(fn + 17U, fn + 21U, b.data_va(0x20));
+    rel(fn + 39U, fn + 43U, b.code_va(fn));
+
+    const auto bytes = b.build();
+    const auto img   = papa::pe::PeParser::parse(bytes);
     REQUIRE(img.has_value());
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
-        *img, papa_tests::shared_flirt_sigs());
+    const papa::features::extractors::papa_native::flirt::FlirtSignatureSet no_sigs;
+    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(*img, no_sigs);
     REQUIRE(backend);
-    papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
+    const papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
 
+    // One rule per scope. The function rule needs the two-block loop, the recursion and
+    // both data references, and the cookie xor before ret is no nzxor
     const auto rs = papa_tests::ruleset({
+        papa_tests::rule_yaml("has-text", "file", {"section: .text"}),
+        papa_tests::rule_yaml("tight-loop", "basic block", {"characteristic: tight loop"}),
+        papa_tests::rule_yaml("nzxor", "instruction", {"characteristic: nzxor"}),
         "rule:\n"
         "  meta:\n"
-        "    name: has-text\n"
-        "    scope: file\n"
+        "    name: data-loop-recursion\n"
+        "    scopes:\n"
+        "      static: function\n"
+        "      dynamic: unsupported\n"
         "  features:\n"
-        "    - section: .text\n"
+        "    - and:\n"
+        "      - characteristic: loop\n"
+        "      - characteristic: recursive call\n"
+        "      - string: hello world\n"
+        "      - bytes: F0 F1 F2 F3 F4 F5 F6 F7\n",
     });
-
-    auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
+    const auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
     REQUIRE(caps);
+    const papa::features::Address thunk_at = papa_tests::va(b.code_va(thunk));
+    CHECK(caps->library_functions == std::vector<papa::features::Address>{thunk_at});
+    const auto where = [&caps](const std::string& name) {
+        std::vector<papa::features::Address> out;
+        for (const auto& [at, result] : caps->all_matches.at(name)) { out.push_back(at); }
+        return out;
+    };
+    using Addresses = std::vector<papa::features::Address>;
+    CHECK(caps->all_matches.size() == 4);
+    CHECK(where("has-text") == Addresses{papa_tests::va(img->image_base())});
+    CHECK(where("data-loop-recursion") == Addresses{papa_tests::va(b.code_va(fn))});
+    CHECK(where("tight-loop") == Addresses{papa_tests::va(b.code_va(fn + 26U))});
+    CHECK(where("nzxor") == Addresses{papa_tests::va(b.code_va(fn + 28U))});
 
-    auto meta = papa::collect_metadata(
-        kNotepad,
-        std::vector<std::string>{"papa.exe", "notepad.exe"},
-        std::vector<std::string>{},
-        *img,
-        *caps);
+    auto meta = papa::collect_metadata("sample.exe", {"papa", "sample.exe"}, {}, *img, *caps);
+    const std::string sha256 = papa::util::hex_digest(papa::util::sha256(bytes));
+    CHECK(meta.hashes.md5 == papa::util::hex_digest(papa::util::md5(bytes)));
+    CHECK(meta.hashes.sha1 == papa::util::hex_digest(papa::util::sha1(bytes)));
+    CHECK(meta.hashes.sha256 == sha256);
+    CHECK(meta.sample_size_bytes == bytes.size());
+    CHECK(meta.analysis.base_address == img->image_base());
+    REQUIRE(meta.analysis.library_functions.size() == 1);
+    CHECK(meta.analysis.library_functions[0].address == thunk_at);
+    CHECK(meta.analysis.library_functions[0].name == "?");
 
-    auto doc = papa::render::build_document(std::move(meta), rs, caps->all_matches);
-    const auto json_out = papa::render::json::render_to_string(doc, /*pretty=*/false);
-    CHECK(json_out.find("\"sha256\":\"") != std::string::npos);
-    CHECK(json_out.find("has-text")     != std::string::npos);
+    const auto doc  = papa::render::build_document(std::move(meta), rs, caps->all_matches);
+    const auto json = papa::render::json::render_to_string(doc, /*pretty=*/false);
+    CHECK(json.find("\"sha256\":\"" + sha256 + "\"") != std::string::npos);
+    CHECK(json.find("\"library_functions\":[{\"address\":{\"type\":\"absolute\",\"value\":" +
+                    std::to_string(b.code_va(thunk)) + "},\"name\":\"?\"}]") != std::string::npos);
+    for (const char* name : {"has-text", "tight-loop", "nzxor", "data-loop-recursion"}) {
+        CAPTURE(name);
+        CHECK(json.find("\"" + std::string(name) + "\":{") != std::string::npos);
+    }
 }
 
 TEST_CASE("collect_metadata: the report version is capa's release so the JSON can match capa") {

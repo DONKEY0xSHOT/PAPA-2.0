@@ -72,6 +72,10 @@ TEST_CASE("pipeline: a synthetic PE is parsed, recovered, and its functions foun
     auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
 
+    // The backend keeps the image it was given and decodes at its bitness
+    CHECK(&backend->image() == &*img);
+    CHECK(backend->disassembler().is_64bit());
+
     // Both .pdata begins are recovered as functions
     const std::uint64_t base  = img->image_base() + papa_tests::PeBuilder::kTextRva;
     const auto&         funcs = backend->functions();
@@ -84,8 +88,12 @@ TEST_CASE("pipeline: a synthetic PE is parsed, recovered, and its functions foun
     CHECK(has_fn(base + 0x00));
     CHECK(has_fn(base + 0x10));
 
-    // The import table is indexed by IAT slot, which is what names a call
-    CHECK_FALSE(backend->imports().by_iat_va.empty());
+    // The import table indexes every row by its own IAT slot, which is what names a call
+    REQUIRE(backend->imports().by_iat_va.size() == img->imports().size());
+    for (const papa::pe::ParsedImport& row : img->imports()) {
+        CAPTURE(row.name);
+        CHECK(backend->imports().by_iat_va.at(row.iat_va) == &row);
+    }
     CHECK(backend->imports().by_iat_va.count(synth.write_file_iat) == 1);
 }
 
@@ -125,16 +133,20 @@ TEST_CASE("pipeline: a rule matches end to end against a synthetic PE") {
     REQUIRE(backend.has_value());
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 
-    // A minimal function-scope rule over the api feature the call produces
+    // A function-scope rule over the api feature the call produces, and a file-scope
+    // rule over a section name
     const auto ruleset = papa_tests::ruleset(
-        {papa_tests::rule_yaml("write file synthetic", "function", {"api: WriteFile"})});
+        {papa_tests::rule_yaml("write file synthetic", "function", {"api: WriteFile"}),
+         papa_tests::rule_yaml("has text section", "file", {"section: .text"})});
 
     const auto caps = papa::capabilities::static_::find_static_capabilities(
         ruleset, extractor);
     REQUIRE(caps.has_value());
 
-    const bool matched = caps->all_matches.count("write file synthetic") == 1;
-    CHECK(matched);
+    CHECK(caps->all_matches.count("write file synthetic") == 1);
+    REQUIRE(caps->all_matches.count("has text section") == 1);
+    REQUIRE(caps->all_matches.at("has text section").size() == 1);
+    CHECK(caps->all_matches.at("has text section")[0].first == papa_tests::va(img->image_base()));
 }
 
 TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {

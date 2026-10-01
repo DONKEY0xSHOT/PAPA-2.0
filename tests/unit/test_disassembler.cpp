@@ -5,26 +5,19 @@
 
 #include "papa/constants.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/pe/pe_image.h"
-#include "papa/pe/pe_parser.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <span>
 #include <string_view>
-#include "fixture_paths.h"
+#include <vector>
 #include "test_support.h"
 
 using papa::features::extractors::papa_native::DecodedInsn;
 using papa::features::extractors::papa_native::Disassembler;
 using papa::features::extractors::papa_native::OperandKind;
-
-namespace {
-
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-}  // namespace
 
 TEST_CASE("decode rejects an empty buffer") {
     Disassembler d(true);
@@ -323,50 +316,92 @@ TEST_CASE("decode does not over-read past buffer end") {
     CHECK(r.error().kind == papa::ErrorKind::kDisassemblyFailed);
 }
 
-TEST_CASE("decode streams first 1000 instructions of notepad.exe .text") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
+TEST_CASE("decode sweeps known encodings exactly and arbitrary bytes safely on both bitnesses") {
+    struct Stream {
+        bool                                   x64;
+        std::vector<std::vector<std::uint8_t>> insns;
+    };
+    const std::array<Stream, 2> streams{{
+        {true,
+         {
+             {0x48, 0x83, 0xEC, 0x28},                                // sub rsp, 0x28
+             {0x33, 0xC0},                                            // xor eax, eax
+             {0xFF, 0x15, 0x10, 0x00, 0x00, 0x00},                    // call [rip+0x10]
+             {0x48, 0x8D, 0x4B, 0x10},                                // lea rcx, [rbx+0x10]
+             {0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00},        // lea rcx, [r12+0xB8]
+             {0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00},  // mov rax, gs:[0x60]
+             {0x48, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8},                    // movabs rax, imm64
+             {0xF3, 0x0F, 0x1E, 0xFA},                                // endbr64
+             {0xE8, 0x00, 0x00, 0x00, 0x00},                          // call $+5
+             {0x66, 0x0F, 0xEF, 0xC0},                                // pxor xmm0, xmm0
+             {0xC3},                                                  // ret
+         }},
+        {false,
+         {
+             {0x55},                                       // push ebp
+             {0x8B, 0xEC},                                 // mov ebp, esp
+             {0x64, 0xA1, 0x30, 0x00, 0x00, 0x00},         // mov eax, fs:[0x30]
+             {0xFF, 0x15, 0x00, 0x20, 0x40, 0x00},         // call [0x402000]
+             {0x8D, 0x04, 0x85, 0x00, 0x10, 0x40, 0x00},   // lea eax, [eax*4+0x401000]
+             {0x6A, 0x10},                                 // push 0x10
+             {0x0F, 0x84, 0x00, 0x00, 0x00, 0x00},         // jz $+6
+             {0xC2, 0x08, 0x00},                           // ret 8
+         }},
+    }};
+    for (const Stream& s : streams) {
+        CAPTURE(s.x64);
+        const Disassembler dis(s.x64);
 
-    // Locate .text
-    const papa::pe::ParsedSection* text = nullptr;
-    for (const auto& s : img.sections()) {
-        if (s.name == ".text") {
-            text = &s;
-            break;
+        // Back to back, the encodings decode one by one at their own lengths
+        std::vector<std::byte> code;
+        for (const auto& encoding : s.insns) {
+            for (const std::uint8_t b : encoding) { code.push_back(std::byte{b}); }
         }
-    }
-    REQUIRE(text != nullptr);
-
-    Disassembler dis(img.is_64bit());
-
-    const auto bytes = img.read_at_rva(text->virtual_address, text->raw_size);
-    REQUIRE(bytes.has_value());
-
-    std::span<const std::byte> cursor = *bytes;
-    std::uint64_t va = img.image_base() + text->virtual_address;
-
-    std::size_t decoded = 0;
-    std::size_t hard_cap = 1000;
-    while (!cursor.empty() && decoded < hard_cap) {
-        const auto ins = dis.decode(cursor, va);
-        if (!ins) {
-            // A linear sweep may hit padding bytes, so advance by one and try again rather
-            // than letting a bad byte fault the sweep
-            cursor = cursor.subspan(1);
-            va    += 1;
-            continue;
+        std::span<const std::byte> cursor = code;
+        std::uint64_t              va     = 0x1000;
+        for (const auto& encoding : s.insns) {
+            const auto ins = dis.decode(cursor, va);
+            REQUIRE(ins.has_value());
+            CHECK(ins->va == va);
+            CHECK(ins->length == encoding.size());
+            cursor = cursor.subspan(ins->length);
+            va += ins->length;
         }
-        CHECK(ins->length >= 1);
-        CHECK(ins->length <= cursor.size());
-        cursor = cursor.subspan(ins->length);
-        va    += ins->length;
-        ++decoded;
+        CHECK(cursor.empty());
+
+        // Over 4 KiB of LCG bytes every decode stays within the bytes left and the x86
+        // length limit, and every rejection is a disassembly failure
+        std::vector<std::byte> noise(0x1000);
+        std::uint64_t          x = 0x9E3779B97F4A7C15ULL;
+        for (std::byte& b : noise) {
+            x = x * 6364136223846793005ULL + 1442695040888963407ULL;
+            b = std::byte{static_cast<std::uint8_t>(x >> 56U)};
+        }
+        std::size_t decoded = 0;
+        std::size_t rejected = 0;
+        std::size_t bad_length = 0;
+        std::size_t bad_error  = 0;
+        for (std::span<const std::byte> rest = noise; !rest.empty();) {
+            const auto  ins  = dis.decode(rest, 0x1000 + (noise.size() - rest.size()));
+            std::size_t step = 1;
+            if (ins.has_value()) {
+                ++decoded;
+                if (ins->length < 1U ||
+                    ins->length > std::min(rest.size(), papa::constants::kMaxInsnBytes)) {
+                    ++bad_length;
+                } else {
+                    step = ins->length;
+                }
+            } else {
+                ++rejected;
+                bad_error += ins.error().kind == papa::ErrorKind::kDisassemblyFailed ? 0U : 1U;
+            }
+            rest = rest.subspan(step);
+        }
+        CHECK(bad_length == 0U);
+        CHECK(bad_error == 0U);
+        // The stream reaches both outcomes, or the checks above would prove nothing
+        CHECK(decoded != 0U);
+        CHECK(rejected != 0U);
     }
-    // very soft floor: .text is much larger than 500 insns in any real PE
-    CHECK(decoded >= 500);
 }
