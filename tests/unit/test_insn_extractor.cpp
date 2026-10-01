@@ -22,8 +22,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -73,79 +75,78 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("insn: extract_mnemonic emits the lower-cased spelling at the insn VA") {
-    auto ins = make_insn(0x401000, "xor");
-    auto r = extract_mnemonic(ins);
-    REQUIRE(r.has_value());
-    CHECK(r->first->tag() == FeatureTag::kMnemonic);
-    CHECK(static_cast<const Mnemonic*>(r->first.get())->value() == "xor");
-    CHECK(std::get<AbsoluteVirtualAddress>(r->second).v == 0x401000U);
+TEST_CASE("insn: extract_mnemonic emits the spelling at the insn VA, and nothing for an empty one") {
+    struct Row {
+        std::string_view                label;
+        std::string_view                mnemonic;
+        std::optional<std::string_view> expected;
+    };
+    const std::vector<Row> rows{
+        {"the lower-cased spelling", "xor", "xor"},
+        {"an empty mnemonic", "", std::nullopt},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = extract_mnemonic(make_insn(0x401000, row.mnemonic));
+        CHECK(r.has_value() == row.expected.has_value());
+        if (r.has_value() && row.expected.has_value()) {
+            CHECK(r->first->tag() == FeatureTag::kMnemonic);
+            CHECK(static_cast<const Mnemonic*>(r->first.get())->value() == *row.expected);
+            CHECK(std::get<AbsoluteVirtualAddress>(r->second).v == 0x401000U);
+        }
+    }
 }
 
-TEST_CASE("insn: extract_mnemonic returns nullopt on empty mnemonic") {
-    auto ins = make_insn(0x401000, "");
-    CHECK_FALSE(extract_mnemonic(ins).has_value());
+TEST_CASE("insn: extract_call_plus_5 fires only on a call whose target equals va+5") {
+    struct Row {
+        std::string_view             label;
+        std::string_view             mnemonic;
+        bool                         is_call;
+        std::optional<std::uint64_t> target;
+        bool                         fires;
+    };
+    const std::vector<Row> rows{
+        {"a call to va+5", "call", true, 0x4005, true},
+        {"a non-call instruction", "jmp", false, 0x4005, false},
+        {"a call without a target", "call", true, std::nullopt, false},
+        {"a call with a non-matching target", "call", true, 0x4010, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        auto ins = make_insn(0x4000, row.mnemonic);
+        ins.is_call = row.is_call;
+        ins.branch_target = row.target;
+        const auto r = extract_call_plus_5(ins);
+        CHECK(r.has_value() == row.fires);
+        if (r.has_value() && row.fires) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "call $+5");
+        }
+    }
 }
 
-TEST_CASE("insn: extract_call_plus_5 fires only when the target equals va+5") {
-    auto ins = make_insn(0x4000, "call");
-    ins.is_call = true;
-    ins.branch_target = 0x4005;
-    auto r = extract_call_plus_5(ins);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "call $+5");
-}
-
-TEST_CASE("insn: extract_call_plus_5 ignores non-call instructions") {
-    auto ins = make_insn(0x4000, "jmp");
-    ins.is_call = false;
-    ins.branch_target = 0x4005;
-    CHECK_FALSE(extract_call_plus_5(ins).has_value());
-}
-
-TEST_CASE("insn: extract_call_plus_5 ignores calls without a target") {
-    auto ins = make_insn(0x4000, "call");
-    ins.is_call = true;
-    ins.branch_target = std::nullopt;
-    CHECK_FALSE(extract_call_plus_5(ins).has_value());
-}
-
-TEST_CASE("insn: extract_call_plus_5 ignores calls with non-matching target") {
-    auto ins = make_insn(0x4000, "call");
-    ins.is_call = true;
-    ins.branch_target = 0x4010;
-    CHECK_FALSE(extract_call_plus_5(ins).has_value());
-}
-
-TEST_CASE("insn: extract_indirect_call accepts kReg, kRegMem, kSib operands") {
-    DecodedInsn ins = make_insn(0x100, "call");
-    ins.is_call = true;
-    ins.operand_count = 1;
-
-    ins.operands[0].kind = OperandKind::kReg;
-    REQUIRE(extract_indirect_call(ins).has_value());
-
-    ins.operands[0].kind = OperandKind::kRegMem;
-    REQUIRE(extract_indirect_call(ins).has_value());
-
-    ins.operands[0].kind = OperandKind::kSib;
-    REQUIRE(extract_indirect_call(ins).has_value());
-}
-
-TEST_CASE("insn: extract_indirect_call rejects PC-relative direct calls") {
-    DecodedInsn ins = make_insn(0x100, "call");
-    ins.is_call = true;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kPcRel;
-    CHECK_FALSE(extract_indirect_call(ins).has_value());
-}
-
-TEST_CASE("insn: extract_indirect_call rejects non-call instructions") {
-    DecodedInsn ins = make_insn(0x100, "jmp");
-    ins.is_call = false;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kReg;
-    CHECK_FALSE(extract_indirect_call(ins).has_value());
+TEST_CASE("insn: extract_indirect_call accepts a call through a register or memory, not a direct call or a jmp") {
+    struct Row {
+        std::string_view label;
+        std::string_view mnemonic;
+        bool             is_call;
+        OperandKind      kind;
+        bool             indirect;
+    };
+    const std::vector<Row> rows{
+        {"call reg", "call", true, OperandKind::kReg, true},
+        {"call [reg + disp]", "call", true, OperandKind::kRegMem, true},
+        {"call [base + index*scale]", "call", true, OperandKind::kSib, true},
+        {"a pc-relative direct call", "call", true, OperandKind::kPcRel, false},
+        {"a non-call instruction", "jmp", false, OperandKind::kReg, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        DecodedInsn ins = make_insn(0x100, row.mnemonic);
+        ins.is_call = row.is_call;
+        ins.operand_count = 1;
+        ins.operands[0].kind = row.kind;
+        CHECK(extract_indirect_call(ins).has_value() == row.indirect);
+    }
 }
 
 TEST_CASE("insn: extract_segment_access emits one feature per active prefix") {
@@ -173,40 +174,38 @@ TEST_CASE("insn: extract_segment_access emits one feature per active prefix") {
     CHECK(none.empty());
 }
 
-TEST_CASE("insn: extract_peb_access detects fs:[0x30] on x86") {
-    DecodedInsn ins = make_insn(0x100, "mov");
-    ins.has_prefix_fs = true;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].disp = 0x30;
-    auto r = extract_peb_access(ins, /*is_64bit=*/false);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "peb access");
-}
-
-TEST_CASE("insn: extract_peb_access detects gs:[0x60] on x64") {
-    DecodedInsn ins = make_insn(0x100, "mov");
-    ins.has_prefix_gs = true;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].disp = 0x60;
-    auto r = extract_peb_access(ins, /*is_64bit=*/true);
-    REQUIRE(r.has_value());
-}
-
-TEST_CASE("insn: extract_peb_access requires both the prefix and the offset") {
-    DecodedInsn ins = make_insn(0x100, "mov");
-    ins.has_prefix_fs = true;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kRegMem;
-    ins.operands[0].disp = 0x60;             // wrong offset for x86
-    CHECK_FALSE(extract_peb_access(ins, false).has_value());
-
-    ins.has_prefix_fs = false;
-    ins.operands[0].disp = 0x30;             // right offset, missing prefix
-    CHECK_FALSE(extract_peb_access(ins, false).has_value());
+TEST_CASE("insn: extract_peb_access needs the bitness's segment prefix and PEB offset together") {
+    struct Row {
+        std::string_view label;
+        bool             fs;
+        bool             gs;
+        std::size_t      mem_at;
+        std::int64_t     disp;
+        bool             is_64bit;
+        bool             peb;
+    };
+    const std::vector<Row> rows{
+        {"fs:[0x30] on x86", true, false, 1, 0x30, false, true},
+        {"gs:[0x60] on x64", false, true, 1, 0x60, true, true},
+        {"fs with the x64 offset on x86", true, false, 0, 0x60, false, false},
+        {"the x86 offset without the prefix", false, false, 0, 0x30, false, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        // The memory operand follows a register destination or stands alone
+        DecodedInsn ins = make_insn(0x100, "mov");
+        ins.has_prefix_fs = row.fs;
+        ins.has_prefix_gs = row.gs;
+        ins.operand_count = row.mem_at + 1;
+        ins.operands[0].kind = OperandKind::kReg;
+        ins.operands[row.mem_at].kind = OperandKind::kRegMem;
+        ins.operands[row.mem_at].disp = row.disp;
+        const auto r = extract_peb_access(ins, row.is_64bit);
+        CHECK(r.has_value() == row.peb);
+        if (r.has_value() && row.peb) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "peb access");
+        }
+    }
 }
 
 namespace {
@@ -270,10 +269,10 @@ TEST_CASE("insn: extract_number emits each immediate at its operation width unle
     const Image x64 = make_image(true, std::vector<std::uint8_t>(0x10, 0x11));
     const Image x86 = make_image(false, std::vector<std::uint8_t>(0x10, 0x11));
     struct Row {
-        const char*  label;
-        const Image* image;
-        DecodedInsn  ins;
-        Features     expected;
+        std::string_view label;
+        const Image*     image;
+        DecodedInsn      ins;
+        Features         expected;
     };
     const std::vector<Row> rows{
         {"mov reg, imm yields the number of its operand", &x64,
@@ -318,10 +317,10 @@ TEST_CASE("insn: memory operands yield offsets, and a plain lea displacement a n
     const Image x86 = make_image(false, std::vector<std::uint8_t>(0x10, 0x11));
     const auto  data = static_cast<std::int64_t>(x86.builder.data_va(0));
     struct Row {
-        const char*  label;
-        const Image* image;
-        DecodedInsn  ins;
-        Features     expected;  // what extract_offset then extract_number yield
+        std::string_view label;
+        const Image*     image;
+        DecodedInsn      ins;
+        Features         expected;  // what extract_offset then extract_number yield
     };
     const std::vector<Row> rows{
         {"[reg+disp] yields the offset of its operand", &x64,
@@ -424,9 +423,9 @@ TEST_CASE("insn: an operand pointing at data yields bytes unless they are zero o
     call.is_call     = true;
 
     struct Row {
-        const char* label;
-        DecodedInsn ins;
-        Features    expected;  // what extract_bytes then extract_string yield
+        std::string_view label;
+        DecodedInsn      ins;
+        Features         expected;  // what extract_bytes then extract_string yield
     };
     const std::vector<Row> rows{
         {"binary data yields the bytes read from it", load(data_va(kBlob)),
@@ -484,62 +483,46 @@ TEST_CASE("insn: extract_flirt_call_api emits the FLIRT name and its stripped fo
     CHECK(has_stripped);
 }
 
-TEST_CASE("insn: extract_nzxor fires on xor of distinct registers") {
-    DecodedInsn xor_insn = make_insn(0x4000, "xor");
-    xor_insn.zyd_mnem = ZYDIS_MNEMONIC_XOR;
-    xor_insn.operand_count = 2;
-    xor_insn.operands[0].kind = OperandKind::kReg;
-    xor_insn.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    xor_insn.operands[1].kind = OperandKind::kReg;
-    xor_insn.operands[1].base_reg = ZYDIS_REGISTER_EBX;
-
-    Function fn = papa_tests::single_block_function({xor_insn});
-    auto r = extract_nzxor(fn, fn.basic_blocks[0], xor_insn, /*is_64bit=*/false);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "nzxor");
-}
-
-TEST_CASE("insn: extract_nzxor suppresses xor reg, reg with the same register") {
-    DecodedInsn ins = make_insn(0x4000, "xor");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_XOR;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].kind = OperandKind::kReg;
-    ins.operands[1].base_reg = ZYDIS_REGISTER_EAX;
-
-    Function fn = papa_tests::single_block_function({ins});
-    CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], ins, false).has_value());
-}
-
-TEST_CASE("insn: extract_nzxor suppresses prologue cookie xor") {
-    // Cookie xor lives in the first kSecurityCookieBytesDelta bytes of the entry block
-    DecodedInsn cookie = make_insn(0x4010, "xor");
-    cookie.zyd_mnem = ZYDIS_MNEMONIC_XOR;
-    cookie.length   = 5;
-    cookie.operand_count = 2;
-    cookie.operands[0].kind = OperandKind::kReg;
-    cookie.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    cookie.operands[1].kind = OperandKind::kReg;
-    cookie.operands[1].base_reg = ZYDIS_REGISTER_EBP;
-
-    Function fn = papa_tests::single_block_function({cookie});
-    fn.basic_blocks[0].va = 0x4000;       // prologue starts here
-    CHECK(is_security_cookie(fn, fn.basic_blocks[0], cookie, false));
-    CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], cookie, false).has_value());
-}
-
-TEST_CASE("insn: extract_nzxor ignores non-xor mnemonics") {
-    DecodedInsn ins = make_insn(0x4000, "and");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_AND;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].kind = OperandKind::kReg;
-    ins.operands[1].base_reg = ZYDIS_REGISTER_EBX;
-
-    Function fn = papa_tests::single_block_function({ins});
-    CHECK_FALSE(extract_nzxor(fn, fn.basic_blocks[0], ins, false).has_value());
+TEST_CASE("insn: extract_nzxor fires on a xor of distinct registers that is no security cookie") {
+    // A cookie xor lives in the first kSecurityCookieBytesDelta bytes of the entry block
+    struct Row {
+        std::string_view label;
+        ZydisMnemonic    mnemonic;
+        ZydisRegister    src;
+        std::uint64_t    va;
+        std::size_t      length;
+        bool             cookie;
+        bool             nzxor;
+    };
+    const std::vector<Row> rows{
+        {"xor of distinct registers", ZYDIS_MNEMONIC_XOR, ZYDIS_REGISTER_EBX, 0x4000, 1, false,
+         true},
+        {"xor reg, reg with the same register", ZYDIS_MNEMONIC_XOR, ZYDIS_REGISTER_EAX, 0x4000, 1,
+         false, false},
+        {"the prologue cookie xor eax, ebp", ZYDIS_MNEMONIC_XOR, ZYDIS_REGISTER_EBP, 0x4010, 5,
+         true, false},
+        {"a non-xor mnemonic", ZYDIS_MNEMONIC_AND, ZYDIS_REGISTER_EBX, 0x4000, 1, false, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        DecodedInsn ins = make_insn(row.va, ZydisMnemonicGetString(row.mnemonic));
+        ins.zyd_mnem = row.mnemonic;
+        ins.length = row.length;
+        ins.operand_count = 2;
+        ins.operands[0].kind = OperandKind::kReg;
+        ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
+        ins.operands[1].kind = OperandKind::kReg;
+        ins.operands[1].base_reg = row.src;
+        // The prologue, and so the entry block, starts at 0x4000
+        Function fn = papa_tests::single_block_function({ins});
+        fn.basic_blocks[0].va = 0x4000;
+        CHECK(is_security_cookie(fn, fn.basic_blocks[0], ins, false) == row.cookie);
+        const auto r = extract_nzxor(fn, fn.basic_blocks[0], ins, /*is_64bit=*/false);
+        CHECK(r.has_value() == row.nzxor);
+        if (r.has_value() && row.nzxor) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "nzxor");
+        }
+    }
 }
 
 namespace {
@@ -572,34 +555,8 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("indirect_calls: find_definition recovers mov reg, imm") {
-    auto def_insn  = make_mov_reg_imm(0x4000, ZYDIS_REGISTER_EAX, 0xCAFEBABE);
-    auto call_insn = make_call_reg(0x4005, ZYDIS_REGISTER_EAX);
-
-    Function fn = papa_tests::single_block_function({def_insn, call_insn});
-    auto def = papa::features::extractors::papa_native::find_definition(
-        fn, 0x4005U, ZYDIS_REGISTER_EAX, /*is_64bit=*/false);
-    REQUIRE(def.has_value());
-    CHECK(def->site_va == 0x4000U);
-    REQUIRE(def->value.has_value());
-    CHECK(*def->value == 0xCAFEBABEULL);
-}
-
-TEST_CASE("indirect_calls: find_definition resolves enclosing register aliases") {
-    // mov rax, imm -> eax read should resolve under x64 mode
-    auto def_insn  = make_mov_reg_imm(0x4000, ZYDIS_REGISTER_RAX, 0x1000);
-    auto call_insn = make_call_reg(0x4007, ZYDIS_REGISTER_EAX);
-
-    Function fn = papa_tests::single_block_function({def_insn, call_insn});
-    auto def = papa::features::extractors::papa_native::find_definition(
-        fn, 0x4007U, ZYDIS_REGISTER_EAX, /*is_64bit=*/true);
-    REQUIRE(def.has_value());
-    REQUIRE(def->value.has_value());
-    CHECK(*def->value == 0x1000U);
-}
-
-TEST_CASE("indirect_calls: find_definition rejects partial-width writes") {
-    // mov al, 0x10 does not define rax under x64 because the upper bits remain
+TEST_CASE("indirect_calls: find_definition finds the nearest full-width write of the register, also in a predecessor block") {
+    // mov al, 0x10 does not define rax under x64, because the upper bits remain
     DecodedInsn partial = make_insn(0x4000, "mov");
     partial.zyd_mnem = ZYDIS_MNEMONIC_MOV;
     partial.length   = 2;
@@ -609,19 +566,55 @@ TEST_CASE("indirect_calls: find_definition rejects partial-width writes") {
     partial.operands[1].kind = OperandKind::kImm;
     partial.operands[1].imm  = 0x10;
 
-    auto call_insn = make_call_reg(0x4002, ZYDIS_REGISTER_RAX);
-    Function fn = papa_tests::single_block_function({partial, call_insn});
-    auto def = papa::features::extractors::papa_native::find_definition(
-        fn, 0x4002U, ZYDIS_REGISTER_RAX, /*is_64bit=*/true);
-    CHECK_FALSE(def.has_value());
-}
+    // The definition ends one block and the call starts the next, its successor
+    const pn::BasicBlock def_block{
+        0x4000, {make_mov_reg_imm(0x4000, ZYDIS_REGISTER_EAX, 0xCAFEBABE)}, {0x4005}, {}};
+    const pn::BasicBlock call_block{
+        0x4005, {make_call_reg(0x4005, ZYDIS_REGISTER_EAX)}, {}, {0x4000}};
 
-TEST_CASE("indirect_calls: find_definition returns nullopt with no preceding write") {
-    auto call_insn = make_call_reg(0x4000, ZYDIS_REGISTER_EAX);
-    Function fn = papa_tests::single_block_function({call_insn});
-    auto def = papa::features::extractors::papa_native::find_definition(
-        fn, 0x4000U, ZYDIS_REGISTER_EAX, false);
-    CHECK_FALSE(def.has_value());
+    struct Row {
+        std::string_view             label;
+        Function                     fn;
+        std::uint64_t                call_va;
+        ZydisRegister                reg;
+        bool                         is_64bit;
+        std::optional<std::uint64_t> site;
+        std::optional<std::uint64_t> value;
+    };
+    const std::vector<Row> rows{
+        {"mov reg, imm in the same block",
+         papa_tests::single_block_function(
+             {make_mov_reg_imm(0x4000, ZYDIS_REGISTER_EAX, 0xCAFEBABE),
+              make_call_reg(0x4005, ZYDIS_REGISTER_EAX)}),
+         0x4005, ZYDIS_REGISTER_EAX, false, 0x4000, 0xCAFEBABEULL},
+        // mov rax, imm defines the eax a call reads under x64
+        {"a write to the enclosing register",
+         papa_tests::single_block_function({make_mov_reg_imm(0x4000, ZYDIS_REGISTER_RAX, 0x1000),
+                                            make_call_reg(0x4007, ZYDIS_REGISTER_EAX)}),
+         0x4007, ZYDIS_REGISTER_EAX, true, 0x4000, 0x1000U},
+        {"a partial-width write is no definition",
+         papa_tests::single_block_function({partial, make_call_reg(0x4002, ZYDIS_REGISTER_RAX)}),
+         0x4002, ZYDIS_REGISTER_RAX, true, std::nullopt, std::nullopt},
+        {"no preceding write",
+         papa_tests::single_block_function({make_call_reg(0x4000, ZYDIS_REGISTER_EAX)}), 0x4000,
+         ZYDIS_REGISTER_EAX, false, std::nullopt, std::nullopt},
+        {"mov reg, imm at the end of the predecessor block",
+         papa_tests::function({def_block, call_block}), 0x4005, ZYDIS_REGISTER_EAX, false, 0x4000,
+         0xCAFEBABEULL},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto def = papa::features::extractors::papa_native::find_definition(
+            row.fn, row.call_va, row.reg, row.is_64bit);
+        CHECK(def.has_value() == row.site.has_value());
+        if (def.has_value() && row.site.has_value()) {
+            CHECK(def->site_va == *row.site);
+            CHECK(def->value.has_value() == row.value.has_value());
+            if (def->value.has_value() && row.value.has_value()) {
+                CHECK(*def->value == *row.value);
+            }
+        }
+    }
 }
 
 TEST_CASE("insn: build_import_table indexes every import, delayed or by ordinal, by its IAT VA") {
@@ -696,7 +689,7 @@ TEST_CASE("insn: extract_cross_section_flow flags a branch into another section 
                                              static_cast<std::uint8_t>(field >> 24U)};
         };
         struct Row {
-            const char*               label;
+            std::string_view          label;
             std::vector<std::uint8_t> code;
             bool                      flagged;
         };
@@ -756,7 +749,7 @@ namespace {
 
 // One expected api use: the instruction's code offset and the names it yields
 struct ApiRow {
-    const char*              label;
+    std::string_view         label;
     std::uint32_t            at;
     std::vector<std::string> names;
 };

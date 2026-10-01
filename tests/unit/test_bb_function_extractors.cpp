@@ -17,8 +17,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
+
+#include "test_support.h"
 
 using papa::features::Characteristic;
 using papa::features::FeatureTag;
@@ -73,161 +76,97 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("basic_block: extract_tight_loop fires when a successor equals the BB VA") {
-    BasicBlock bb;
-    bb.va = 0x4000;
-    bb.successors.push_back(0x4000);
-    auto r = extract_tight_loop(bb);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "tight loop");
+TEST_CASE("basic_block: extract_tight_loop fires only when a successor is the block itself") {
+    struct Row {
+        std::string_view           label;
+        std::vector<std::uint64_t> successors;
+        bool                       fires;
+    };
+    const std::vector<Row> rows{
+        {"a successor equal to the block VA", {0x4000}, true},
+        {"a successor elsewhere", {0x5000}, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        BasicBlock bb;
+        bb.va = 0x4000;
+        bb.successors = row.successors;
+        const auto r = extract_tight_loop(bb);
+        CHECK(r.has_value() == row.fires);
+        if (r.has_value() && row.fires) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "tight loop");
+        }
+    }
 }
 
-TEST_CASE("basic_block: extract_tight_loop ignores non-self successors") {
-    BasicBlock bb;
-    bb.va = 0x4000;
-    bb.successors.push_back(0x5000);
-    CHECK_FALSE(extract_tight_loop(bb).has_value());
+TEST_CASE("basic_block: extract_stack_string needs a run of printable bytes stored to the stack") {
+    struct Row {
+        std::string_view         label;
+        std::vector<DecodedInsn> insns;
+        bool                     fires;
+    };
+    const std::vector<Row> rows{
+        // Two consecutive 4-byte stores of "ABCD" and "EFGH", little-endian, form an 8-byte run
+        {"8 printable bytes via two dword stores",
+         {make_mov_stack_imm(0x4000, ZYDIS_REGISTER_ESP, 0x00, 0x44434241U, 4),
+          make_mov_stack_imm(0x4007, ZYDIS_REGISTER_ESP, 0x04, 0x48474645U, 4)},
+         true},
+        {"a store that does not go to the stack",
+         {make_mov_stack_imm(0x4000, ZYDIS_REGISTER_EAX, 0x00, 0x44434241U, 4)}, false},
+        {"non-printable bytes reset the run",
+         {make_mov_stack_imm(0x4000, ZYDIS_REGISTER_ESP, 0x00, 0x00010203U, 4)}, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        BasicBlock bb;
+        bb.va = 0x4000;
+        bb.instructions = row.insns;
+        const auto r = extract_stack_string(bb, /*is_64bit=*/false);
+        CHECK(r.has_value() == row.fires);
+        if (r.has_value() && row.fires) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "stack string");
+        }
+    }
 }
 
-TEST_CASE("basic_block: extract_stack_string detects 8 printable bytes via two dword stores") {
-    BasicBlock bb;
-    bb.va = 0x4000;
-    // Two consecutive 4-byte stores of "ABCD" + "EFGH" form an 8-byte run
-    bb.instructions.push_back(make_mov_stack_imm(
-        0x4000, ZYDIS_REGISTER_ESP, 0x00,
-        /*imm=*/0x44434241U /* "ABCD" little-endian */, /*width=*/4));
-    bb.instructions.push_back(make_mov_stack_imm(
-        0x4007, ZYDIS_REGISTER_ESP, 0x04,
-        /*imm=*/0x48474645U /* "EFGH" little-endian */, /*width=*/4));
-    auto r = extract_stack_string(bb, /*is_64bit=*/false);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "stack string");
-}
-
-TEST_CASE("basic_block: extract_stack_string ignores non-stack stores") {
-    BasicBlock bb;
-    bb.va = 0x4000;
-    bb.instructions.push_back(make_mov_stack_imm(
-        0x4000, ZYDIS_REGISTER_EAX, 0x00, 0x44434241U, 4));
-    CHECK_FALSE(extract_stack_string(bb, false).has_value());
-}
-
-TEST_CASE("basic_block: extract_stack_string resets on non-printable byte") {
-    BasicBlock bb;
-    bb.va = 0x4000;
-    bb.instructions.push_back(make_mov_stack_imm(
-        0x4000, ZYDIS_REGISTER_ESP, 0x00, 0x00010203U, 4));   // non-printable bytes
-    CHECK_FALSE(extract_stack_string(bb, false).has_value());
-}
-
-TEST_CASE("function: extract_loop detects a non-trivial SCC") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    a.successors.push_back(0x4010);
-    BasicBlock b;
-    b.va = 0x4010;
-    b.successors.push_back(0x4000);   // back-edge forms a 2-node cycle
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    auto r = extract_loop(fn);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "loop");
-}
-
-TEST_CASE("function: extract_loop ignores acyclic CFGs") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    a.successors.push_back(0x4010);
-    BasicBlock b;
-    b.va = 0x4010;
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    CHECK_FALSE(extract_loop(fn).has_value());
-}
-
-TEST_CASE("function: extract_loop ignores trivial single-node SCCs without self-edge") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock only;
-    only.va = 0x4000;
-    fn.basic_blocks.push_back(std::move(only));
-    CHECK_FALSE(extract_loop(fn).has_value());
-}
-
-TEST_CASE("function: extract_loop ignores a lone self-loop") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    a.successors.push_back(0x4000);   // a size-one component, which capa does not count
-    a.successors.push_back(0x4010);
-    BasicBlock b;
-    b.va = 0x4010;
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    CHECK_FALSE(extract_loop(fn).has_value());
-}
-
-TEST_CASE("function: extract_loop ignores reconverging paths") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    a.successors.push_back(0x4010);
-    a.successors.push_back(0x4020);
-    BasicBlock b;
-    b.va = 0x4010;
-    b.successors.push_back(0x4030);
-    BasicBlock c;
-    c.va = 0x4020;
-    c.successors.push_back(0x4030);   // d is reached twice, but no path returns
-    BasicBlock d;
-    d.va = 0x4030;
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    fn.basic_blocks.push_back(std::move(c));
-    fn.basic_blocks.push_back(std::move(d));
-    CHECK_FALSE(extract_loop(fn).has_value());
-}
-
-TEST_CASE("function: extract_loop finds a cycle reached only from a later block") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    BasicBlock b;
-    b.va = 0x4010;
-    b.successors.push_back(0x4020);
-    BasicBlock c;
-    c.va = 0x4020;
-    c.successors.push_back(0x4010);   // back-edge forms a 2-node cycle
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    fn.basic_blocks.push_back(std::move(c));
-    auto r = extract_loop(fn);
-    REQUIRE(r.has_value());
-    CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "loop");
-}
-
-TEST_CASE("function: extract_loop ignores several entry-less blocks and duplicate edges") {
-    Function fn;
-    fn.va = 0x4000;
-    BasicBlock a;
-    a.va = 0x4000;
-    BasicBlock b;
-    b.va = 0x4010;
-    b.successors.push_back(0x4020);
-    b.successors.push_back(0x4020);   // a jcc to the next block gives two identical edges
-    BasicBlock c;
-    c.va = 0x4020;
-    fn.basic_blocks.push_back(std::move(a));
-    fn.basic_blocks.push_back(std::move(b));
-    fn.basic_blocks.push_back(std::move(c));
-    CHECK_FALSE(extract_loop(fn).has_value());
+TEST_CASE("function: extract_loop fires on a cycle of two or more blocks, as capa counts loops") {
+    // Each block is its VA and its successors, the first block being the entry
+    using Graph = std::vector<std::pair<std::uint64_t, std::vector<std::uint64_t>>>;
+    struct Row {
+        std::string_view label;
+        Graph            graph;
+        bool             loop;
+    };
+    const std::vector<Row> rows{
+        {"a back-edge forming a 2-node cycle", {{0x4000, {0x4010}}, {0x4010, {0x4000}}}, true},
+        {"an acyclic CFG", {{0x4000, {0x4010}}, {0x4010, {}}}, false},
+        {"a single node without a self-edge", {{0x4000, {}}}, false},
+        // A size-one component, which capa does not count
+        {"a lone self-loop", {{0x4000, {0x4000, 0x4010}}, {0x4010, {}}}, false},
+        // The last block is reached twice, but no path returns
+        {"reconverging paths",
+         {{0x4000, {0x4010, 0x4020}}, {0x4010, {0x4030}}, {0x4020, {0x4030}}, {0x4030, {}}}, false},
+        {"a cycle reached only from a later block",
+         {{0x4000, {}}, {0x4010, {0x4020}}, {0x4020, {0x4010}}}, true},
+        // A jcc to the next block gives two identical edges
+        {"several entry-less blocks and duplicate edges",
+         {{0x4000, {}}, {0x4010, {0x4020, 0x4020}}, {0x4020, {}}}, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        std::vector<BasicBlock> blocks;
+        for (const auto& [va, successors] : row.graph) {
+            BasicBlock bb;
+            bb.va = va;
+            bb.successors = successors;
+            blocks.push_back(std::move(bb));
+        }
+        const auto r = extract_loop(papa_tests::function(std::move(blocks)));
+        CHECK(r.has_value() == row.loop);
+        if (r.has_value() && row.loop) {
+            CHECK(static_cast<const Characteristic*>(r->first.get())->value() == "loop");
+        }
+    }
 }
 
 namespace {
