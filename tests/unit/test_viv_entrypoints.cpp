@@ -3,27 +3,27 @@
 
 #include "doctest.h"
 
-#include "papa/features/extractors/papa_native/cfg.h"
+#include "papa/features/extractors/papa_native/viv/entrypoints.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
-namespace cfg = papa::features::extractors::papa_native::cfg;
+namespace pv = papa::features::extractors::papa_native::viv;
 
-using papa::features::extractors::papa_native::PdataEntryKind;
+using pv::PdataEntryKind;
 
 TEST_CASE("classify_pdata_unwind seeds v1, skips chained, stops on v2 or unreadable") {
     // v1 (ver=1), no flags -> a real function entry
-    CHECK(cfg::classify_pdata_unwind(std::uint8_t{0x01}) == PdataEntryKind::kSeed);
+    CHECK(pv::classify_pdata_unwind(std::uint8_t{0x01}) == PdataEntryKind::kSeed);
     // v1 with UNW_FLAG_CHAININFO set (Flags bit 2: VerFlags = 1 | (4 << 3) = 0x21)
-    CHECK(cfg::classify_pdata_unwind(std::uint8_t{0x21}) ==
+    CHECK(pv::classify_pdata_unwind(std::uint8_t{0x21}) ==
           PdataEntryKind::kSkipChained);
     // v2 UNWIND_INFO (ver=2): vivisect bails on the rest of the .pdata
-    CHECK(cfg::classify_pdata_unwind(std::uint8_t{0x02}) == PdataEntryKind::kStop);
+    CHECK(pv::classify_pdata_unwind(std::uint8_t{0x02}) == PdataEntryKind::kStop);
     // An unreadable or invalid unwind pointer also bails the walk
-    CHECK(cfg::classify_pdata_unwind(std::nullopt) == PdataEntryKind::kStop);
+    CHECK(pv::classify_pdata_unwind(std::nullopt) == PdataEntryKind::kStop);
 }
 
 TEST_CASE("find_function_prologues finds vivisect i386 prologues in gaps only") {
@@ -49,7 +49,7 @@ TEST_CASE("find_function_prologues finds vivisect i386 prologues in gaps only") 
     code[0x51] = 0x81u; code[0x52] = 0xECu;
     code[0x53] = 0x40u; code[0x54] = 0x00u; code[0x55] = 0x00u; code[0x56] = 0x00u;
 
-    const auto seeds = cfg::find_function_prologues(code, 0x1000u, covered);
+    const auto seeds = pv::find_function_prologues(code, 0x1000u, covered);
     const std::vector<std::uint64_t> want{0x1011u, 0x1041u};
     CHECK(seeds == want);
 }

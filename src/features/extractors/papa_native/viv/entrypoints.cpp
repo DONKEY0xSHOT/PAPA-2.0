@@ -1,4 +1,4 @@
-#include "papa/features/extractors/papa_native/cfg.h"
+#include "papa/features/extractors/papa_native/viv/entrypoints.h"
 
 #include "papa/constants.h"
 #include "papa/pe/pe_image.h"
@@ -11,7 +11,7 @@
 #include <span>
 #include <vector>
 
-namespace papa::features::extractors::papa_native {
+namespace papa::features::extractors::papa_native::viv {
 
 namespace {
 
@@ -62,8 +62,7 @@ template <typename T>
 
 }  // namespace
 
-PdataEntryKind
-cfg::classify_pdata_unwind(std::optional<std::uint8_t> verflags) noexcept {
+PdataEntryKind classify_pdata_unwind(std::optional<std::uint8_t> verflags) noexcept {
     if (!verflags.has_value()) {
         return PdataEntryKind::kStop;
     }
@@ -80,7 +79,7 @@ cfg::classify_pdata_unwind(std::optional<std::uint8_t> verflags) noexcept {
     return PdataEntryKind::kSeed;
 }
 
-std::vector<std::uint64_t> cfg::pdata_function_begins(const pe::PeImage& image) {
+std::vector<std::uint64_t> pdata_function_begins(const pe::PeImage& image) {
     std::vector<std::uint64_t> begins;
     if (!image.is_64bit()) { return begins; }
     const pe::ParsedSection* pdata = nullptr;
@@ -127,7 +126,7 @@ std::vector<std::uint64_t> cfg::pdata_function_begins(const pe::PeImage& image) 
     return begins;
 }
 
-std::vector<std::uint64_t> cfg::find_function_prologues(
+std::vector<std::uint64_t> find_function_prologues(
     std::span<const std::uint8_t> code, std::uint64_t base_va,
     std::span<const std::uint8_t> covered) {
     std::vector<std::uint64_t> out;
@@ -149,4 +148,4 @@ std::vector<std::uint64_t> cfg::find_function_prologues(
     return out;
 }
 
-}  // namespace papa::features::extractors::papa_native
+}  // namespace papa::features::extractors::papa_native::viv

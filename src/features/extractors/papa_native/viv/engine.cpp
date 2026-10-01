@@ -19,6 +19,7 @@
 #include "papa/features/extractors/papa_native/noreturn.h"
 #include "papa/features/extractors/papa_native/viv/discovery.h"
 #include "papa/features/extractors/papa_native/viv/discovery_passes.h"
+#include "papa/features/extractors/papa_native/viv/entrypoints.h"
 #include "papa/features/extractors/papa_native/viv/flirt_analysis.h"
 
 namespace papa::features::extractors::papa_native::viv {
@@ -186,7 +187,7 @@ std::vector<std::uint64_t> entrypoint_seeds(const pe::PeImage& image) {
             entries.push_back(cb);
         }
     }
-    for (const std::uint64_t begin : cfg::pdata_function_begins(image)) {
+    for (const std::uint64_t begin : pdata_function_begins(image)) {
         entries.push_back(begin);
     }
     return entries;
@@ -355,7 +356,7 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm,
                                 covered[off + k] = 1U;
                             }
                         });
-                    return cfg::find_function_prologues(code, text_base, covered);
+                    return find_function_prologues(code, text_base, covered);
                 });
             }
         }

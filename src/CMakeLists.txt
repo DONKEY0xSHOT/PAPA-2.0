@@ -19,7 +19,7 @@ set(PAPA_LIB_SOURCES
     features/extractors/pefile.cpp
     features/extractors/global_.cpp
     features/extractors/papa_native/disassembler.cpp
-    features/extractors/papa_native/cfg.cpp
+    features/extractors/papa_native/viv/entrypoints.cpp
     features/extractors/papa_native/viv/location_db.cpp
     features/extractors/papa_native/viv/xref_db.cpp
     features/extractors/papa_native/viv/cf_context.cpp

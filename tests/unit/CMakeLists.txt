@@ -7,7 +7,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_pe_builder.cpp
     test_pipeline_synthetic.cpp
     test_disassembler.cpp
-    test_cfg.cpp
+    test_viv_entrypoints.cpp
     test_viv_location_db.cpp
     test_viv_xref_db.cpp
     test_viv_cf_context.cpp

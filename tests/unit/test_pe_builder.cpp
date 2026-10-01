@@ -10,7 +10,7 @@
 #include "papa/constants.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
-#include "papa/features/extractors/papa_native/cfg.h"
+#include "papa/features/extractors/papa_native/viv/entrypoints.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -199,7 +199,7 @@ TEST_CASE("pe_builder: an x64 image carries a walkable .pdata table") {
 
     // The exception-directory walk must yield both begins, which means each
     // record's UNWIND_INFO parsed as version 1
-    const auto begins = papa::features::extractors::papa_native::cfg::
+    const auto begins = papa::features::extractors::papa_native::viv::
         pdata_function_begins(*img);
     REQUIRE(begins.size() == 2);
     CHECK(begins[0] == img->image_base() + papa_tests::PeBuilder::kTextRva + 0x00);
