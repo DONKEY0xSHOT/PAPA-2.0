@@ -138,7 +138,7 @@ void inject_match_features(features::FeatureSet&                fs,
 
 // Per-scope passes. Each takes the globals find_static_capabilities extracted once
 InstructionCapabilities
-find_instruction_capabilities_inner(
+find_instruction_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -155,7 +155,7 @@ find_instruction_capabilities_inner(
 }
 
 BasicBlockCapabilities
-find_basic_block_capabilities_inner(
+find_basic_block_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -165,7 +165,7 @@ find_basic_block_capabilities_inner(
     ::papa::engine::MatchResults insn_matches_acc;
 
     for (const auto& ih : extractor.get_instructions(fh, bbh)) {
-        auto insn_caps = find_instruction_capabilities_inner(
+        auto insn_caps = find_instruction_capabilities(
             rules, extractor, fh, bbh, ih, globals);
         bb_fs.merge_in(insn_caps.features);
         merge_into(insn_matches_acc, std::move(insn_caps.matches));
@@ -184,7 +184,7 @@ find_basic_block_capabilities_inner(
 }
 
 CodeCapabilities
-find_code_capabilities_inner(
+find_code_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -194,7 +194,7 @@ find_code_capabilities_inner(
     ::papa::engine::MatchResults insn_matches_acc;
 
     for (const auto& bbh : extractor.get_basic_blocks(fh)) {
-        auto bb_caps = find_basic_block_capabilities_inner(
+        auto bb_caps = find_basic_block_capabilities(
             rules, extractor, fh, bbh, globals);
         fn_fs.merge_in(bb_caps.features);
         merge_into(bb_matches_acc,   std::move(bb_caps.matches));
@@ -246,7 +246,7 @@ find_static_capabilities(
             slots[i].library = true;
             return;
         }
-        slots[i].caps = find_code_capabilities_inner(rules, extractor, fhs[i], globals);
+        slots[i].caps = find_code_capabilities(rules, extractor, fhs[i], globals);
     };
 
     const unsigned workers = resolve_worker_count(threads, n);
