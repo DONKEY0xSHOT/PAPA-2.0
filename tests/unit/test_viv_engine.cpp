@@ -102,3 +102,40 @@ TEST_CASE("discovery engine: each seed source, direct call and i386 pass contrib
         CHECK(callers == want_callers);
     }
 }
+
+TEST_CASE("discovery engine: an x64 switch's case targets become blocks of its function") {
+    papa_tests::PeBuilder b;
+    // lea r8, [rip+base] / cmp ecx, 2 / ja default / movsxd rax, ecx /
+    // mov ecx, [r8+rax*4+table] / add rcx, r8 / jmp rcx, then three cases and the default
+    const std::uint32_t f = b.add_function({
+        0x4C, 0x8D, 0x05, 0, 0, 0, 0,  0x83, 0xF9, 0x02,  0x77, 0x22,  0x48, 0x63, 0xC1,
+        0x41, 0x8B, 0x8C, 0x80, 0, 0, 0, 0,  0x49, 0x03, 0xC8,  0xFF, 0xE1,
+        0xB8, 0x01, 0, 0, 0, 0xC3,  0xB8, 0x02, 0, 0, 0, 0xC3,  0xB8, 0x03, 0, 0, 0, 0xC3,
+        0x33, 0xC0, 0xC3});
+    b.data.assign(16, 0);
+    papa_tests::detail::poke(b.code, f + 3U,
+                             static_cast<std::int32_t>(b.base() - b.code_va(f + 7U)));
+    papa_tests::detail::poke(b.code, f + 19U, b.section_rva(".data"));
+    // The offset table holds each case's RVA and ends at an entry that is no code
+    const std::vector<std::uint32_t> cases{f + 28U, f + 34U, f + 40U};
+    for (std::uint32_t i = 0; i < cases.size(); ++i) {
+        papa_tests::detail::poke(b.data, i * 4U, papa_tests::PeBuilder::kTextRva + cases[i]);
+    }
+
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const pn::Disassembler             disasm(true);
+    const pn::flirt::FlirtSignatureSet no_sigs;
+    const auto rec = pn::viv::discover_functions(*img, disasm, pn::build_import_table(*img),
+                                                 no_sigs);
+    REQUIRE(rec.functions.size() == 1);
+    CHECK(rec.functions[0].va == b.code_va(f));
+
+    std::vector<std::uint64_t> blocks;
+    for (const pn::BasicBlock& bb : rec.functions[0].basic_blocks) { blocks.push_back(bb.va); }
+    std::sort(blocks.begin(), blocks.end());
+    const std::vector<std::uint64_t> want{b.code_va(f), b.code_va(f + 12U), b.code_va(cases[0]),
+                                          b.code_va(cases[1]), b.code_va(cases[2]),
+                                          b.code_va(f + 46U)};
+    CHECK(blocks == want);
+}
