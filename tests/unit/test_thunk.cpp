@@ -11,6 +11,9 @@
 #include "test_support.h"
 
 #include <cstdint>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 using papa::features::extractors::papa_native::BasicBlock;
 using papa::features::extractors::papa_native::DecodedInsn;
@@ -34,39 +37,44 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("is_thunk: flags single-block jmp [iat] functions") {
-    const auto fn = papa_tests::single_block_function({make_jmp_iat(0x1000)});
-    CHECK(is_thunk(fn));
-}
-
-TEST_CASE("is_thunk: rejects multi-block functions") {
-    auto fn = papa_tests::single_block_function({make_jmp_iat(0x1000)});
-    BasicBlock bb2;
-    bb2.va = 0x2000;
-    fn.basic_blocks.push_back(std::move(bb2));
-    CHECK_FALSE(is_thunk(fn));
-}
-
-TEST_CASE("is_thunk: rejects multi-instruction blocks") {
-    DecodedInsn extra;
-    extra.va = 0x1006;
-    extra.length = 1;
-    auto fn = papa_tests::single_block_function({make_jmp_iat(0x1000)});
-    fn.basic_blocks.front().instructions.push_back(std::move(extra));
-    CHECK_FALSE(is_thunk(fn));
-}
-
-TEST_CASE("is_thunk: rejects conditional jumps and register operands") {
-    {
-        auto cond = make_jmp_iat(0x1000);
-        cond.is_conditional = true;
-        const auto fn = papa_tests::single_block_function({cond});
-        CHECK_FALSE(is_thunk(fn));
-    }
-    {
-        auto reg = make_jmp_iat(0x1000);
-        reg.operands[0].kind = OperandKind::kReg;
-        const auto fn = papa_tests::single_block_function({reg});
-        CHECK_FALSE(is_thunk(fn));
+TEST_CASE("is_thunk: flags only a function of one block holding one unconditional jmp [iat]") {
+    using papa::features::extractors::papa_native::Function;
+    const auto with = [](auto change) {
+        auto fn = papa_tests::single_block_function({make_jmp_iat(0x1000)});
+        change(fn);
+        return fn;
+    };
+    struct Row {
+        std::string_view label;
+        Function         fn;
+        bool             thunk;
+    };
+    const std::vector<Row> rows{
+        {"a single-block jmp [iat] function", with([](Function&) {}), true},
+        {"a second block", with([](Function& fn) {
+             BasicBlock bb2;
+             bb2.va = 0x2000;
+             fn.basic_blocks.push_back(std::move(bb2));
+         }),
+         false},
+        {"a second instruction in the block", with([](Function& fn) {
+             DecodedInsn extra;
+             extra.va = 0x1006;
+             extra.length = 1;
+             fn.basic_blocks.front().instructions.push_back(std::move(extra));
+         }),
+         false},
+        {"a conditional jump", with([](Function& fn) {
+             fn.basic_blocks.front().instructions.front().is_conditional = true;
+         }),
+         false},
+        {"a register operand", with([](Function& fn) {
+             fn.basic_blocks.front().instructions.front().operands[0].kind = OperandKind::kReg;
+         }),
+         false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(is_thunk(row.fn) == row.thunk);
     }
 }

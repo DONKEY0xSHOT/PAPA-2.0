@@ -54,7 +54,8 @@ TEST_CASE("regex_prefilter: required_literal picks the longest mandatory run") {
         {"(abc",                  false, ""},
     };
     for (const Row& r : rows) {
-        CAPTURE(r.pattern);
+        const std::string_view pattern{r.pattern};
+        CAPTURE(pattern);
         CHECK(required_literal(r.pattern, r.icase) == r.literal);
     }
 }
@@ -91,7 +92,8 @@ TEST_CASE("regex_prefilter: every match contains the required literal") {
         {"([a-z]|q)xyz",          false, "qxyz"},
     };
     for (const Row& r : rows) {
-        CAPTURE(r.pattern);
+        const std::string_view pattern{r.pattern};
+        CAPTURE(pattern);
         auto flags = std::regex::ECMAScript;
         if (r.icase) { flags |= std::regex::icase; }
         REQUIRE(std::regex_search(r.subject, std::regex(r.pattern, flags)));

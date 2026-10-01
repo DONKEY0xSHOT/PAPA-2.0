@@ -7,9 +7,11 @@
 
 #include <array>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <streambuf>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using papa::cli::parse_args;
@@ -32,20 +34,25 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("parse_args: without -r the rules directory is unset so the embedded rules load") {
-    const std::array<const char*, 1> argv{"sample.exe"};
-    const auto res = parse_args(static_cast<int>(argv.size()), argv.data());
-    REQUIRE(res.error.empty());
-    CHECK_FALSE(res.args.rules_dir.has_value());
-}
-
-TEST_CASE("parse_args: -r and --rules set the rules directory") {
-    for (const char* flag : {"-r", "--rules"}) {
-        const std::array<const char*, 3> argv{"sample.exe", flag, "my-rules"};
-        const auto res = parse_args(static_cast<int>(argv.size()), argv.data());
+TEST_CASE("parse_args: -r and --rules set the rules directory, which stays unset without them so the embedded rules load") {
+    struct Row {
+        std::string_view                label;
+        std::vector<const char*>        argv;
+        std::optional<std::string_view> rules_dir;
+    };
+    const std::vector<Row> rows{
+        {"no -r", {"sample.exe"}, std::nullopt},
+        {"-r", {"sample.exe", "-r", "my-rules"}, "my-rules"},
+        {"--rules", {"sample.exe", "--rules", "my-rules"}, "my-rules"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto res = parse_args(static_cast<int>(row.argv.size()), row.argv.data());
         REQUIRE(res.error.empty());
-        REQUIRE(res.args.rules_dir.has_value());
-        CHECK(res.args.rules_dir->string() == "my-rules");
+        CHECK(res.args.rules_dir.has_value() == row.rules_dir.has_value());
+        if (res.args.rules_dir.has_value() && row.rules_dir.has_value()) {
+            CHECK(res.args.rules_dir->string() == *row.rules_dir);
+        }
     }
 }
 
@@ -66,21 +73,26 @@ TEST_CASE("parse_args: a non-positive argc records no arguments") {
     }
 }
 
-TEST_CASE("run: --version prints the program file name and the release version like argparse") {
-    papa::cli::Args args;
-    args.show_version = true;
-    args.argv0 = "tools/papa.exe";
-    CHECK(run_capturing_stdout(args) == version_line("papa.exe"));
+TEST_CASE("run: --version prints the program file name, or papa without one, and the release version like argparse") {
+    struct Row {
+        std::string_view label;
+        std::string      argv0;
+        std::string      prog;
+    };
+    const std::vector<Row> rows{
+        {"a relative path", "tools/papa.exe", "papa.exe"},
 #if defined(_WIN32)
-    args.argv0 = "C:\\tools\\papa.exe";
-    CHECK(run_capturing_stdout(args) == version_line("papa.exe"));
+        {"a Windows path", "C:\\tools\\papa.exe", "papa.exe"},
 #endif
-}
-
-TEST_CASE("run: --version names the program papa when argv[0] is empty") {
-    papa::cli::Args args;
-    args.show_version = true;
-    CHECK(run_capturing_stdout(args) == version_line("papa"));
+        {"an empty argv[0]", "", "papa"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        papa::cli::Args args;
+        args.show_version = true;
+        args.argv0 = row.argv0;
+        CHECK(run_capturing_stdout(args) == version_line(row.prog));
+    }
 }
 
 TEST_CASE("run: the first line of --help is the --version line") {

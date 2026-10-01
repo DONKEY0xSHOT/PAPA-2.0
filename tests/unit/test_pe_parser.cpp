@@ -89,13 +89,13 @@ TEST_CASE("pe_image: the bounded readers stay inside the file and its sections")
 
     enum class Reader { kRva, kFileOffset, kSection, kReadable, kProbe };
     struct Row {
-        const char*   label;
-        Reader        reader;
-        std::uint64_t at;
-        std::size_t   n;
+        std::string_view label;
+        Reader           reader;
+        std::uint64_t    at;
+        std::size_t      n;
         // bytes read or -1 when out of bounds, the section index or -1, the readable
         // count, or 1 when probe_readable holds
-        std::int64_t  expected;
+        std::int64_t     expected;
     };
     const std::vector<Row> rows{
         {"read the code", Reader::kRva, text, 4, 4},

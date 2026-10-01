@@ -39,34 +39,33 @@ std::vector<std::uint8_t> sample_x64_code() {
 
 }  // namespace
 
-TEST_CASE("pe_builder: a minimal x64 image parses with the expected headers") {
-    papa_tests::PeBuilder b;
-    b.x64  = true;
-    b.code = sample_x64_code();
-
-    const auto bytes = b.build();
-    auto       img   = papa::pe::PeParser::parse(bytes);
-    REQUIRE(img.has_value());
-
-    CHECK(img->is_64bit());
-    CHECK(img->machine() == papa::constants::kImageFileMachineAmd64);
-    CHECK(img->image_base() == 0x140000000ULL);
-    CHECK(img->entry_point_rva() == papa_tests::PeBuilder::kTextRva);
-    CHECK(img->size_of_image() > 0);
-}
-
-TEST_CASE("pe_builder: a minimal x86 image parses as 32-bit") {
-    papa_tests::PeBuilder b;
-    b.x64  = false;
-    b.code = {0x55, 0x8B, 0xEC, 0x5D, 0xC3};  // push ebp / mov ebp,esp / pop ebp / ret
-
-    const auto bytes = b.build();
-    auto       img   = papa::pe::PeParser::parse(bytes);
-    REQUIRE(img.has_value());
-
-    CHECK_FALSE(img->is_64bit());
-    CHECK(img->machine() == papa::constants::kImageFileMachineI386);
-    CHECK(img->image_base() == 0x400000ULL);
+TEST_CASE("pe_builder: a minimal image of each bitness parses with the expected headers") {
+    struct Row {
+        std::string_view          label;
+        bool                      x64;
+        std::vector<std::uint8_t> code;
+        std::uint16_t             machine;
+        std::uint64_t             image_base;
+    };
+    const std::vector<Row> rows{
+        {"x64", true, sample_x64_code(), papa::constants::kImageFileMachineAmd64, 0x140000000ULL},
+        // push ebp / mov ebp,esp / pop ebp / ret
+        {"x86", false, {0x55, 0x8B, 0xEC, 0x5D, 0xC3}, papa::constants::kImageFileMachineI386,
+         0x400000ULL},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        papa_tests::PeBuilder b;
+        b.x64  = row.x64;
+        b.code = row.code;
+        const auto img = papa::pe::PeParser::parse(b.build());
+        REQUIRE(img.has_value());
+        CHECK(img->is_64bit() == row.x64);
+        CHECK(img->machine() == row.machine);
+        CHECK(img->image_base() == row.image_base);
+        CHECK(img->entry_point_rva() == papa_tests::PeBuilder::kTextRva);
+        CHECK(img->size_of_image() > 0);
+    }
 }
 
 TEST_CASE("pe_builder: the code section is readable back at its virtual address") {

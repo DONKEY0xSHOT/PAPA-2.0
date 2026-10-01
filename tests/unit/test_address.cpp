@@ -4,33 +4,39 @@
 
 #include "papa/features/address.h"
 
+#include <functional>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
+#include <vector>
 
 using namespace papa::features;
 
 TEST_SUITE("address") {
 
-TEST_CASE("NoAddress instances compare equal") {
-    const Address a = NoAddress{};
-    const Address b = NoAddress{};
-    CHECK(a == b);
-}
-
-TEST_CASE("Concrete addresses compare by payload") {
-    Address a = AbsoluteVirtualAddress{0x401000};
-    Address b = AbsoluteVirtualAddress{0x401000};
-    Address c = AbsoluteVirtualAddress{0x401004};
-    CHECK(a == b);
-    CHECK_FALSE(a == c);
-}
-
-TEST_CASE("Different variant alternatives are not equal even when payload matches") {
-    // AbsoluteVirtualAddress{0x10} vs FileOffsetAddress{0x10} share a payload but live
-    // in different variant slots, and std::variant operator== is index-aware
-    Address a = AbsoluteVirtualAddress{0x10};
-    Address b = FileOffsetAddress{0x10};
-    CHECK_FALSE(a == b);
+TEST_CASE("Addresses compare equal only in one variant slot with one payload, and equal ones hash equal") {
+    struct Row {
+        std::string_view label;
+        Address          a;
+        Address          b;
+        bool             equal;
+    };
+    const std::vector<Row> rows{
+        {"NoAddress instances", NoAddress{}, NoAddress{}, true},
+        {"concrete addresses with one payload", AbsoluteVirtualAddress{0x401000},
+         AbsoluteVirtualAddress{0x401000}, true},
+        {"concrete addresses with different payloads", AbsoluteVirtualAddress{0x401000},
+         AbsoluteVirtualAddress{0x401004}, false},
+        // The payloads match but live in different variant slots, and std::variant
+        // operator== is index-aware
+        {"different variant alternatives", AbsoluteVirtualAddress{0x10}, FileOffsetAddress{0x10},
+         false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK((row.a == row.b) == row.equal);
+        if (row.equal) { CHECK(std::hash<Address>{}(row.a) == std::hash<Address>{}(row.b)); }
+    }
 }
 
 TEST_CASE("linearize yields distinct values for distinct tag and payload") {

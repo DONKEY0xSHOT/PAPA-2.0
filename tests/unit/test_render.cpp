@@ -303,7 +303,7 @@ TEST_CASE("render: end-to-end JSON over a builder PE carries its hashes, matches
     CHECK(json.find("\"sha256\":\"" + sha256 + "\"") != std::string::npos);
     CHECK(json.find("\"library_functions\":[{\"address\":{\"type\":\"absolute\",\"value\":" +
                     std::to_string(b.code_va(thunk)) + "},\"name\":\"?\"}]") != std::string::npos);
-    for (const char* name : {"has-text", "tight-loop", "nzxor", "data-loop-recursion"}) {
+    for (const std::string_view name : {"has-text", "tight-loop", "nzxor", "data-loop-recursion"}) {
         CAPTURE(name);
         CHECK(json.find("\"" + std::string(name) + "\":{") != std::string::npos);
     }
@@ -322,8 +322,8 @@ TEST_CASE("collect_metadata: the report version is capa's release so the JSON ca
 
 TEST_CASE("collect_metadata: the arch names i386 and amd64 and falls back to aarch64 or unknown") {
     struct Row {
-        std::uint16_t machine;
-        const char*   arch;
+        std::uint16_t    machine;
+        std::string_view arch;
     };
     constexpr std::array<Row, 4> kRows = {{
         {0x014C, "i386"}, {0x8664, "amd64"}, {0xAA64, "aarch64"}, {0x01C4, "unknown"},

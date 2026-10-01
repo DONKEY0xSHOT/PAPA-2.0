@@ -29,7 +29,7 @@ using papa::features::extractors::extract_global_features;
 
 TEST_CASE("global_: a PE yields os windows, format pe and its arch, all at no address") {
     struct Row {
-        const char*      label;
+        std::string_view label;
         bool             x64;
         std::uint16_t    machine;  // 0 keeps the machine the builder writes
         std::string_view arch;     // empty when no arch is emitted
