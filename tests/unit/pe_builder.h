@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -16,16 +17,19 @@
 
 namespace papa_tests {
 
-/// One imported DLL and the function names taken from it
+/// One imported DLL and the functions taken from it. A function spelled "#N" is
+/// imported by ordinal N
 struct ImportSpec {
     std::string              dll;
     std::vector<std::string> functions;
 };
 
-/// One exported function, named, pointing at an offset into the code section
+/// One exported function, named, pointing at an offset into the code section or, when
+/// forwarder is set, forwarded to another DLL's export such as "ntdll.RtlAllocateHeap"
 struct ExportSpec {
     std::string   name;
     std::uint32_t code_offset{0};
+    std::string   forwarder;
 };
 
 /// File offsets of the header structures in the image build() returns
@@ -71,6 +75,8 @@ public:
     // Code offset of the entry point
     std::uint32_t             entry_offset{0};
     std::vector<ImportSpec>   imports;
+    // Imports bound through the delay-load directory instead of the import directory
+    std::vector<ImportSpec>   delay_imports;
     std::vector<ExportSpec>   exports;
     // Code offsets whose 4 or 8 byte slot holds an absolute address to relocate
     std::vector<std::uint32_t> reloc_code_offsets;
@@ -94,8 +100,8 @@ public:
     /// RVA where the named section lands, 0 when there is none
     [[nodiscard]] std::uint32_t section_rva(std::string_view name) const;
 
-    /// Virtual address of the IAT slot for fn of dll as spelled in imports, 0 when
-    /// absent. It holds until a section changes size
+    /// Virtual address of the IAT slot for fn of dll as spelled in imports or
+    /// delay_imports, 0 when absent. It holds until a section changes size
     [[nodiscard]] std::uint64_t iat_va(std::string_view dll, std::string_view fn) const;
 
     /// File offsets of the headers in the image build() would return
@@ -144,7 +150,8 @@ private:
     };
 
     [[nodiscard]] Image assemble() const;
-    void put_imports(Blob& rdata, Image& image) const;
+    void put_imports(Blob& rdata, const std::vector<ImportSpec>& specs, bool delayed,
+                     Image& image) const;
     [[nodiscard]] HeaderLayout layout_for(std::size_t section_count) const noexcept;
 };
 
@@ -195,23 +202,30 @@ inline HeaderLayout PeBuilder::layout_for(std::size_t section_count) const noexc
     return l;
 }
 
-// Writes the import descriptors, then the hint/name entries and DLL names, then every
-// lookup table, then every address table
-inline void PeBuilder::put_imports(Blob& rdata, Image& image) const {
+// Writes the import descriptors (or delay-load descriptors) for specs, then the
+// hint/name entries and DLL names, then every lookup table, then every address table
+inline void PeBuilder::put_imports(Blob& rdata, const std::vector<ImportSpec>& specs,
+                                   bool delayed, Image& image) const {
     using detail::poke;
-    const std::vector<ImportSpec>& specs = imports;
-    const std::uint32_t descriptor_size  = 20U;
+    const std::uint32_t descriptor_size  = delayed ? 32U : 20U;
     const std::uint32_t dir_rva          = rdata.here();
     const std::size_t   descriptor_count = specs.size() + 1U;
     rdata.bytes.resize(rdata.bytes.size() + descriptor_count * descriptor_size, 0);
 
-    const std::uint32_t thunk_size = x64 ? 8U : 4U;
+    const std::uint32_t thunk_size   = x64 ? 8U : 4U;
+    const std::uint64_t ordinal_flag = x64 ? 0x8000000000000000ULL : 0x80000000ULL;
     std::vector<std::uint32_t>              dll_name_rvas;
     std::vector<std::vector<std::uint64_t>> thunks;
 
     for (const ImportSpec& imp : specs) {
         std::vector<std::uint64_t> values;
         for (const std::string& fn : imp.functions) {
+            if (fn.size() > 1U && fn[0] == '#') {
+                std::uint16_t ordinal = 0;
+                std::from_chars(fn.data() + 1, fn.data() + fn.size(), ordinal);
+                values.push_back(ordinal_flag | ordinal);
+                continue;
+            }
             values.push_back(rdata.here());
             const std::uint16_t hint = 0;
             rdata.put(hint);
@@ -249,12 +263,20 @@ inline void PeBuilder::put_imports(Blob& rdata, Image& image) const {
 
     for (std::size_t i = 0; i < specs.size(); ++i) {
         const std::size_t at = std::size_t{dir_rva - rdata.rva} + i * descriptor_size;
-        poke<std::uint32_t>(rdata.bytes, at + 0U,  ilt_rvas[i]);
-        poke<std::uint32_t>(rdata.bytes, at + 12U, dll_name_rvas[i]);
-        poke<std::uint32_t>(rdata.bytes, at + 16U, iat_rvas[i]);
+        if (delayed) {
+            poke<std::uint32_t>(rdata.bytes, at + 0U,  1U);  // Attributes, RVA based
+            poke<std::uint32_t>(rdata.bytes, at + 4U,  dll_name_rvas[i]);
+            poke<std::uint32_t>(rdata.bytes, at + 12U, iat_rvas[i]);
+            poke<std::uint32_t>(rdata.bytes, at + 16U, ilt_rvas[i]);
+        } else {
+            poke<std::uint32_t>(rdata.bytes, at + 0U,  ilt_rvas[i]);
+            poke<std::uint32_t>(rdata.bytes, at + 12U, dll_name_rvas[i]);
+            poke<std::uint32_t>(rdata.bytes, at + 16U, iat_rvas[i]);
+        }
     }
     if (!specs.empty()) {
-        image.dirs[1] = {dir_rva, static_cast<std::uint32_t>(descriptor_count * descriptor_size)};
+        image.dirs[delayed ? 13U : 1U] = {
+            dir_rva, static_cast<std::uint32_t>(descriptor_count * descriptor_size)};
     }
 }
 
@@ -278,10 +300,10 @@ inline PeBuilder::Image PeBuilder::assemble() const {
 
     place(".text", code, size_of(code), kScnCode | kScnExecute | kScnRead);
 
-    // .rdata holds the import, export and TLS directories
+    // .rdata holds the import, export, TLS and delay-load directories
     Blob rdata;
     rdata.rva = next_rva;
-    put_imports(rdata, image);
+    put_imports(rdata, imports, false, image);
 
     if (!exports.empty()) {
         std::vector<std::uint32_t> name_rvas;
@@ -320,6 +342,17 @@ inline PeBuilder::Image PeBuilder::assemble() const {
         rdata.put(functions_rva);
         rdata.put(names_rva);
         rdata.put(ordinals_rva);
+
+        // A forwarder string lies inside the export directory, which is how a loader
+        // tells it from code
+        for (std::size_t i = 0; i < exports.size(); ++i) {
+            if (exports[i].forwarder.empty()) {
+                continue;
+            }
+            poke<std::uint32_t>(rdata.bytes, std::size_t{functions_rva - rdata.rva} + i * 4U,
+                                rdata.here());
+            rdata.put_bytes(exports[i].forwarder.data(), exports[i].forwarder.size() + 1U);
+        }
         image.dirs[0] = {export_dir_rva, rdata.here() - export_dir_rva};
     }
 
@@ -360,6 +393,10 @@ inline PeBuilder::Image PeBuilder::assemble() const {
         }
     }
 
+    if (!delay_imports.empty()) {
+        rdata.align(4);
+        put_imports(rdata, delay_imports, true, image);
+    }
     place(".rdata", rdata.bytes, size_of(rdata.bytes), kScnInitializedData | kScnRead);
 
     // .pdata, the x64 exception table. Each record needs an UNWIND_INFO whose

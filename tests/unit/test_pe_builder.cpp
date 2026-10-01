@@ -271,6 +271,88 @@ TEST_CASE("pe_builder: entry_offset moves the entry point into the code") {
     REQUIRE(img.has_value());
     CHECK(img->entry_point_rva() == papa_tests::PeBuilder::kTextRva + 0x10);
 }
+
+TEST_CASE("pe_builder: an import spelled #N is taken by ordinal") {
+    papa_tests::PeBuilder b;
+    b.code    = sample_x64_code();
+    b.imports = {{"ws2_32.dll", {"#6"}}, {"kernel32.dll", {"#6", "ExitProcess"}}};
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const auto imps = img->imports();
+    REQUIRE(imps.size() == 3);
+
+    // ws2_32 is in the parser's ordinal table, so #6 resolves to its name
+    CHECK(imps[0].dll == "ws2_32");
+    CHECK(imps[0].name == "getsockname");
+    CHECK(imps[0].ordinal == 6);
+    CHECK_FALSE(imps[0].by_ordinal);
+    CHECK(imps[0].iat_va == b.iat_va("ws2_32.dll", "#6"));
+
+    CHECK(imps[1].dll == "kernel32");
+    CHECK(imps[1].name.empty());
+    CHECK(imps[1].ordinal == 6);
+    CHECK(imps[1].by_ordinal);
+    CHECK(imps[1].iat_va == b.iat_va("kernel32.dll", "#6"));
+
+    CHECK(imps[2].name == "ExitProcess");
+    CHECK_FALSE(imps[2].by_ordinal);
+}
+
+TEST_CASE("pe_builder: delay imports come back through directory 13 marked delayed") {
+    papa_tests::PeBuilder b;
+    b.code          = sample_x64_code();
+    b.imports       = {{"kernel32.dll", {"ExitProcess"}}};
+    b.delay_imports = {{"USER32.dll", {"MessageBoxA", "MessageBoxW"}}, {"ws2_32.dll", {"#6"}}};
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const auto imps = img->imports();
+    REQUIRE(imps.size() == 4);
+
+    CHECK(imps[0].name == "ExitProcess");
+    CHECK_FALSE(imps[0].delayed);
+    struct Row {
+        std::string_view dll_spec;
+        std::string_view fn_spec;
+        std::string_view dll;
+        std::string_view name;
+    };
+    const std::array<Row, 3> rows{{
+        {"USER32.dll", "MessageBoxA", "user32", "MessageBoxA"},
+        {"USER32.dll", "MessageBoxW", "user32", "MessageBoxW"},
+        {"ws2_32.dll", "#6", "ws2_32", "getsockname"},
+    }};
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        CAPTURE(rows[i].fn_spec);
+        const papa::pe::ParsedImport& imp = imps[i + 1];
+        CHECK(imp.delayed);
+        CHECK(imp.dll == rows[i].dll);
+        CHECK(imp.name == rows[i].name);
+        CHECK(imp.iat_va == b.iat_va(rows[i].dll_spec, rows[i].fn_spec));
+    }
+}
+
+TEST_CASE("pe_builder: a forwarded export carries its forwarder and no address") {
+    papa_tests::PeBuilder b;
+    b.code    = sample_x64_code();
+    b.exports = {{"Local", 0x10, ""}, {"HeapAlloc", 0, "ntdll.RtlAllocateHeap"}};
+
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const auto exps = img->exports();
+    REQUIRE(exps.size() == 2);
+
+    CHECK(exps[0].name == "Local");
+    CHECK(exps[0].va == b.code_va(0x10));
+    CHECK_FALSE(exps[0].forwarder.has_value());
+
+    CHECK(exps[1].name == "HeapAlloc");
+    CHECK(exps[1].ordinal == 2);
+    CHECK(exps[1].va == 0);
+    REQUIRE(exps[1].forwarder.has_value());
+    CHECK(*exps[1].forwarder == "ntdll.RtlAllocateHeap");
+}
 TEST_CASE("pe_builder: the header layout locates the headers build writes") {
     for (const bool x64 : {true, false}) {
         CAPTURE(x64);
