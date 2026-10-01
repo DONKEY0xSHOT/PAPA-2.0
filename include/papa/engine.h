@@ -170,7 +170,7 @@ public:
     [[nodiscard]] std::unique_ptr<Statement> take_inner() noexcept { return std::move(inner_); }
 
 private:
-    rules::Scope               scope_;
+    rules::Scope               scope_{rules::Scope::kFile};
     std::unique_ptr<Statement> inner_;
 };
 

@@ -45,7 +45,7 @@ public:
     }
 
 private:
-    const ::papa::pe::PeImage* image_;
+    const ::papa::pe::PeImage* image_{nullptr};
 };
 
 }  // namespace papa::features::extractors

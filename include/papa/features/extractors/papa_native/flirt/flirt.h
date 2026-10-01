@@ -16,8 +16,8 @@ namespace embedded {
 /// them from the executable's resources on MSVC builds
 struct EmbeddedSig {
     std::string_view    name;
-    const std::uint8_t* data;
-    std::size_t         size;
+    const std::uint8_t* data{nullptr};
+    std::size_t         size{0};
 };
 
 /// The compile-time set of embedded signature blobs

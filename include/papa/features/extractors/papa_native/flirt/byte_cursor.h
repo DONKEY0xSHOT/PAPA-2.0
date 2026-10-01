@@ -135,7 +135,7 @@ public:
 
 private:
     std::span<const std::uint8_t> buf_;
-    std::size_t                   pos_;
+    std::size_t                   pos_{0};
 };
 
 }  // namespace papa::features::extractors::papa_native::flirt::detail

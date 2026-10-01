@@ -132,7 +132,7 @@ protected:
         return util::hashing::hash_combine(static_cast<std::size_t>(t), h);
     }
 
-    FeatureTag  tag_;
+    FeatureTag  tag_{FeatureTag::kString};
     std::string description_;
 };
 

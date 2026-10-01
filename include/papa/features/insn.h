@@ -40,7 +40,7 @@ public:
 
 private:
     std::string value_;
-    Access      access_;
+    Access      access_{Access::kNone};
 };
 
 // operand[i].number is a Number feature scoped to a specific operand index
@@ -57,7 +57,7 @@ public:
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
 
 private:
-    std::size_t index_;
+    std::size_t index_{0};
     Value       value_;
 };
 
@@ -73,8 +73,8 @@ public:
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
 
 private:
-    std::size_t  index_;
-    std::int64_t value_;
+    std::size_t  index_{0};
+    std::int64_t value_{0};
 };
 
 }  // namespace papa::features

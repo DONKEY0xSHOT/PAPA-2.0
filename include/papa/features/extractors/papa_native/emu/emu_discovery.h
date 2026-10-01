@@ -57,7 +57,7 @@ public:
     [[nodiscard]] std::vector<std::uint64_t> seeds() const;
 
 private:
-    std::uint64_t                     funcva_;
+    std::uint64_t                     funcva_{0};
     std::unordered_set<std::uint64_t> seeds_;
 };
 

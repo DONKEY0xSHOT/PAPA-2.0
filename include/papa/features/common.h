@@ -97,7 +97,7 @@ public:
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
 
 private:
-    std::int64_t value_;
+    std::int64_t value_{0};
 };
 
 // MatchedRule is injected into FeatureSet after a rule matches

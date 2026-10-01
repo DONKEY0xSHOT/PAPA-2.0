@@ -13,11 +13,11 @@ namespace papa::pe {
 
 struct ParsedSection {
     std::string   name;
-    std::uint32_t virtual_address;
-    std::uint32_t virtual_size;
-    std::uint32_t raw_offset;
-    std::uint32_t raw_size;
-    std::uint32_t characteristics;
+    std::uint32_t virtual_address{0};
+    std::uint32_t virtual_size{0};
+    std::uint32_t raw_offset{0};
+    std::uint32_t raw_size{0};
+    std::uint32_t characteristics{0};
 };
 
 struct ParsedImport {
@@ -31,14 +31,14 @@ struct ParsedImport {
 
 struct ParsedExport {
     std::string                name;
-    std::uint32_t              ordinal;
-    std::uint64_t              va;
+    std::uint32_t              ordinal{0};
+    std::uint64_t              va{0};
     std::optional<std::string> forwarder;
 };
 
 struct ParsedRelocation {
-    std::uint32_t rva;   // RVA of the relocation site (page RVA + entry offset)
-    std::uint16_t type;  // IMAGE_REL_BASED_* type, e.g. 3 HIGHLOW, 10 DIR64, 0 ABSOLUTE
+    std::uint32_t rva{0};   // RVA of the relocation site (page RVA + entry offset)
+    std::uint16_t type{0};  // IMAGE_REL_BASED_* type, e.g. 3 HIGHLOW, 10 DIR64, 0 ABSOLUTE
 };
 
 class PeParser;  // friend

@@ -36,9 +36,9 @@ public:
     [[nodiscard]] bool is_function_entry(std::uint64_t va) const override;
 
 private:
-    const pe::PeImage*                image_;
+    const pe::PeImage*                image_{nullptr};
     InsnReader                        read_;
-    const Discovery*                  disc_;
+    const Discovery*                  disc_{nullptr};
     mutable std::vector<std::uint8_t> scratch_;
 };
 
@@ -73,7 +73,7 @@ private:
     void apply_names(std::uint64_t va, const flirt::FlirtModule& winner);
 
     std::vector<flirt::ModuleMatchFn> matchers_;
-    const flirt::FunctionContext*     context_;
+    const flirt::FunctionContext*     context_{nullptr};
     MakeFunction                      make_function_;
     IsFunction                        is_function_;
     // The library functions found so far, keyed by address
