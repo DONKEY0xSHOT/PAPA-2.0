@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
@@ -74,36 +75,31 @@ TEST_CASE("flirt_classifier: a name only at a non-zero offset names nothing") {
     CHECK_FALSE(classifier.classify(0x1000U).has_value());
 }
 
-TEST_CASE("flirt_classifier: a reference to an import is rejected") {
-    MockFlirtContext ctx;
-    ctx.functions.insert(0x2000U);
-    ctx.code[0x2000U] = {0xAAU, 0x00U, 0x00U};
-    ctx.xrefs[0x2010U] = {0x9000U, /*is_code=*/true};
-    ctx.imports[0x9000U] = "malloc";
-
-    flirt::FlirtModule foo = public_module("foo");
-    foo.references.push_back({0x10U, "malloc"});
-    flirt::FlirtClassifier::Cache cache;
-    const flirt::FlirtClassifier classifier(byte_dispatch({{0xAAU, {&foo}}}), ctx, cache);
-
+TEST_CASE("flirt_classifier: a named reference resolving to an import, matching or not, rejects the match") {
     // capa satisfies a named reference only via a local matched library function, not
-    // an import, so a candidate whose only reference resolves to an imported
-    CHECK_FALSE(classifier.classify(0x2000U).has_value());
-}
+    // an import, so a candidate whose only reference resolves to an import is rejected
+    struct Row {
+        std::string_view label;
+        std::string      import;
+    };
+    const std::vector<Row> rows{
+        {"a reference to the import it names", "malloc"},
+        {"an unsatisfied reference to another import", "free"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        MockFlirtContext ctx;
+        ctx.functions.insert(0x2000U);
+        ctx.code[0x2000U] = {0xAAU, 0x00U, 0x00U};
+        ctx.xrefs[0x2010U] = {0x9000U, /*is_code=*/true};
+        ctx.imports[0x9000U] = row.import;
 
-TEST_CASE("flirt_classifier: an unsatisfied reference rejects the match") {
-    MockFlirtContext ctx;
-    ctx.functions.insert(0x2000U);
-    ctx.code[0x2000U] = {0xAAU, 0x00U, 0x00U};
-    ctx.xrefs[0x2010U] = {0x9000U, /*is_code=*/true};
-    ctx.imports[0x9000U] = "free";  // the reference names "malloc", not "free"
-
-    flirt::FlirtModule foo = public_module("foo");
-    foo.references.push_back({0x10U, "malloc"});
-    flirt::FlirtClassifier::Cache cache;
-    const flirt::FlirtClassifier classifier(byte_dispatch({{0xAAU, {&foo}}}), ctx, cache);
-
-    CHECK_FALSE(classifier.classify(0x2000U).has_value());
+        flirt::FlirtModule foo = public_module("foo");
+        foo.references.push_back({0x10U, "malloc"});
+        flirt::FlirtClassifier::Cache cache;
+        const flirt::FlirtClassifier classifier(byte_dispatch({{0xAAU, {&foo}}}), ctx, cache);
+        CHECK_FALSE(classifier.classify(0x2000U).has_value());
+    }
 }
 
 TEST_CASE("flirt_classifier: a reference resolved by recursion is accepted") {

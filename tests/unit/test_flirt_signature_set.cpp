@@ -9,8 +9,10 @@
 #include "test_support.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
@@ -52,28 +54,31 @@ std::vector<std::uint8_t> make_function_bytes(std::span<const std::uint8_t> tail
 
 }  // namespace
 
-TEST_CASE("flirt_signature_set: default-constructed set has no trees") {
-    const flirt::FlirtSignatureSet set;
-    CHECK(set.tree_count() == 0U);
-}
-
-TEST_CASE("flirt_signature_set: add_from_buffer accepts a valid sig") {
-    flirt::FlirtSignatureSet set;
-    const auto sig = build_valid_sig();
-    CHECK(set.add_from_buffer(sig));
-    CHECK(set.tree_count() == 1U);
-}
-
-TEST_CASE("flirt_signature_set: add_from_buffer rejects garbage and leaves count unchanged") {
-    flirt::FlirtSignatureSet set;
-    const auto sig = build_valid_sig();
-    REQUIRE(set.add_from_buffer(sig));
-    REQUIRE(set.tree_count() == 1U);
-
-    const std::array<std::uint8_t, 8> garbage{0x00, 0x01, 0x02, 0x03,
-                                              0x04, 0x05, 0x06, 0x07};
-    CHECK_FALSE(set.add_from_buffer(garbage));
-    CHECK(set.tree_count() == 1U);  // unchanged, prior success retained
+TEST_CASE("flirt_signature_set: add_from_buffer keeps each valid sig as a tree and drops garbage") {
+    struct Add {
+        std::vector<std::uint8_t> sig;
+        bool                      accepted;
+        std::size_t               trees;
+    };
+    struct Row {
+        std::string_view label;
+        std::vector<Add> adds;
+    };
+    const std::vector<std::uint8_t> garbage{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+    const std::vector<Row> rows{
+        {"a valid sig is accepted", {{build_valid_sig(), true, 1}}},
+        {"garbage after a valid sig is rejected and leaves the count",
+         {{build_valid_sig(), true, 1}, {garbage, false, 1}}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        flirt::FlirtSignatureSet set;
+        for (std::size_t i = 0; i < row.adds.size(); ++i) {
+            CAPTURE(i);
+            CHECK(set.add_from_buffer(row.adds[i].sig) == row.adds[i].accepted);
+            CHECK(set.tree_count() == row.adds[i].trees);
+        }
+    }
 }
 
 TEST_CASE("flirt_signature_set: classify matches the right tail and rejects a wrong one") {
@@ -90,8 +95,9 @@ TEST_CASE("flirt_signature_set: classify matches the right tail and rejects a wr
     CHECK_FALSE(set.classify(bad));
 }
 
-TEST_CASE("flirt_signature_set: classify on an empty set never matches") {
+TEST_CASE("flirt_signature_set: an empty set has no trees and classifies nothing") {
     const flirt::FlirtSignatureSet set;
+    CHECK(set.tree_count() == 0U);
     const auto good = make_function_bytes(kTail);
     CHECK_FALSE(set.classify(good));
 }

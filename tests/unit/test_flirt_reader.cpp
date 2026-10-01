@@ -10,6 +10,7 @@
 #include "test_support.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -17,192 +18,124 @@
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
 
-TEST_CASE("flirt_reader: empty buffer is truncated") {
-    auto r = flirt::parse_header({});
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
-
-TEST_CASE("flirt_reader: wrong magic is rejected") {
-    std::vector<std::uint8_t> buf(64, 0);
-    buf[0] = 'X';
-    auto r = flirt::parse_header(buf);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtBadMagic);
-}
-
-TEST_CASE("flirt_reader: unsupported versions are rejected") {
-    for (std::uint8_t v : {std::uint8_t{0}, std::uint8_t{5}, std::uint8_t{7},
-                            std::uint8_t{11}, std::uint8_t{255}}) {
+TEST_CASE("flirt_reader: parse_header rejects a short buffer, a wrong magic, an unsupported version and a cut library name") {
+    const auto with_version = [](std::uint8_t v) {
         std::vector<std::uint8_t> buf(64, 0);
         std::memcpy(buf.data(), "IDASGN", 6);
         buf[6] = v;
-        auto r = flirt::parse_header(buf);
-        REQUIRE_FALSE(r.has_value());
-        CHECK(r.error().kind == papa::ErrorKind::kFlirtUnsupportedVersion);
+        return buf;
+    };
+    std::vector<std::uint8_t> wrong_magic(64, 0);
+    wrong_magic[0] = 'X';
+    // Drop 3 of the 5 name bytes
+    auto cut_name = papa_tests::sig_header(10, /*ln_len=*/5);
+    cut_name.resize(cut_name.size() - 3);
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> buf;
+        papa::ErrorKind           kind;
+    };
+    const std::vector<Row> rows{
+        {"an empty buffer", {}, papa::ErrorKind::kFlirtTruncated},
+        {"a wrong magic", wrong_magic, papa::ErrorKind::kFlirtBadMagic},
+        {"version 0", with_version(0), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 5", with_version(5), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 7", with_version(7), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 11", with_version(11), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 255", with_version(255), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"a truncated library name", cut_name, papa::ErrorKind::kFlirtTruncated},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = flirt::parse_header(row.buf);
+        CHECK_FALSE(r.has_value());
+        if (!r.has_value()) { CHECK(r.error().kind == row.kind); }
     }
 }
 
-TEST_CASE("flirt_reader: v10 minimal header parses every field") {
-    const auto buf = papa_tests::sig_header(10);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version          == 10U);
-    CHECK(r->arch             == flirt::FlirtArch::kX86);
-    CHECK(r->file_types       == 0x00000002U);
-    CHECK(r->os_types         == 0x0003U);
-    CHECK(r->app_types        == 0x0004U);
-    CHECK(r->features         == 0x0010U);
-    CHECK(r->is_compressed());
-    CHECK(r->old_n_functions  == 0x0007U);
-    CHECK(r->pattern_crc16    == 0xABCDU);
-    CHECK(r->library_name_len == 0U);
-    CHECK(r->ctypes_crc16     == 0x1234U);
-    CHECK(r->n_functions      == 0x0000002AU);
-    CHECK(r->pattern_size     == 0x0020U);
-    CHECK(r->library_name.empty());
+TEST_CASE("flirt_reader: parse_header reads every field its version carries and leaves the later ones at their defaults") {
+    struct Row {
+        std::string_view label;
+        std::uint8_t     version;
+        std::uint8_t     ln_len;
+        std::uint32_t    n_functions;
+        std::uint16_t    pattern_size;
+        std::string_view library_name;
+        std::size_t      header_size;
+    };
+    const std::vector<Row> rows{
+        {"a minimal v10 header", 10, 0, 0x0000002AU, 0x0020U, "", 45},
+        {"a v9 header leaves the v10 pattern size at its default", 9, 0, 0x0000002AU, 0, "", 41},
+        {"a v8 header leaves the v9 and v10 fields at their defaults", 8, 0, 0, 0, "", 37},
+        {"a v10 header with a library name of 5 letters", 10, 5, 0x0000002AU, 0x0020U, "abcde",
+         45},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = flirt::parse_header(papa_tests::sig_header(row.version, row.ln_len));
+        REQUIRE(r.has_value());
+        CHECK(r->version          == row.version);
+        CHECK(r->arch             == flirt::FlirtArch::kX86);
+        CHECK(r->file_types       == 0x00000002U);
+        CHECK(r->os_types         == 0x0003U);
+        CHECK(r->app_types        == 0x0004U);
+        CHECK(r->features         == 0x0010U);
+        CHECK(r->is_compressed());
+        CHECK(r->old_n_functions  == 0x0007U);
+        CHECK(r->pattern_crc16    == 0xABCDU);
+        CHECK(r->library_name_len == row.ln_len);
+        CHECK(r->ctypes_crc16     == 0x1234U);
+        CHECK(r->n_functions      == row.n_functions);
+        CHECK(r->pattern_size     == row.pattern_size);
+        CHECK(r->library_name     == row.library_name);
+        CHECK(flirt::header_size_for_version(row.version) == row.header_size);
+    }
 }
 
-TEST_CASE("flirt_reader: v8 header does not populate v9+ fields") {
-    const auto buf = papa_tests::sig_header(8);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version      == 8U);
-    CHECK(r->n_functions  == 0U);  // v9+ field, stays at default
-    CHECK(r->pattern_size == 0U);  // v10+ field, stays at default
-}
-
-TEST_CASE("flirt_reader: v9 header does not populate v10+ fields") {
-    const auto buf = papa_tests::sig_header(9);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version      == 9U);
-    CHECK(r->n_functions  == 0x0000002AU);
-    CHECK(r->pattern_size == 0U);
-}
-
-TEST_CASE("flirt_reader: library name is read when length is non-zero") {
-    const auto buf = papa_tests::sig_header(10, /*ln_len=*/5);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->library_name_len == 5U);
-    CHECK(r->library_name == "abcde");
-}
-
-TEST_CASE("flirt_reader: truncated library name is rejected") {
-    auto buf = papa_tests::sig_header(10, /*ln_len=*/5);
-    buf.resize(buf.size() - 3);  // drop 3 of the 5 name bytes
-    auto r = flirt::parse_header(buf);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
-
-TEST_CASE("flirt_reader: header consumed length matches version") {
-    const auto v10 = papa_tests::sig_header(10);
-    auto r = flirt::parse_header(v10);
-    REQUIRE(r.has_value());
-    CHECK(flirt::header_size_for_version(10) == 45U);
-    CHECK(flirt::header_size_for_version(9)  == 41U);
-    CHECK(flirt::header_size_for_version(8)  == 37U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 one-byte form") {
-    std::array<std::uint8_t, 1> data{0x7F};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0xFFFF;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x7FU);
-    CHECK(cur.offset() == 1U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 two-byte form") {
-    std::array<std::uint8_t, 2> data{0x92, 0x34};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x1234U);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 two-byte form reaches max value") {
-    std::array<std::uint8_t, 2> data{0xFF, 0xFF};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x7FFFU);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 truncated two-byte form fails cleanly") {
-    std::array<std::uint8_t, 1> data{0x92};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0xABCD;
-    REQUIRE_FALSE(cur.read_vle16(out));
-    CHECK(out == 0xABCDU);     // out param untouched on failure
-    CHECK(cur.offset() == 0U);  // cursor not advanced
-}
-
-TEST_CASE("flirt_reader: read_vle16 empty buffer fails") {
-    std::array<std::uint8_t, 0> data{};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0x1111;
-    REQUIRE_FALSE(cur.read_vle16(out));
-    CHECK(out == 0x1111U);
-    CHECK(cur.offset() == 0U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 one-byte form") {
-    std::array<std::uint8_t, 1> data{0x7F};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0xFFFFFFFF;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x7FU);
-    CHECK(cur.offset() == 1U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 two-byte form") {
-    std::array<std::uint8_t, 2> data{0x81, 0x00};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x0100U);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 four-byte masked form") {
-    std::array<std::uint8_t, 4> data{0xC0, 0x00, 0x80, 0x00};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x8000U);
-    CHECK(cur.offset() == 4U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 full five-byte form") {
-    std::array<std::uint8_t, 5> data{0xFF, 0xDE, 0xAD, 0xBE, 0xEF};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0xDEADBEEFU);
-    CHECK(cur.offset() == 5U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 truncated four-byte form fails cleanly") {
-    std::array<std::uint8_t, 3> data{0xC0, 0x00, 0x80};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0x12345678;
-    REQUIRE_FALSE(cur.read_vle32(out));
-    CHECK(out == 0x12345678U);  // out param untouched on failure
-    CHECK(cur.offset() == 0U);   // cursor not advanced
-}
-
-TEST_CASE("flirt_reader: read_vle32 truncated five-byte form fails cleanly") {
-    std::array<std::uint8_t, 4> data{0xFF, 0xDE, 0xAD, 0xBE};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0x99999999;
-    REQUIRE_FALSE(cur.read_vle32(out));
-    CHECK(out == 0x99999999U);
-    CHECK(cur.offset() == 0U);
+TEST_CASE("flirt_reader: read_vle16 and read_vle32 decode each length form and leave the cursor and value on a short read") {
+    // The value a failed read must leave untouched
+    constexpr std::uint32_t kUntouched = 0x5A5A5A5AU;
+    struct Row {
+        std::string_view          label;
+        int                       width;
+        std::vector<std::uint8_t> data;
+        bool                      ok;
+        std::uint32_t             value;
+        std::size_t               consumed;
+    };
+    const std::vector<Row> rows{
+        {"vle16 one-byte form", 16, {0x7F}, true, 0x7FU, 1},
+        {"vle16 two-byte form", 16, {0x92, 0x34}, true, 0x1234U, 2},
+        {"vle16 two-byte form reaches max value", 16, {0xFF, 0xFF}, true, 0x7FFFU, 2},
+        {"vle16 truncated two-byte form fails cleanly", 16, {0x92}, false, kUntouched & 0xFFFFU, 0},
+        {"vle16 empty buffer fails", 16, {}, false, kUntouched & 0xFFFFU, 0},
+        {"vle32 one-byte form", 32, {0x7F}, true, 0x7FU, 1},
+        {"vle32 two-byte form", 32, {0x81, 0x00}, true, 0x0100U, 2},
+        {"vle32 four-byte masked form", 32, {0xC0, 0x00, 0x80, 0x00}, true, 0x8000U, 4},
+        {"vle32 full five-byte form", 32, {0xFF, 0xDE, 0xAD, 0xBE, 0xEF}, true, 0xDEADBEEFU, 5},
+        {"vle32 truncated four-byte form fails cleanly", 32, {0xC0, 0x00, 0x80}, false, kUntouched,
+         0},
+        {"vle32 truncated five-byte form fails cleanly", 32, {0xFF, 0xDE, 0xAD, 0xBE}, false,
+         kUntouched, 0},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        flirt::detail::ByteCursor cur{row.data};
+        bool          ok    = false;
+        std::uint32_t value = 0;
+        if (row.width == 16) {
+            auto out = static_cast<std::uint16_t>(kUntouched);
+            ok = cur.read_vle16(out);
+            value = out;
+        } else {
+            std::uint32_t out = kUntouched;
+            ok = cur.read_vle32(out);
+            value = out;
+        }
+        CHECK(ok == row.ok);
+        CHECK(value == row.value);
+        CHECK(cur.offset() == row.consumed);
+    }
 }
 
 TEST_CASE("flirt_reader: minimal uncompressed sig parses one module") {
@@ -293,36 +226,43 @@ TEST_CASE("flirt_reader: leaf with two colliding modules") {
     CHECK(child->leaf_modules[1].tail_crc16 == 0x1234U);
 }
 
-TEST_CASE("flirt_reader: truncated body returns truncated error") {
-    papa_tests::SigWriter body;
-    body.vle16(1);
+TEST_CASE("flirt_reader: parse_sig_buffer rejects a cut body and an over-long pattern") {
+    papa_tests::SigWriter one_module;
+    one_module.vle16(1);
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    body.child_pattern(pat);
-    body.vle16(0);                                    // leaf
-    body.u8(0x08);
-    body.u16_be(0x1234);
-    body.module_body(0x10, "foo", 0x00);
+    one_module.child_pattern(pat);
+    one_module.vle16(0);  // leaf
+    one_module.u8(0x08);
+    one_module.u16_be(0x1234);
+    one_module.module_body(0x10, "foo", 0x00);
 
-    auto sig = papa_tests::sig_with_body(body.buf);
-    sig.resize(sig.size() - 2);  // drop the trailing flags and last name byte
+    // kMaxPatternLength is 32, so a pattern length of 33 is one too many
+    papa_tests::SigWriter long_pattern;
+    long_pattern.vle16(1);
+    long_pattern.vle16(33);
+    long_pattern.vle16(0);  // empty variant mask
+    long_pattern.buf.insert(long_pattern.buf.end(), 33, std::uint8_t{0x90});
 
-    auto r = flirt::parse_sig_buffer(sig);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
-
-TEST_CASE("flirt_reader: pattern longer than cap is a bad node") {
-    papa_tests::SigWriter body;
-    body.vle16(1);
-    // kMaxPatternLength is 32. Encode a 33-byte pattern length
-    body.vle16(33);
-    body.vle16(0);  // empty variant mask
-    body.buf.insert(body.buf.end(), 33, std::uint8_t{0x90});
-
-    const auto sig = papa_tests::sig_with_body(body.buf);
-    auto r = flirt::parse_sig_buffer(sig);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtBadNode);
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> body;
+        std::size_t               drop;
+        papa::ErrorKind           kind;
+    };
+    const std::vector<Row> rows{
+        // Dropping 2 bytes cuts the trailing flags and the last name byte
+        {"a body cut short", one_module.buf, 2, papa::ErrorKind::kFlirtTruncated},
+        {"a pattern longer than the cap is a bad node", long_pattern.buf, 0,
+         papa::ErrorKind::kFlirtBadNode},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        auto sig = papa_tests::sig_with_body(row.body);
+        sig.resize(sig.size() - row.drop);
+        const auto r = flirt::parse_sig_buffer(sig);
+        CHECK_FALSE(r.has_value());
+        if (!r.has_value()) { CHECK(r.error().kind == row.kind); }
+    }
 }
 
 TEST_CASE("flirt_reader: variant mask marks wildcard positions") {
