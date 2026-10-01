@@ -252,10 +252,11 @@ std::vector<std::uint64_t> cfg::find_function_prologues(
 
 Expected<RecoveredImage> cfg::recover(const pe::PeImage& image,
                                       const Disassembler& disasm,
+                                      const ImportTable& imports,
                                       const flirt::FlirtSignatureSet& sigs) {
     // The discovery engine runs the ordered passes and per-function analysis internally.
     // Only the caller edges are added here, being a whole-image view
-    RecoveredImage out = viv::discover_functions(image, disasm, sigs);
+    RecoveredImage out = viv::discover_functions(image, disasm, imports, sigs);
     fill_callers(out.functions);
     return out;
 }

@@ -179,14 +179,13 @@ std::vector<std::uint64_t> reloc_pointer_sites(const pe::PeImage& image) {
 
 RecoveredImage
 discover_functions(const pe::PeImage& image, const Disassembler& disasm,
-                   const flirt::FlirtSignatureSet& sigs) {
+                   const ImportTable& imports, const flirt::FlirtSignatureSet& sigs) {
     const std::uint64_t ptr_size = image.is_64bit() ? 8U : 4U;
     const emu::ImageMaps maps    = emu::build_image_maps(image);
     const InsnReader     reader  = cfg::make_image_reader(image, disasm);
 
     // The API no-return oracle: a call whose resolved import is an exit/abort family
     // function does not return
-    const ImportTable    imports = build_import_table(image);
     const NoReturnOracle api_no_return =
         [&image, &disasm, &imports](const DecodedInsn& ins) -> bool {
         if (!ins.is_call) {

@@ -18,6 +18,7 @@ namespace papa::features::extractors::papa_native {
 namespace flirt {
 class FlirtSignatureSet;
 }
+struct ImportTable;
 
 // How vivisect's .pdata walk treats one RUNTIME_FUNCTION (parsers/pe.py)
 enum class PdataEntryKind {
@@ -59,7 +60,7 @@ namespace cfg {
 /// functions together with the library functions FLIRT named from sigs in the same pass
 [[nodiscard]] Expected<RecoveredImage>
     recover(const pe::PeImage& image, const Disassembler& disasm,
-            const flirt::FlirtSignatureSet& sigs);
+            const ImportTable& imports, const flirt::FlirtSignatureSet& sigs);
 
 /// Scan undefined code for boundary-anchored function prologues and return candidate
 /// function-entry VAs

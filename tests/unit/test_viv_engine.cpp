@@ -13,6 +13,7 @@
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_parser.h"
 #include "test_support.h"
@@ -28,9 +29,10 @@ TEST_CASE("discovery engine: recovers the entry point and a non-empty function s
     auto img = papa::pe::PeParser::parse_file(path);
     REQUIRE(img.has_value());
     const pn::Disassembler disasm(img->is_64bit());
+    const auto imports = pn::build_import_table(*img);
 
     const std::vector<pn::Function> funcs =
-        pn::viv::discover_functions(*img, disasm, papa_tests::shared_flirt_sigs())
+        pn::viv::discover_functions(*img, disasm, imports, papa_tests::shared_flirt_sigs())
             .functions;
 
     REQUIRE_FALSE(funcs.empty());

@@ -32,9 +32,10 @@ PapaNativeBackend::build(const ::papa::pe::PeImage& image,
     // depends on its bitness and decoded operand semantics
     Disassembler disasm(image.is_64bit());
 
+    // Discovery and the instruction extractors share this one table
     ImportTable imports = build_import_table(image);
 
-    auto cfg_result = cfg::recover(image, disasm, sigs);
+    auto cfg_result = cfg::recover(image, disasm, imports, sigs);
     if (!cfg_result) {
         return ::papa::Unexpected{cfg_result.error()};
     }

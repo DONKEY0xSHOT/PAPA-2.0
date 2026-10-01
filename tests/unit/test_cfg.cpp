@@ -5,6 +5,7 @@
 
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
 
@@ -94,7 +95,8 @@ TEST_CASE("recover on notepad.exe seeds at least the entry point and several exp
     REQUIRE(res.has_value());
     Disassembler d(res->is_64bit());
 
-    const auto rec = cfg::recover(*res, d, papa_tests::shared_flirt_sigs());
+    const auto imports = papa::features::extractors::papa_native::build_import_table(*res);
+    const auto rec = cfg::recover(*res, d, imports, papa_tests::shared_flirt_sigs());
     REQUIRE(rec.has_value());
     const std::vector<Function>& funcs = rec->functions;
 
