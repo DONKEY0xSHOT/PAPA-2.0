@@ -1,5 +1,6 @@
 #pragma once
 
+#include "papa/features/address.h"
 #include "papa/features/feature.h"
 
 #include <cstddef>
@@ -7,6 +8,7 @@
 #include <regex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -113,6 +115,10 @@ public:
     explicit Characteristic(std::string v, std::string desc = {})
         : ValueFeature(FeatureTag::kCharacteristic, std::move(v), std::move(desc)) {}
 };
+
+// A Characteristic feature paired with the absolute virtual address it applies to
+[[nodiscard]] std::pair<FeaturePtr, Address> make_characteristic(std::string_view name,
+                                                                std::uint64_t    va);
 
 // Class and Namespace are value-typed like Characteristic
 // Default evaluate suffices because the extractor emits the exact rule spelling

@@ -27,12 +27,6 @@ namespace {
 constexpr const char* kCharTightLoop   = "tight loop";
 constexpr const char* kCharStackString = "stack string";
 
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_address(va) };
-}
-
 // Mirror of the same helper in insn.cpp. Keeping it private here avoids a public
 // dependency between the two extractor modules just to share a three-line predicate
 [[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {

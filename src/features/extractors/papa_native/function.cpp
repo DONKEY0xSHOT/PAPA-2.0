@@ -24,12 +24,6 @@ constexpr const char* kCharCallsFrom     = "calls from";
 constexpr const char* kCharCallsTo       = "calls to";
 constexpr const char* kCharRecursiveCall = "recursive call";
 
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_address(va) };
-}
-
 // True when the block graph has a cycle, which is capa's loop test once self-loops are dropped
 // Kahn's peel is iterative, so a crafted chain of blocks cannot exhaust the native stack
 [[nodiscard]] bool has_cycle(const std::vector<std::vector<std::size_t>>& succ) {

@@ -1,6 +1,7 @@
 #include "papa/features/common.h"
 
 #include "papa/engine.h"
+#include "papa/features/address.h"
 #include "papa/util/hashing.h"
 #include "papa/util/regex_prefilter.h"
 
@@ -248,6 +249,10 @@ bool Os::matches(const FeatureSet& fs) const {
         if (entry.first && entry.first->tag() == FeatureTag::kOs) { return true; }
     }
     return false;
+}
+
+std::pair<FeaturePtr, Address> make_characteristic(std::string_view name, std::uint64_t va) {
+    return {std::make_shared<const Characteristic>(std::string(name)), va_address(va)};
 }
 
 }  // namespace papa::features

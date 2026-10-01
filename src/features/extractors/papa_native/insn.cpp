@@ -47,14 +47,6 @@ constexpr std::array<ZydisMnemonic, 4> kXorMnemonics{
     ZYDIS_MNEMONIC_PXOR,
 };
 
-// Lift a Characteristic into an addressed feature pair
-// Used by every characteristic-emitting extractor below
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_address(va) };
-}
-
 // True when the operand carries a memory access whose displacement matches
 // the requested offset. Register and immediate operands are skipped
 [[nodiscard]] bool
