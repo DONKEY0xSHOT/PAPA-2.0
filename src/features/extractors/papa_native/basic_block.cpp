@@ -27,19 +27,6 @@ namespace {
 constexpr const char* kCharTightLoop   = "tight loop";
 constexpr const char* kCharStackString = "stack string";
 
-// Mirror of the same helper in insn.cpp. Keeping it private here avoids a public
-// dependency between the two extractor modules just to share a three-line predicate
-[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
-    if (reg == ZYDIS_REGISTER_NONE) { return false; }
-    const ZydisMachineMode mode =
-        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
-    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
-    if (is_64bit) {
-        return enclosing == ZYDIS_REGISTER_RSP || enclosing == ZYDIS_REGISTER_RBP;
-    }
-    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
-}
-
 // Count printable bytes in the low width_bytes octets of imm. Returns the number of
 // leading printable bytes
 [[nodiscard]] std::size_t

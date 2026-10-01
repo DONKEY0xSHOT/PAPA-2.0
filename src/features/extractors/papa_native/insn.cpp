@@ -78,19 +78,6 @@ operand_target_va(const DecodedInsn& ins, const DecodedOperand& op) noexcept {
     }
 }
 
-// True when reg is a stack-pointer or frame-pointer for the given bitness
-// Uses ZydisRegisterGetLargestEnclosing so partial-width aliases (sp/bp/esp/...) all resolve correctly
-[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
-    if (reg == ZYDIS_REGISTER_NONE) { return false; }
-    const ZydisMachineMode mode =
-        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
-    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
-    if (is_64bit) {
-        return enclosing == ZYDIS_REGISTER_RSP || enclosing == ZYDIS_REGISTER_RBP;
-    }
-    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
-}
-
 // True for the base registers CAPA excludes from offset features, the frame pointer
 // and the 32-bit stack pointer. It keeps rsp, so rsp offsets are still emitted
 [[nodiscard]] bool is_offset_excluded_reg(ZydisRegister reg, bool is_64bit) noexcept {

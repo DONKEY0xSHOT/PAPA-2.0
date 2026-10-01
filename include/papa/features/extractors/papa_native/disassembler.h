@@ -86,4 +86,7 @@ private:
     bool         is_64bit_ { false };
 };
 
+/// True when reg, at any width, is the stack or frame pointer for the given bitness
+[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept;
+
 }  // namespace papa::features::extractors::papa_native

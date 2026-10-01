@@ -223,4 +223,16 @@ Expected<DecodedInsn> Disassembler::decode(
     return d;
 }
 
+bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
+    if (reg == ZYDIS_REGISTER_NONE) { return false; }
+    // The largest enclosing register resolves every partial-width alias such as sp or bp
+    const ZydisMachineMode mode =
+        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
+    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
+    if (is_64bit) {
+        return enclosing == ZYDIS_REGISTER_RSP || enclosing == ZYDIS_REGISTER_RBP;
+    }
+    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
+}
+
 }  // namespace papa::features::extractors::papa_native
