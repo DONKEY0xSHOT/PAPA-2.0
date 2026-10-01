@@ -4,8 +4,11 @@
 
 #include "papa/util/yaml.h"
 
+#include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 using papa::util::yaml::Node;
 using papa::util::yaml::NodeKind;
@@ -29,17 +32,31 @@ TEST_CASE("yaml: empty input parses to default scalar") {
     CHECK(r->scalar().empty());
 }
 
-TEST_CASE("yaml: simple mapping with three keys") {
-    constexpr std::string_view text =
-        "name: PAPA\n"
-        "scope: file\n"
-        "lib: true\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    REQUIRE(r->kind() == NodeKind::kMapping);
-    CHECK(must_get(*r, "name").scalar()  == "PAPA");
-    CHECK(must_get(*r, "scope").scalar() == "file");
-    CHECK(must_get(*r, "lib").scalar()   == "true");
+TEST_CASE("yaml: a block mapping keeps every key and value in insertion order") {
+    using Entry = std::pair<std::string_view, std::string_view>;
+    struct Row {
+        std::string_view   label;
+        std::string_view   text;
+        std::vector<Entry> entries;
+    };
+    const std::vector<Row> rows{
+        {"a simple mapping with three keys", "name: PAPA\nscope: file\nlib: true\n",
+         {{"name", "PAPA"}, {"scope", "file"}, {"lib", "true"}}},
+        {"keys out of alphabetical order", "z: 1\na: 2\nm: 3\n",
+         {{"z", "1"}, {"a", "2"}, {"m", "3"}}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = parse(row.text);
+        REQUIRE(r);
+        CHECK(r->kind() == NodeKind::kMapping);
+        CHECK(r->mapping().size() == row.entries.size());
+        for (std::size_t i = 0; i < r->mapping().size() && i < row.entries.size(); ++i) {
+            CAPTURE(i);
+            CHECK(r->mapping()[i].first == row.entries[i].first);
+            CHECK(r->mapping()[i].second.scalar() == row.entries[i].second);
+        }
+    }
 }
 
 TEST_CASE("yaml: nested mapping") {
@@ -83,27 +100,27 @@ TEST_CASE("yaml: sequence of scalars") {
     CHECK(a.sequence()[2].scalar() == "carol");
 }
 
-TEST_CASE("yaml: double-quoted scalars decode escapes") {
-    constexpr std::string_view text =
-        "a: \"line1\\nline2\"\n"
-        "b: \"tab\\there\"\n"
-        "c: \"hex\\x41\"\n"
-        "d: \"unicode\\u00e9\"\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    CHECK(must_get(*r, "a").scalar() == "line1\nline2");
-    CHECK(must_get(*r, "b").scalar() == "tab\there");
-    CHECK(must_get(*r, "c").scalar() == "hexA");
-    // U+00E9 is encoded as 0xC3 0xA9 in UTF-8
-    CHECK(must_get(*r, "d").scalar() == std::string("unicode\xC3\xA9"));
-}
-
-TEST_CASE("yaml: single-quoted scalars decode '' as one quote") {
-    constexpr std::string_view text =
-        "msg: 'it''s fine'\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    CHECK(must_get(*r, "msg").scalar() == "it's fine");
+TEST_CASE("yaml: quoted scalars decode their escapes") {
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+        std::string      expected;
+    };
+    const std::vector<Row> rows{
+        {"a double-quoted \\n", "a: \"line1\\nline2\"\n", "line1\nline2"},
+        {"a double-quoted \\t", "b: \"tab\\there\"\n", "tab\there"},
+        {"a double-quoted \\x escape", "c: \"hex\\x41\"\n", "hexA"},
+        // U+00E9 is encoded as 0xC3 0xA9 in UTF-8
+        {"a double-quoted \\u escape", "d: \"unicode\\u00e9\"\n", "unicode\xC3\xA9"},
+        {"a single-quoted '' is one quote", "msg: 'it''s fine'\n", "it's fine"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = parse(row.text);
+        REQUIRE(r);
+        REQUIRE(r->kind() == NodeKind::kMapping);
+        CHECK(r->mapping().front().second.scalar() == row.expected);
+    }
 }
 
 TEST_CASE("yaml: comments are ignored") {
@@ -118,58 +135,48 @@ TEST_CASE("yaml: comments are ignored") {
     CHECK(must_get(*r, "value").scalar() == "42");
 }
 
-TEST_CASE("yaml: literal block scalar | preserves newlines") {
-    constexpr std::string_view text =
-        "desc: |\n"
-        "  line one\n"
-        "  line two\n"
-        "name: foo\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    const Node& d = must_get(*r, "desc");
-    CHECK(d.kind() == NodeKind::kScalar);
-    CHECK(d.scalar() == "line one\nline two\n");
-    CHECK(must_get(*r, "name").scalar() == "foo");
+TEST_CASE("yaml: a literal block scalar keeps its newlines unless chomped, and the mapping continues after it") {
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+        std::string_view desc;
+    };
+    const std::vector<Row> rows{
+        {"| preserves newlines", "desc: |\n  line one\n  line two\nname: foo\n",
+         "line one\nline two\n"},
+        {"|- strips the final newline", "desc: |-\n  hi\nname: foo\n", "hi"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = parse(row.text);
+        REQUIRE(r);
+        const Node& d = must_get(*r, "desc");
+        CHECK(d.kind() == NodeKind::kScalar);
+        CHECK(d.scalar() == row.desc);
+        CHECK(must_get(*r, "name").scalar() == "foo");
+    }
 }
 
-TEST_CASE("yaml: literal block with chomp strip") {
-    constexpr std::string_view text =
-        "desc: |-\n"
-        "  hi\n"
-        "name: foo\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    CHECK(must_get(*r, "desc").scalar() == "hi");
-    CHECK(must_get(*r, "name").scalar() == "foo");
-}
-
-TEST_CASE("yaml: tabs in indentation are rejected") {
-    constexpr std::string_view text =
-        "a:\n"
-        "\tb: 1\n";
-    auto r = parse(text);
-    REQUIRE_FALSE(r);
-    CHECK(r.error().kind == papa::ErrorKind::kYamlParseError);
-}
-
-TEST_CASE("yaml: anchors and aliases are rejected") {
-    constexpr std::string_view text_anchor =
-        "a: &x foo\n"
-        "b: *x\n";
-    auto r1 = parse(text_anchor);
-    REQUIRE_FALSE(r1);
-    CHECK(r1.error().kind == papa::ErrorKind::kYamlParseError);
-}
-
-TEST_CASE("yaml: flow collections are rejected") {
-    constexpr std::string_view text_seq =
-        "a: [1, 2, 3]\n";
-    auto r1 = parse(text_seq);
-    REQUIRE_FALSE(r1);
-    constexpr std::string_view text_map =
-        "a: {x: 1}\n";
-    auto r2 = parse(text_map);
-    REQUIRE_FALSE(r2);
+TEST_CASE("yaml: tabs, anchors, aliases, flow collections, unterminated quotes and bad escapes are parse errors") {
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+    };
+    const std::vector<Row> rows{
+        {"a tab in indentation", "a:\n\tb: 1\n"},
+        {"an anchor and an alias", "a: &x foo\nb: *x\n"},
+        {"a flow sequence", "a: [1, 2, 3]\n"},
+        {"a flow mapping", "a: {x: 1}\n"},
+        {"an unterminated double-quoted string", "a: \"unterminated\n"},
+        {"an unterminated single-quoted string", "a: 'unterminated\n"},
+        {"an invalid hex escape", "a: \"bad\\xZZ\"\n"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = parse(row.text);
+        CHECK_FALSE(r);
+        if (!r) { CHECK(r.error().kind == papa::ErrorKind::kYamlParseError); }
+    }
 }
 
 TEST_CASE("yaml: dash item with inline mapping") {
@@ -223,19 +230,6 @@ TEST_CASE("yaml: capa-style nested rule layout") {
     REQUIRE(and_seq.sequence().size() == 2);
 }
 
-TEST_CASE("yaml: mapping insertion order is preserved") {
-    constexpr std::string_view text =
-        "z: 1\n"
-        "a: 2\n"
-        "m: 3\n";
-    auto r = parse(text);
-    REQUIRE(r);
-    REQUIRE(r->mapping().size() == 3);
-    CHECK(r->mapping()[0].first == "z");
-    CHECK(r->mapping()[1].first == "a");
-    CHECK(r->mapping()[2].first == "m");
-}
-
 TEST_CASE("yaml: document separator is allowed at start and end") {
     constexpr std::string_view text =
         "---\n"
@@ -244,24 +238,6 @@ TEST_CASE("yaml: document separator is allowed at start and end") {
     auto r = parse(text);
     REQUIRE(r);
     CHECK(must_get(*r, "name").scalar() == "foo");
-}
-
-TEST_CASE("yaml: unterminated quoted string is rejected") {
-    constexpr std::string_view t1 =
-        "a: \"unterminated\n";
-    auto r1 = parse(t1);
-    REQUIRE_FALSE(r1);
-    constexpr std::string_view t2 =
-        "a: 'unterminated\n";
-    auto r2 = parse(t2);
-    REQUIRE_FALSE(r2);
-}
-
-TEST_CASE("yaml: invalid hex escape rejected") {
-    constexpr std::string_view text =
-        "a: \"bad\\xZZ\"\n";
-    auto r = parse(text);
-    REQUIRE_FALSE(r);
 }
 
 TEST_CASE("yaml: nesting is bounded so a crafted document cannot overflow the stack") {
