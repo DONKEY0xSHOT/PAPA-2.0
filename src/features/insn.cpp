@@ -1,34 +1,16 @@
 #include "papa/features/insn.h"
 
+#include "papa/features/common.h"
 #include "papa/util/hashing.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <variant>
 
 namespace papa::features {
-
-namespace {
-
-// Hash an OperandNumber::Value variant and fold in its active alternative
-// index so the distinct zero values 0u64, 0i64, and 0.0 hash apart
-std::size_t hash_number_variant(const OperandNumber::Value& v) noexcept {
-    const std::size_t payload = std::visit([](auto x) noexcept -> std::size_t {
-        using T = std::decay_t<decltype(x)>;
-        if constexpr (std::is_same_v<T, double>) {
-            return util::hashing::hash_double_bits(x);
-        } else {
-            return std::hash<T>{}(x);
-        }
-    }, v);
-    return util::hashing::hash_combine(payload, v.index());
-}
-
-}  // namespace
 
 // Property
 Property::Property(std::string value, Access access, std::string desc)
@@ -56,7 +38,7 @@ OperandNumber::OperandNumber(std::size_t index, Value value, std::string desc)
 
 std::size_t OperandNumber::hash() const noexcept {
     std::size_t h = std::hash<std::size_t>{}(index_);
-    h = util::hashing::hash_combine(h, hash_number_variant(value_));
+    h = util::hashing::hash_combine(h, hash_number_value(value_));
     return mix_tag(tag_, h);
 }
 

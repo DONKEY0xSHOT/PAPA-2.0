@@ -183,7 +183,7 @@ Number::Number(Value v, std::string desc)
     : Feature(FeatureTag::kNumber, std::move(desc)),
       value_(std::move(v)) {}
 
-std::size_t Number::hash() const noexcept {
+std::size_t hash_number_value(const Number::Value& v) noexcept {
     // Treat the double alternative bitwise so NaN values hash stably and
     // the distinct variant alternatives 1u64 vs 1i64 vs 1.0 mix to different seeds
     const std::size_t payload = std::visit([](auto x) noexcept -> std::size_t {
@@ -193,8 +193,12 @@ std::size_t Number::hash() const noexcept {
         } else {
             return std::hash<T>{}(x);
         }
-    }, value_);
-    return mix_tag(tag_, util::hashing::hash_combine(payload, value_.index()));
+    }, v);
+    return util::hashing::hash_combine(payload, v.index());
+}
+
+std::size_t Number::hash() const noexcept {
+    return mix_tag(tag_, hash_number_value(value_));
 }
 
 bool Number::equals(const Feature& o) const noexcept {

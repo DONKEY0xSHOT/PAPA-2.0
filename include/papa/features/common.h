@@ -86,6 +86,10 @@ private:
     Value value_;
 };
 
+/// Hash a number value with its active alternative folded in, so 1u64, 1i64 and 1.0
+/// hash apart
+[[nodiscard]] std::size_t hash_number_value(const Number::Value& v) noexcept;
+
 // Offset is stored signed because negative struct offsets are valid inputs
 class Offset : public Feature {
 public:
