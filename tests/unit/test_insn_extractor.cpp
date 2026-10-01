@@ -10,6 +10,7 @@
 #include "papa/features/insn.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/indirect_calls.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"

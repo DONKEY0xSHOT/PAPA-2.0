@@ -9,7 +9,7 @@
 #include "papa/constants.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/emu/emu_discovery.h"
-#include "papa/features/extractors/papa_native/insn.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/jump_tables.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
@@ -193,7 +193,7 @@ discover_functions(const pe::PeImage& image, const Disassembler& disasm,
             return false;
         }
         const pe::ParsedImport* row =
-            insn::resolve_direct_call_import(ins, image, imports, disasm);
+            resolve_direct_call_import(ins, image, imports, disasm);
         return row != nullptr && is_noreturn_api(row->dll, row->name);
     };
 
