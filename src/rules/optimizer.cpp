@@ -24,9 +24,26 @@ using engine::StatementKind;
         case features::FeatureTag::kRegex:
         case features::FeatureTag::kBytes:
             return 2;
-        default:
-            return 1;
+        case features::FeatureTag::kString:
+        case features::FeatureTag::kNumber:
+        case features::FeatureTag::kOffset:
+        case features::FeatureTag::kMnemonic:
+        case features::FeatureTag::kApi:
+        case features::FeatureTag::kImport:
+        case features::FeatureTag::kExport:
+        case features::FeatureTag::kSection:
+        case features::FeatureTag::kFunctionName:
+        case features::FeatureTag::kClass:
+        case features::FeatureTag::kNamespace:
+        case features::FeatureTag::kProperty:
+        case features::FeatureTag::kCharacteristic:
+        case features::FeatureTag::kMatchedRule:
+        case features::FeatureTag::kOperandNumber:
+        case features::FeatureTag::kOperandOffset:
+        case features::FeatureTag::kBasicBlock:
+            break;
     }
+    return 1;
 }
 
 // Worst-case evaluation cost of a statement subtree, mirroring capa's
