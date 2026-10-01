@@ -53,25 +53,11 @@ SyntheticImage build_calling_writefile() {
     };
     b.pdata_functions = {{0x00, 0x0F}, {0x10, 0x13}};
 
-    // First pass: find where WriteFile's IAT slot landed
-    auto probe = papa::pe::PeParser::parse(b.build());
-    REQUIRE(probe.has_value());
-    std::uint64_t iat = 0;
-    for (const papa::pe::ParsedImport& imp : probe->imports()) {
-        if (imp.name == "WriteFile") {
-            iat = imp.iat_va;
-        }
-    }
+    const std::uint64_t iat = b.iat_va("kernel32.dll", "WriteFile");
     REQUIRE(iat != 0);
 
     // rip-relative displacement from the end of the 6-byte call at 0x04
-    const std::uint64_t next_insn =
-        probe->image_base() + papa_tests::PeBuilder::kTextRva + 0x0A;
-    const auto disp = static_cast<std::int32_t>(iat - next_insn);
-    b.code[6] = static_cast<std::uint8_t>(disp & 0xFF);
-    b.code[7] = static_cast<std::uint8_t>((disp >> 8) & 0xFF);
-    b.code[8] = static_cast<std::uint8_t>((disp >> 16) & 0xFF);
-    b.code[9] = static_cast<std::uint8_t>((disp >> 24) & 0xFF);
+    papa_tests::detail::poke(b.code, 6, static_cast<std::int32_t>(iat - b.code_va(0x0A)));
 
     return {b.build(), iat};
 }
@@ -157,12 +143,9 @@ TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {
     // 0x00 xor eax,eax | 0x02 ret | 0x03 int3 | 0x04 jmp [rip+X]
     b.code            = {0x33, 0xC0, 0xC3, 0xCC, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
     b.pdata_functions = {{0x00, 0x03}, {0x04, 0x0A}};
-    const std::uint64_t text  = b.base() + papa_tests::PeBuilder::kTextRva;
-    auto                probe = papa::pe::PeParser::parse(b.build());
-    REQUIRE(probe.has_value());
-    REQUIRE(probe->imports().size() == 1);
-    papa_tests::detail::poke(
-        b.code, 6, static_cast<std::int32_t>(probe->imports().front().iat_va - (text + 0x0A)));
+    const std::uint64_t text = b.code_va(0);
+    const std::uint64_t iat  = b.iat_va("kernel32.dll", "ExitProcess");
+    papa_tests::detail::poke(b.code, 6, static_cast<std::int32_t>(iat - (text + 0x0A)));
 
     auto img = papa::pe::PeParser::parse(b.build());
     REQUIRE(img.has_value());

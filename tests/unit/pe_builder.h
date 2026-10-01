@@ -3,10 +3,14 @@
 // Builds valid PE images in memory so the test suite never needs a real executable
 // on disk. The images are small but structurally genuine
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -24,21 +28,48 @@ struct ExportSpec {
     std::uint32_t code_offset{0};
 };
 
-/// A synthetic PE image. Set the fields, call build(), get a byte buffer that
-/// papa::pe::PeParser::parse accepts
+/// File offsets of the header structures in the image build() returns
+struct HeaderLayout {
+    std::size_t e_lfanew{0};          // the DOS header field that points at nt_headers
+    std::size_t nt_headers{0};        // the PE signature
+    std::size_t file_header{0};
+    std::size_t optional_header{0};
+    std::size_t data_directories{0};
+    std::size_t section_table{0};
+    std::size_t section_count{0};
+    std::size_t size_of_headers{0};
+
+    /// File offset of data directory entry index
+    [[nodiscard]] std::size_t data_directory(std::size_t index) const noexcept {
+        return data_directories + index * 8U;
+    }
+
+    /// File offset of the header of section index
+    [[nodiscard]] std::size_t section_header(std::size_t index) const noexcept {
+        return section_table + index * 40U;
+    }
+};
+
+/// A synthetic PE image that papa::pe::PeParser::parse accepts. Its sections sit back
+/// to back on 0x1000 boundaries: .text, .rdata, .pdata, .reloc
 class PeBuilder {
 public:
     static constexpr std::uint32_t kSectionAlign = 0x1000;
     static constexpr std::uint32_t kFileAlign    = 0x200;
     static constexpr std::uint32_t kTextRva      = 0x1000;
-    static constexpr std::uint32_t kRdataRva     = 0x2000;
-    static constexpr std::uint32_t kPdataRva     = 0x3000;
-    static constexpr std::uint32_t kRelocRva     = 0x4000;
+
+    static constexpr std::uint32_t kScnCode              = 0x00000020U;
+    static constexpr std::uint32_t kScnInitializedData   = 0x00000040U;
+    static constexpr std::uint32_t kScnExecute           = 0x20000000U;
+    static constexpr std::uint32_t kScnRead              = 0x40000000U;
+    static constexpr std::uint32_t kScnWrite             = 0x80000000U;
 
     bool          x64{true};
     std::uint64_t image_base{0};  // 0 selects the usual default for the bitness
-    // Machine code placed at kTextRva. The entry point is its first byte
+    // Machine code placed at kTextRva
     std::vector<std::uint8_t> code;
+    // Code offset of the entry point
+    std::uint32_t             entry_offset{0};
     std::vector<ImportSpec>   imports;
     std::vector<ExportSpec>   exports;
     // Code offsets whose 4 or 8 byte slot holds an absolute address to relocate
@@ -54,6 +85,21 @@ public:
         }
         return x64 ? 0x140000000ULL : 0x400000ULL;
     }
+
+    /// Virtual address of a code offset
+    [[nodiscard]] std::uint64_t code_va(std::uint32_t offset) const noexcept {
+        return base() + kTextRva + offset;
+    }
+
+    /// RVA where the named section lands, 0 when there is none
+    [[nodiscard]] std::uint32_t section_rva(std::string_view name) const;
+
+    /// Virtual address of the IAT slot for fn of dll as spelled in imports, 0 when
+    /// absent. It holds until a section changes size
+    [[nodiscard]] std::uint64_t iat_va(std::string_view dll, std::string_view fn) const;
+
+    /// File offsets of the headers in the image build() would return
+    [[nodiscard]] HeaderLayout header_layout() const;
 
     [[nodiscard]] std::vector<std::byte> build() const;
 
@@ -71,15 +117,35 @@ private:
             const auto* b = static_cast<const std::uint8_t*>(p);
             bytes.insert(bytes.end(), b, b + n);
         }
-        void pad_to(std::size_t n) {
-            if (bytes.size() < n) {
-                bytes.resize(n, 0);
+        void align(std::size_t a) {
+            while (bytes.size() % a != 0U) {
+                bytes.push_back(0);
             }
         }
         [[nodiscard]] std::uint32_t here() const noexcept {
             return rva + static_cast<std::uint32_t>(bytes.size());
         }
     };
+
+    struct Section {
+        std::string               name;
+        std::uint32_t             rva{0};
+        std::vector<std::uint8_t> bytes;
+        std::uint32_t             virtual_size{0};
+        std::uint32_t             characteristics{0};
+    };
+
+    // Everything build() serializes, laid out at final RVAs
+    struct Image {
+        std::vector<Section>                                         sections;
+        std::array<std::pair<std::uint32_t, std::uint32_t>, 16>      dirs{};
+        std::map<std::pair<std::string, std::string>, std::uint32_t> iat_rvas;
+        std::uint32_t                                                size_of_image{0};
+    };
+
+    [[nodiscard]] Image assemble() const;
+    void put_imports(Blob& rdata, Image& image) const;
+    [[nodiscard]] HeaderLayout layout_for(std::size_t section_count) const noexcept;
 };
 
 namespace detail {
@@ -96,79 +162,127 @@ void poke(std::vector<std::uint8_t>& buf, std::size_t off, T value) {
 
 }  // namespace detail
 
-inline std::vector<std::byte> PeBuilder::build() const {
-    using detail::align_up;
+inline std::uint32_t PeBuilder::section_rva(std::string_view name) const {
+    for (const Section& s : assemble().sections) {
+        if (s.name == name) {
+            return s.rva;
+        }
+    }
+    return 0;
+}
+
+inline std::uint64_t PeBuilder::iat_va(std::string_view dll, std::string_view fn) const {
+    const Image image = assemble();
+    const auto  it    = image.iat_rvas.find({std::string(dll), std::string(fn)});
+    return it == image.iat_rvas.end() ? 0U : base() + it->second;
+}
+
+inline HeaderLayout PeBuilder::header_layout() const {
+    return layout_for(assemble().sections.size());
+}
+
+inline HeaderLayout PeBuilder::layout_for(std::size_t section_count) const noexcept {
+    HeaderLayout l;
+    l.e_lfanew         = 0x3C;
+    l.nt_headers       = 0x80;
+    l.file_header      = l.nt_headers + 4U;
+    l.optional_header  = l.file_header + 20U;
+    l.data_directories = l.optional_header + (x64 ? 112U : 96U);
+    l.section_table    = l.optional_header + (x64 ? 240U : 224U);
+    l.section_count    = section_count;
+    l.size_of_headers  = detail::align_up(
+        static_cast<std::uint32_t>(l.section_table + section_count * 40U), kFileAlign);
+    return l;
+}
+
+// Writes the import descriptors, then the hint/name entries and DLL names, then every
+// lookup table, then every address table
+inline void PeBuilder::put_imports(Blob& rdata, Image& image) const {
     using detail::poke;
-
-    // .rdata holds the import and export directories
-    Blob rdata;
-    rdata.rva = kRdataRva;
-
-    // Import directory: descriptors, then per-DLL lookup and address tables,
-    // then the name strings
-    const std::uint32_t import_dir_rva = rdata.here();
-    const std::size_t   descriptor_count = imports.size() + 1U;
-    rdata.bytes.resize(rdata.bytes.size() + descriptor_count * 20U, 0);
+    const std::vector<ImportSpec>& specs = imports;
+    const std::uint32_t descriptor_size  = 20U;
+    const std::uint32_t dir_rva          = rdata.here();
+    const std::size_t   descriptor_count = specs.size() + 1U;
+    rdata.bytes.resize(rdata.bytes.size() + descriptor_count * descriptor_size, 0);
 
     const std::uint32_t thunk_size = x64 ? 8U : 4U;
-    std::vector<std::uint32_t> ilt_rvas;
-    std::vector<std::uint32_t> iat_rvas;
-    std::vector<std::uint32_t> dll_name_rvas;
-    std::vector<std::vector<std::uint32_t>> hint_name_rvas;
+    std::vector<std::uint32_t>              dll_name_rvas;
+    std::vector<std::vector<std::uint64_t>> thunks;
 
-    for (const ImportSpec& imp : imports) {
-        std::vector<std::uint32_t> names;
+    for (const ImportSpec& imp : specs) {
+        std::vector<std::uint64_t> values;
         for (const std::string& fn : imp.functions) {
-            names.push_back(rdata.here());
+            values.push_back(rdata.here());
             const std::uint16_t hint = 0;
             rdata.put(hint);
             rdata.put_bytes(fn.data(), fn.size() + 1U);
-            if (rdata.bytes.size() % 2U != 0U) {
-                rdata.bytes.push_back(0);  // keep the next hint aligned
-            }
+            rdata.align(2);  // keep the next hint aligned
         }
-        hint_name_rvas.push_back(std::move(names));
+        thunks.push_back(std::move(values));
 
         dll_name_rvas.push_back(rdata.here());
         rdata.put_bytes(imp.dll.data(), imp.dll.size() + 1U);
-        if (rdata.bytes.size() % 2U != 0U) {
-            rdata.bytes.push_back(0);
-        }
+        rdata.align(2);
     }
 
-    for (std::size_t i = 0; i < imports.size(); ++i) {
-        ilt_rvas.push_back(rdata.here());
-        for (const std::uint32_t name_rva : hint_name_rvas[i]) {
-            if (x64) {
-                rdata.put(std::uint64_t{name_rva});
-            } else {
-                rdata.put(std::uint32_t{name_rva});
+    const auto put_table = [&](std::vector<std::uint32_t>& rvas, bool is_iat) {
+        for (std::size_t i = 0; i < specs.size(); ++i) {
+            rvas.push_back(rdata.here());
+            for (std::size_t j = 0; j < thunks[i].size(); ++j) {
+                if (is_iat) {
+                    image.iat_rvas.emplace(
+                        std::make_pair(specs[i].dll, specs[i].functions[j]), rdata.here());
+                }
+                if (x64) {
+                    rdata.put(std::uint64_t{thunks[i][j]});
+                } else {
+                    rdata.put(static_cast<std::uint32_t>(thunks[i][j]));
+                }
             }
+            rdata.bytes.insert(rdata.bytes.end(), thunk_size, 0);  // terminator
         }
-        rdata.bytes.insert(rdata.bytes.end(), thunk_size, 0);  // terminator
-    }
-    for (std::size_t i = 0; i < imports.size(); ++i) {
-        iat_rvas.push_back(rdata.here());
-        for (const std::uint32_t name_rva : hint_name_rvas[i]) {
-            if (x64) {
-                rdata.put(std::uint64_t{name_rva});
-            } else {
-                rdata.put(std::uint32_t{name_rva});
-            }
-        }
-        rdata.bytes.insert(rdata.bytes.end(), thunk_size, 0);
-    }
+    };
+    std::vector<std::uint32_t> ilt_rvas;
+    std::vector<std::uint32_t> iat_rvas;
+    put_table(ilt_rvas, false);
+    put_table(iat_rvas, true);
 
-    for (std::size_t i = 0; i < imports.size(); ++i) {
-        const std::size_t at = static_cast<std::size_t>(import_dir_rva - rdata.rva) + i * 20U;
+    for (std::size_t i = 0; i < specs.size(); ++i) {
+        const std::size_t at = std::size_t{dir_rva - rdata.rva} + i * descriptor_size;
         poke<std::uint32_t>(rdata.bytes, at + 0U,  ilt_rvas[i]);
         poke<std::uint32_t>(rdata.bytes, at + 12U, dll_name_rvas[i]);
         poke<std::uint32_t>(rdata.bytes, at + 16U, iat_rvas[i]);
     }
+    if (!specs.empty()) {
+        image.dirs[1] = {dir_rva, static_cast<std::uint32_t>(descriptor_count * descriptor_size)};
+    }
+}
 
-    // Export directory
-    std::uint32_t export_dir_rva  = 0;
-    std::uint32_t export_dir_size = 0;
+inline PeBuilder::Image PeBuilder::assemble() const {
+    using detail::align_up;
+    using detail::poke;
+
+    Image         image;
+    std::uint32_t next_rva = kTextRva;
+    const auto place = [&image, &next_rva](std::string name, std::vector<std::uint8_t> bytes,
+                                           std::uint32_t virtual_size,
+                                           std::uint32_t characteristics) {
+        const std::uint32_t rva = next_rva;
+        next_rva = align_up(rva + std::max<std::uint32_t>(virtual_size, 1U), kSectionAlign);
+        image.sections.push_back(
+            {std::move(name), rva, std::move(bytes), virtual_size, characteristics});
+    };
+    const auto size_of = [](const std::vector<std::uint8_t>& bytes) {
+        return static_cast<std::uint32_t>(bytes.size());
+    };
+
+    place(".text", code, size_of(code), kScnCode | kScnExecute | kScnRead);
+
+    // .rdata holds the import, export and TLS directories
+    Blob rdata;
+    rdata.rva = next_rva;
+    put_imports(rdata, image);
+
     if (!exports.empty()) {
         std::vector<std::uint32_t> name_rvas;
         for (const ExportSpec& e : exports) {
@@ -178,9 +292,7 @@ inline std::vector<std::byte> PeBuilder::build() const {
         const std::uint32_t module_name_rva = rdata.here();
         const std::string   module_name     = "synthetic.exe";
         rdata.put_bytes(module_name.data(), module_name.size() + 1U);
-        while (rdata.bytes.size() % 4U != 0U) {
-            rdata.bytes.push_back(0);
-        }
+        rdata.align(4);
 
         const std::uint32_t functions_rva = rdata.here();
         for (const ExportSpec& e : exports) {
@@ -194,11 +306,9 @@ inline std::vector<std::byte> PeBuilder::build() const {
         for (std::size_t i = 0; i < exports.size(); ++i) {
             rdata.put(static_cast<std::uint16_t>(i));
         }
-        while (rdata.bytes.size() % 4U != 0U) {
-            rdata.bytes.push_back(0);
-        }
+        rdata.align(4);
 
-        export_dir_rva = rdata.here();
+        const std::uint32_t export_dir_rva = rdata.here();
         rdata.put(std::uint32_t{0});                 // Characteristics
         rdata.put(std::uint32_t{0});                 // TimeDateStamp
         rdata.put(std::uint16_t{0});                 // MajorVersion
@@ -210,22 +320,18 @@ inline std::vector<std::byte> PeBuilder::build() const {
         rdata.put(functions_rva);
         rdata.put(names_rva);
         rdata.put(ordinals_rva);
-        export_dir_size = 40U;
+        image.dirs[0] = {export_dir_rva, rdata.here() - export_dir_rva};
     }
 
     // TLS directory, pointing at callbacks in the code section
-    std::uint32_t tls_dir_rva  = 0;
-    std::uint32_t tls_dir_size = 0;
     if (!tls_callbacks.empty()) {
-        while (rdata.bytes.size() % 8U != 0U) {
-            rdata.bytes.push_back(0);
-        }
+        rdata.align(8);
         const std::uint32_t callback_array_rva = rdata.here();
         for (const std::uint32_t off : tls_callbacks) {
             if (x64) {
-                rdata.put(std::uint64_t{base() + kTextRva + off});
+                rdata.put(std::uint64_t{code_va(off)});
             } else {
-                rdata.put(static_cast<std::uint32_t>(base() + kTextRva + off));
+                rdata.put(static_cast<std::uint32_t>(code_va(off)));
             }
         }
         if (x64) {
@@ -234,7 +340,7 @@ inline std::vector<std::byte> PeBuilder::build() const {
             rdata.put(std::uint32_t{0});
         }
 
-        tls_dir_rva = rdata.here();
+        const std::uint32_t tls_dir_rva = rdata.here();
         if (x64) {
             rdata.put(std::uint64_t{0});  // StartAddressOfRawData
             rdata.put(std::uint64_t{0});  // EndAddressOfRawData
@@ -242,7 +348,7 @@ inline std::vector<std::byte> PeBuilder::build() const {
             rdata.put(std::uint64_t{base() + callback_array_rva});
             rdata.put(std::uint32_t{0});  // SizeOfZeroFill
             rdata.put(std::uint32_t{0});  // Characteristics
-            tls_dir_size = 40U;
+            image.dirs[9] = {tls_dir_rva, 40U};
         } else {
             rdata.put(std::uint32_t{0});
             rdata.put(std::uint32_t{0});
@@ -250,17 +356,19 @@ inline std::vector<std::byte> PeBuilder::build() const {
             rdata.put(static_cast<std::uint32_t>(base() + callback_array_rva));
             rdata.put(std::uint32_t{0});
             rdata.put(std::uint32_t{0});
-            tls_dir_size = 24U;
+            image.dirs[9] = {tls_dir_rva, 24U};
         }
     }
 
+    place(".rdata", rdata.bytes, size_of(rdata.bytes), kScnInitializedData | kScnRead);
+
     // .pdata, the x64 exception table. Each record needs an UNWIND_INFO whose
     // version is 1, or the walk stops at it
-    Blob pdata;
-    pdata.rva = kPdataRva;
     if (x64 && !pdata_functions.empty()) {
-        const std::uint32_t unwind_rva =
-            kPdataRva + static_cast<std::uint32_t>(pdata_functions.size()) * 12U;
+        Blob pdata;
+        pdata.rva = next_rva;
+        const auto rows = static_cast<std::uint32_t>(pdata_functions.size());
+        const std::uint32_t unwind_rva = pdata.rva + rows * 12U;
         for (const auto& fn : pdata_functions) {
             pdata.put(std::uint32_t{kTextRva + fn.first});
             pdata.put(std::uint32_t{kTextRva + fn.second});
@@ -270,153 +378,114 @@ inline std::vector<std::byte> PeBuilder::build() const {
         pdata.put(std::uint8_t{0});  // SizeOfProlog
         pdata.put(std::uint8_t{0});  // CountOfCodes
         pdata.put(std::uint8_t{0});  // FrameRegister / FrameOffset
+        image.dirs[3] = {pdata.rva, rows * 12U};
+        place(".pdata", pdata.bytes, size_of(pdata.bytes), kScnInitializedData | kScnRead);
     }
 
-    // .reloc, one block covering the code page
-    Blob reloc;
-    reloc.rva = kRelocRva;
+    // .reloc, one block per code page, each padded to a 4-byte multiple with an
+    // ABSOLUTE entry
     if (!reloc_code_offsets.empty()) {
-        const std::uint16_t type      = x64 ? 10U : 3U;  // DIR64 or HIGHLOW
-        std::uint32_t       block_size =
-            8U + static_cast<std::uint32_t>(reloc_code_offsets.size()) * 2U;
-        if (block_size % 4U != 0U) {
-            block_size += 2U;  // pad the block to a 4-byte multiple
-        }
-        reloc.put(std::uint32_t{kTextRva});
-        reloc.put(block_size);
+        Blob reloc;
+        reloc.rva = next_rva;
+        const std::uint32_t type = x64 ? 10U : 3U;  // DIR64 or HIGHLOW
+        std::map<std::uint32_t, std::vector<std::uint16_t>> pages;
         for (const std::uint32_t off : reloc_code_offsets) {
-            reloc.put(static_cast<std::uint16_t>((std::uint32_t{type} << 12) |
-                                                 (off & 0x0FFFU)));
+            const std::uint32_t rva = kTextRva + off;
+            pages[rva & ~0x0FFFU].push_back(
+                static_cast<std::uint16_t>((type << 12) | (rva & 0x0FFFU)));
         }
-        while (reloc.bytes.size() < block_size) {
-            reloc.put(std::uint16_t{0});
+        for (auto& [page, entries] : pages) {
+            if (entries.size() % 2U != 0U) {
+                entries.push_back(0);
+            }
+            reloc.put(page);
+            reloc.put(static_cast<std::uint32_t>(8U + entries.size() * 2U));
+            for (const std::uint16_t e : entries) {
+                reloc.put(e);
+            }
         }
+        image.dirs[5] = {reloc.rva, size_of(reloc.bytes)};
+        place(".reloc", reloc.bytes, size_of(reloc.bytes), kScnInitializedData | kScnRead);
     }
 
-    // Assemble the sections
-    struct Section {
-        const char*               name;
-        std::uint32_t             rva;
-        std::vector<std::uint8_t> data;
-        std::uint32_t             characteristics;
-    };
-    constexpr std::uint32_t kCode        = 0x00000020U;
-    constexpr std::uint32_t kInitialized = 0x00000040U;
-    constexpr std::uint32_t kExecute     = 0x20000000U;
-    constexpr std::uint32_t kRead        = 0x40000000U;
+    image.size_of_image = next_rva;
+    return image;
+}
 
-    std::vector<Section> sections;
-    sections.push_back({".text", kTextRva, code, kCode | kExecute | kRead});
-    sections.push_back({".rdata", kRdataRva, rdata.bytes, kInitialized | kRead});
-    if (!pdata.bytes.empty()) {
-        sections.push_back({".pdata", kPdataRva, pdata.bytes, kInitialized | kRead});
-    }
-    if (!reloc.bytes.empty()) {
-        sections.push_back({".reloc", kRelocRva, reloc.bytes, kInitialized | kRead});
-    }
+inline std::vector<std::byte> PeBuilder::build() const {
+    using detail::align_up;
+    using detail::poke;
 
-    const std::uint32_t opt_size     = x64 ? 240U : 224U;
-    const std::uint32_t headers_size = align_up(
-        0x80U + 24U + opt_size + static_cast<std::uint32_t>(sections.size()) * 40U,
-        kFileAlign);
+    const Image        image = assemble();
+    const HeaderLayout l     = layout_for(image.sections.size());
 
-    std::vector<std::uint8_t> out(headers_size, 0);
+    // The headers always fill at least one file-aligned block. Saying so lets GCC see
+    // that the buffer is never empty, or -O2 warns of a null dereference below
+    std::vector<std::uint8_t> out(std::max<std::size_t>(l.size_of_headers, kFileAlign), 0);
 
     // DOS header, with e_lfanew pointing at the PE signature
-    out[0] = 'M';
-    out[1] = 'Z';
-    poke<std::uint32_t>(out, 0x3CU, 0x80U);
-
-    std::size_t off = 0x80U;
-    out[off + 0] = 'P';
-    out[off + 1] = 'E';
-    off += 4U;
+    poke<std::uint16_t>(out, 0, 0x5A4DU);  // MZ
+    poke<std::uint32_t>(out, l.e_lfanew, static_cast<std::uint32_t>(l.nt_headers));
+    poke<std::uint32_t>(out, l.nt_headers, 0x00004550U);  // PE and two NULs
 
     // File header
-    poke<std::uint16_t>(out, off + 0U, x64 ? 0x8664U : 0x014CU);       // Machine
-    poke<std::uint16_t>(out, off + 2U,
-                        static_cast<std::uint16_t>(sections.size()));  // NumberOfSections
-    poke<std::uint16_t>(out, off + 16U, static_cast<std::uint16_t>(opt_size));
-    poke<std::uint16_t>(out, off + 18U, 0x0022U);  // EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
-    off += 20U;
+    poke<std::uint16_t>(out, l.file_header + 0U, x64 ? 0x8664U : 0x014CU);  // Machine
+    poke<std::uint16_t>(out, l.file_header + 2U,
+                        static_cast<std::uint16_t>(image.sections.size()));  // NumberOfSections
+    poke<std::uint16_t>(out, l.file_header + 16U,
+                        static_cast<std::uint16_t>(l.section_table - l.optional_header));
+    // Characteristics, EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+    poke<std::uint16_t>(out, l.file_header + 18U, 0x0022U);
 
-    const std::size_t opt_off = off;
-    poke<std::uint16_t>(out, opt_off + 0U, x64 ? 0x20BU : 0x10BU);  // Magic
-    poke<std::uint32_t>(out, opt_off + 16U, kTextRva);              // AddressOfEntryPoint
-    poke<std::uint32_t>(out, opt_off + 20U, kTextRva);              // BaseOfCode
-
-    std::size_t dd_off = 0;
+    // Optional header. The fields from SectionAlignment on sit at the same offsets in
+    // PE32 and PE32+
+    const std::size_t opt = l.optional_header;
+    poke<std::uint16_t>(out, opt + 0U, x64 ? 0x20BU : 0x10BU);     // Magic
+    poke<std::uint32_t>(out, opt + 16U, kTextRva + entry_offset);  // AddressOfEntryPoint
+    poke<std::uint32_t>(out, opt + 20U, kTextRva);                 // BaseOfCode
     if (x64) {
-        poke<std::uint64_t>(out, opt_off + 24U, base());          // ImageBase
-        poke<std::uint32_t>(out, opt_off + 32U, kSectionAlign);
-        poke<std::uint32_t>(out, opt_off + 36U, kFileAlign);
-        poke<std::uint16_t>(out, opt_off + 68U, 5U);              // MajorSubsystemVersion
-        poke<std::uint32_t>(out, opt_off + 56U,
-                            align_up(kRelocRva + kSectionAlign, kSectionAlign));
-        poke<std::uint32_t>(out, opt_off + 60U, headers_size);    // SizeOfHeaders
-        poke<std::uint16_t>(out, opt_off + 68U, 3U);              // Subsystem (console)
-        poke<std::uint32_t>(out, opt_off + 108U, 16U);            // NumberOfRvaAndSizes
-        dd_off = opt_off + 112U;
+        poke<std::uint64_t>(out, opt + 24U, base());               // ImageBase
     } else {
-        poke<std::uint32_t>(out, opt_off + 24U, 0U);              // BaseOfData
-        poke<std::uint32_t>(out, opt_off + 28U,
-                            static_cast<std::uint32_t>(base()));  // ImageBase
-        poke<std::uint32_t>(out, opt_off + 32U, kSectionAlign);
-        poke<std::uint32_t>(out, opt_off + 36U, kFileAlign);
-        poke<std::uint32_t>(out, opt_off + 56U,
-                            align_up(kRelocRva + kSectionAlign, kSectionAlign));
-        poke<std::uint32_t>(out, opt_off + 60U, headers_size);
-        poke<std::uint16_t>(out, opt_off + 68U, 3U);
-        poke<std::uint32_t>(out, opt_off + 92U, 16U);             // NumberOfRvaAndSizes
-        dd_off = opt_off + 96U;
+        poke<std::uint32_t>(out, opt + 24U, 0U);                   // BaseOfData
+        poke<std::uint32_t>(out, opt + 28U, static_cast<std::uint32_t>(base()));
     }
+    poke<std::uint32_t>(out, opt + 32U, kSectionAlign);
+    poke<std::uint32_t>(out, opt + 36U, kFileAlign);
+    poke<std::uint16_t>(out, opt + 48U, 5U);                       // MajorSubsystemVersion
+    poke<std::uint32_t>(out, opt + 56U, image.size_of_image);
+    poke<std::uint32_t>(out, opt + 60U, static_cast<std::uint32_t>(l.size_of_headers));
+    poke<std::uint16_t>(out, opt + 68U, 3U);                       // Subsystem (console)
+    poke<std::uint32_t>(out, l.data_directories - 4U, 16U);        // NumberOfRvaAndSizes
 
-    const auto set_dir = [&out, dd_off](std::size_t index, std::uint32_t rva,
-                                        std::uint32_t size) {
-        poke<std::uint32_t>(out, dd_off + index * 8U, rva);
-        poke<std::uint32_t>(out, dd_off + index * 8U + 4U, size);
-    };
-    if (export_dir_rva != 0) {
-        set_dir(0, export_dir_rva, export_dir_size);
-    }
-    if (!imports.empty()) {
-        set_dir(1, import_dir_rva,
-                static_cast<std::uint32_t>(descriptor_count * 20U));
-    }
-    if (x64 && !pdata.bytes.empty()) {
-        set_dir(3, kPdataRva,
-                static_cast<std::uint32_t>(pdata_functions.size()) * 12U);
-    }
-    if (!reloc.bytes.empty()) {
-        set_dir(5, kRelocRva, static_cast<std::uint32_t>(reloc.bytes.size()));
-    }
-    if (tls_dir_rva != 0) {
-        set_dir(9, tls_dir_rva, tls_dir_size);
+    for (std::size_t i = 0; i < image.dirs.size(); ++i) {
+        if (image.dirs[i].first != 0) {
+            poke<std::uint32_t>(out, l.data_directory(i), image.dirs[i].first);
+            poke<std::uint32_t>(out, l.data_directory(i) + 4U, image.dirs[i].second);
+        }
     }
 
     // Section table, then the section bodies at file-aligned offsets
-    std::size_t   sh_off   = opt_off + opt_size;
-    std::uint32_t file_pos = headers_size;
-    for (const Section& s : sections) {
-        const std::uint32_t raw = align_up(
-            static_cast<std::uint32_t>(s.data.size()), kFileAlign);
-        std::memcpy(out.data() + sh_off, s.name, std::strlen(s.name));
-        poke<std::uint32_t>(out, sh_off + 8U,  static_cast<std::uint32_t>(s.data.size()));
-        poke<std::uint32_t>(out, sh_off + 12U, s.rva);
-        poke<std::uint32_t>(out, sh_off + 16U, raw);
-        poke<std::uint32_t>(out, sh_off + 20U, file_pos);
-        poke<std::uint32_t>(out, sh_off + 36U, s.characteristics);
-        sh_off += 40U;
+    auto file_pos = static_cast<std::uint32_t>(l.size_of_headers);
+    for (std::size_t i = 0; i < image.sections.size(); ++i) {
+        const Section&      s   = image.sections[i];
+        const std::size_t   sh  = l.section_header(i);
+        const std::uint32_t raw = align_up(static_cast<std::uint32_t>(s.bytes.size()), kFileAlign);
+        std::memcpy(out.data() + sh, s.name.data(), std::min<std::size_t>(s.name.size(), 8U));
+        poke<std::uint32_t>(out, sh + 8U,  s.virtual_size);
+        poke<std::uint32_t>(out, sh + 12U, s.rva);
+        poke<std::uint32_t>(out, sh + 16U, raw);
+        poke<std::uint32_t>(out, sh + 20U, file_pos);
+        poke<std::uint32_t>(out, sh + 36U, s.characteristics);
         file_pos += raw;
     }
 
     out.resize(file_pos, 0);
-    file_pos = headers_size;
-    for (const Section& s : sections) {
-        if (!s.data.empty()) {
-            std::memcpy(out.data() + file_pos, s.data.data(), s.data.size());
+    file_pos = static_cast<std::uint32_t>(l.size_of_headers);
+    for (const Section& s : image.sections) {
+        if (!s.bytes.empty()) {
+            std::memcpy(out.data() + file_pos, s.bytes.data(), s.bytes.size());
         }
-        file_pos += align_up(static_cast<std::uint32_t>(s.data.size()), kFileAlign);
+        file_pos += align_up(static_cast<std::uint32_t>(s.bytes.size()), kFileAlign);
     }
 
     std::vector<std::byte> bytes(out.size());
