@@ -5,7 +5,9 @@
 #include "papa/features/extractors/papa_native/emu/memory.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace emu = papa::features::extractors::papa_native::emu;
@@ -19,98 +21,121 @@ constexpr std::array<std::uint8_t, 8> kBacking = {
     0x44, 0x33, 0x22, 0x11, 0xAA, 0xBB, 0xCC, 0xDD,
 };
 
+// kBacking read-only at 0x1000 and writable at 0x2000, plus the stack
+emu::SandboxMemory fixture() {
+    emu::SandboxMemory mem;
+    mem.add_map(0x1000, emu::kMemRead, kBacking);
+    mem.add_map(0x2000, emu::kMemRead | emu::kMemWrite, kBacking);
+    mem.init_stack();
+    return mem;
+}
+
 }  // namespace
 
-TEST_CASE("emu SandboxMemory: read_value reads a little-endian dword from a map") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);
-    CHECK(mem.read_value(0x1000, 4) == 0x11223344ULL);
+TEST_CASE("emu SandboxMemory: a read sees the backing, the fill bytes and every write the maps allow") {
+    using Write = void (*)(emu::SandboxMemory&);
+    struct Row {
+        std::string_view label;
+        Write            write;
+        std::uint64_t    at;
+        std::size_t      size;
+        std::uint64_t    expected;
+    };
+    const Write none = [](emu::SandboxMemory&) {};
+    const std::vector<Row> rows{
+        {"read_value reads a little-endian dword from a map", none, 0x1000, 4, 0x11223344ULL},
+        {"read_value reads a single byte", none, 0x1004, 1, 0xAAULL},
+        // vivisect _safe_mem: a read that does not probe returns taintbyte*size
+        {"an unmapped read returns the taint fill", none, 0x9000, 4, 0x61616161ULL},
+        {"the stack reads its fill byte where unwritten", none, emu::kStackBase, 1, 0xFEULL},
+        {"a stack write reads back through the overlay",
+         [](emu::SandboxMemory& m) {
+             const std::array<std::uint8_t, 4> data = {0xEF, 0xBE, 0xAD, 0xDE};
+             m.write(emu::kStackBase + 0x100, data);
+         },
+         emu::kStackBase + 0x100, 4, 0xDEADBEEFULL},
+        {"write_value and read_value round-trip on the stack",
+         [](emu::SandboxMemory& m) { m.write_value(emu::kStackBase + 0x40, 0xCAFEBABEULL, 4); },
+         emu::kStackBase + 0x40, 4, 0xCAFEBABEULL},
+        // The backing bytes must never change, a safety property
+        {"a write to a read-only map is dropped",
+         [](emu::SandboxMemory& m) {
+             const std::array<std::uint8_t, 1> data = {0xFF};
+             m.write(0x1000, data);
+         },
+         0x1000, 1, 0x44ULL},
+        {"a write to a writable map overlays the backing",
+         [](emu::SandboxMemory& m) {
+             const std::array<std::uint8_t, 1> data = {0x99};
+             m.write(0x2000, data);
+         },
+         0x2000, 1, 0x99ULL},
+        {"an overlay write leaves the backing bytes beside it",
+         [](emu::SandboxMemory& m) {
+             const std::array<std::uint8_t, 1> data = {0x99};
+             m.write(0x2000, data);
+         },
+         0x2001, 1, 0x33ULL},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::SandboxMemory mem = fixture();
+        row.write(mem);
+        CHECK(mem.read_value(row.at, row.size) == row.expected);
+    }
 }
 
-TEST_CASE("emu SandboxMemory: read_value reads a single byte") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);
-    CHECK(mem.read_value(0x1004, 1) == 0xAAULL);
+TEST_CASE("emu SandboxMemory: probe and is_valid_pointer accept only mapped ranges with the perm asked for") {
+    struct Row {
+        std::string_view label;
+        std::uint64_t    at;
+        std::size_t      size;
+        std::uint32_t    perm;
+        bool             probe;
+        bool             valid_pointer;
+    };
+    const std::vector<Row> rows{
+        {"a whole readable map", 0x1000, 8, emu::kMemRead, true, true},
+        {"a range inside one readable map", 0x1004, 4, emu::kMemRead, true, true},
+        {"the last byte of a map", 0x1007, 1, emu::kMemRead, true, true},
+        {"a range crossing the map end", 0x1004, 8, emu::kMemRead, false, true},
+        {"a perm the map lacks", 0x1000, 4, emu::kMemWrite, false, true},
+        {"one past the map end", 0x1008, 1, emu::kMemRead, false, false},
+        {"an unmapped range", 0x9000, 4, emu::kMemRead, false, false},
+        {"a taint-range value", 0x4156100FULL, 4, emu::kMemRead, false, false},
+        {"the stack is writable", emu::kStackBase, 4, emu::kMemWrite, true, true},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::SandboxMemory mem;
+        mem.add_map(0x1000, emu::kMemRead, kBacking);
+        mem.init_stack();
+        CHECK(mem.probe(row.at, row.size, row.perm) == row.probe);
+        CHECK(mem.is_valid_pointer(row.at) == row.valid_pointer);
+    }
 }
 
-TEST_CASE("emu SandboxMemory: an unmapped read returns the taint fill") {
-    // vivisect _safe_mem: a read that does not probe returns taintbyte*size
-    emu::SandboxMemory mem;
-    CHECK(mem.read_value(0x9000, 4) == 0x61616161ULL);
-}
-
-TEST_CASE("emu SandboxMemory: probe accepts a range inside one readable map") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);
-    CHECK(mem.probe(0x1000, 8, emu::kMemRead));
-    CHECK(mem.probe(0x1004, 4, emu::kMemRead));
-}
-
-TEST_CASE("emu SandboxMemory: probe rejects a range crossing the map end") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);  // 8 bytes
-    CHECK_FALSE(mem.probe(0x1004, 8, emu::kMemRead));
-}
-
-TEST_CASE("emu SandboxMemory: probe rejects a perm the map lacks") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);  // read-only
-    CHECK_FALSE(mem.probe(0x1000, 4, emu::kMemWrite));
-}
-
-TEST_CASE("emu SandboxMemory: probe rejects an unmapped range") {
-    emu::SandboxMemory mem;
-    CHECK_FALSE(mem.probe(0x9000, 4, emu::kMemRead));
-}
-
-TEST_CASE("emu SandboxMemory: is_valid_pointer is true only for mapped addresses") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);
-    CHECK(mem.is_valid_pointer(0x1000));
-    CHECK(mem.is_valid_pointer(0x1007));
-    CHECK_FALSE(mem.is_valid_pointer(0x1008));
-    CHECK_FALSE(mem.is_valid_pointer(0x4156100FULL));  // a taint-range value
-}
-
-TEST_CASE("emu SandboxMemory: the stack reads its fill byte where unwritten") {
-    emu::SandboxMemory mem;
-    mem.init_stack();
-    CHECK(mem.read_value(emu::kStackBase, 1) == 0xFEULL);
-    CHECK(mem.is_valid_pointer(emu::kStackBase));
-    CHECK(mem.probe(emu::kStackBase, 4, emu::kMemWrite));
-}
-
-TEST_CASE("emu SandboxMemory: a stack write reads back through the overlay") {
-    emu::SandboxMemory mem;
-    mem.init_stack();
-    const std::array<std::uint8_t, 4> data = {0xEF, 0xBE, 0xAD, 0xDE};
-    mem.write(emu::kStackBase + 0x100, data);
-    CHECK(mem.read_value(emu::kStackBase + 0x100, 4) == 0xDEADBEEFULL);
-}
-
-TEST_CASE("emu SandboxMemory: a write to a read-only map is dropped") {
-    // The backing bytes must never change -- safety property
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead, kBacking);
-    const std::array<std::uint8_t, 1> data = {0xFF};
-    mem.write(0x1000, data);
-    CHECK(mem.read_value(0x1000, 1) == 0x44ULL);  // unchanged
-}
-
-TEST_CASE("emu SandboxMemory: a write to a writable map overlays the backing") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x2000, emu::kMemRead | emu::kMemWrite, kBacking);
-    const std::array<std::uint8_t, 1> data = {0x99};
-    mem.write(0x2000, data);
-    CHECK(mem.read_value(0x2000, 1) == 0x99ULL);     // overlay
-    CHECK(mem.read_value(0x2001, 1) == 0x33ULL);     // still backing
-}
-
-TEST_CASE("emu SandboxMemory: write_value and read_value round-trip on the stack") {
-    emu::SandboxMemory mem;
-    mem.init_stack();
-    mem.write_value(emu::kStackBase + 0x40, 0xCAFEBABEULL, 4);
-    CHECK(mem.read_value(emu::kStackBase + 0x40, 4) == 0xCAFEBABEULL);
+TEST_CASE("emu SandboxMemory: read_code returns mapped bytes clipped to the map end") {
+    struct Row {
+        std::string_view          label;
+        std::uint64_t             at;
+        std::vector<std::uint8_t> expected;
+    };
+    const std::vector<Row> rows{
+        {"only the 4 bytes left in the map", 0x1004, {0xAA, 0xBB, 0xCC, 0xDD}},
+        {"nothing at an unmapped address", 0x9000, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        emu::SandboxMemory mem;
+        mem.add_map(0x1000, emu::kMemRead | emu::kMemExec, kBacking);  // 8 bytes
+        const std::vector<std::uint8_t> got = mem.read_code(row.at, 15);
+        CHECK(got.size() == row.expected.size());
+        for (std::size_t i = 0; i < got.size() && i < row.expected.size(); ++i) {
+            CAPTURE(i);
+            CHECK(got[i] == row.expected[i]);
+        }
+    }
 }
 
 TEST_CASE("emu SandboxMemory: snapshot and restore roll back overlay writes") {
@@ -122,20 +147,6 @@ TEST_CASE("emu SandboxMemory: snapshot and restore roll back overlay writes") {
     CHECK(mem.read_value(emu::kStackBase + 0x10, 4) == 0x22222222ULL);
     mem.restore(snap);
     CHECK(mem.read_value(emu::kStackBase + 0x10, 4) == 0x11111111ULL);
-}
-
-TEST_CASE("emu SandboxMemory: read_code returns mapped bytes clipped to the map end") {
-    emu::SandboxMemory mem;
-    mem.add_map(0x1000, emu::kMemRead | emu::kMemExec, kBacking);  // 8 bytes
-    const std::vector<std::uint8_t> got = mem.read_code(0x1004, 15);
-    REQUIRE(got.size() == 4);  // only 4 bytes left in the map
-    CHECK(got[0] == 0xAA);
-    CHECK(got[3] == 0xDD);
-}
-
-TEST_CASE("emu SandboxMemory: read_code of an unmapped address is empty") {
-    emu::SandboxMemory mem;
-    CHECK(mem.read_code(0x9000, 15).empty());
 }
 
 TEST_CASE("emu SandboxMemory: the overlay cap drops writes beyond the bound") {
