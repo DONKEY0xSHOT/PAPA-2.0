@@ -10,8 +10,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
+#include <vector>
 
 using papa::rules::ComEntry;
 using papa::rules::ComKind;
@@ -19,63 +22,50 @@ using papa::rules::com_class_table;
 using papa::rules::com_interface_table;
 using papa::rules::lookup_com;
 
-TEST_CASE("com_lookup: ShellDesktop class resolves to its CLSID") {
-    const ComEntry* e = lookup_com(ComKind::kClass, "ShellDesktop");
-    REQUIRE(e != nullptr);
-    CHECK(e->name == "ShellDesktop");
-    CHECK(e->guid_string == "{00021400-0000-0000-c000-000000000046}");
-
-    // First DWORD encoded little-endian: 0x00 0x14 0x02 0x00
-    CHECK(static_cast<std::uint8_t>(e->guid_bytes[0]) == 0x00);
-    CHECK(static_cast<std::uint8_t>(e->guid_bytes[1]) == 0x14);
-    CHECK(static_cast<std::uint8_t>(e->guid_bytes[2]) == 0x02);
-    CHECK(static_cast<std::uint8_t>(e->guid_bytes[3]) == 0x00);
-    // Last byte is the trailing 0x46 from Data4
-    CHECK(static_cast<std::uint8_t>(e->guid_bytes[15]) == 0x46);
-}
-
-TEST_CASE("com_lookup: IUnknown interface resolves") {
-    const ComEntry* e = lookup_com(ComKind::kInterface, "IUnknown");
-    REQUIRE(e != nullptr);
-    CHECK(e->guid_string == "{00000000-0000-0000-c000-000000000046}");
-}
-
-TEST_CASE("com_lookup: classes and interfaces share namespaces but lookup is segregated") {
-    // IUnknown is in the interface table only
-    CHECK(lookup_com(ComKind::kClass,     "IUnknown") == nullptr);
-    CHECK(lookup_com(ComKind::kInterface, "IUnknown") != nullptr);
-    // ShellDesktop is in the class table only
-    CHECK(lookup_com(ComKind::kClass,     "ShellDesktop") != nullptr);
-    CHECK(lookup_com(ComKind::kInterface, "ShellDesktop") == nullptr);
-}
-
-TEST_CASE("com_lookup: unknown name returns nullptr") {
-    CHECK(lookup_com(ComKind::kClass,     "DefinitelyNotARealCom") == nullptr);
-    CHECK(lookup_com(ComKind::kInterface, "AlsoNotReal")           == nullptr);
-}
-
-TEST_CASE("com_lookup: SystemDeviceEnum and WbemLocator resolve correctly") {
-    // These two CLSIDs unblock CAPA rules in the host-interaction/hardware and host-
-    // interaction/wmi namespaces
-    const ComEntry* sde = lookup_com(ComKind::kClass, "SystemDeviceEnum");
-    REQUIRE(sde != nullptr);
-    CHECK(sde->guid_string == "{62be5d10-60eb-11d0-bd3b-00a0c911ce86}");
-    // First DWORD 0x62be5d10 stored little-endian as 10 5d be 62
-    CHECK(static_cast<std::uint8_t>(sde->guid_bytes[0]) == 0x10);
-    CHECK(static_cast<std::uint8_t>(sde->guid_bytes[3]) == 0x62);
-
-    const ComEntry* wl = lookup_com(ComKind::kClass, "WbemLocator");
-    REQUIRE(wl != nullptr);
-    CHECK(wl->guid_string == "{4590f811-1d3a-11d0-891f-00aa004b2e24}");
-    CHECK(static_cast<std::uint8_t>(wl->guid_bytes[0]) == 0x11);
-    CHECK(static_cast<std::uint8_t>(wl->guid_bytes[3]) == 0x45);
+TEST_CASE("com_lookup: a name resolves to its GUID in its own table only") {
+    // SystemDeviceEnum and WbemLocator unblock capa rules in the host-interaction/hardware
+    // and host-interaction/wmi namespaces
+    struct Row {
+        std::string_view                label;
+        ComKind                         kind;
+        std::string_view                name;
+        std::optional<std::string_view> guid;
+        std::string_view                bytes_hex;
+    };
+    const std::vector<Row> rows{
+        // The first DWORD is little-endian, and the last byte is the trailing 0x46 of Data4
+        {"the ShellDesktop class", ComKind::kClass, "ShellDesktop",
+         "{00021400-0000-0000-c000-000000000046}", "0014020000000000c000000000000046"},
+        {"the IUnknown interface", ComKind::kInterface, "IUnknown",
+         "{00000000-0000-0000-c000-000000000046}", "0000000000000000c000000000000046"},
+        {"the SystemDeviceEnum class", ComKind::kClass, "SystemDeviceEnum",
+         "{62be5d10-60eb-11d0-bd3b-00a0c911ce86}", "105dbe62eb60d011bd3b00a0c911ce86"},
+        {"the WbemLocator class", ComKind::kClass, "WbemLocator",
+         "{4590f811-1d3a-11d0-891f-00aa004b2e24}", "11f890453a1dd011891f00aa004b2e24"},
+        {"IUnknown is not a class", ComKind::kClass, "IUnknown", std::nullopt, ""},
+        {"ShellDesktop is not an interface", ComKind::kInterface, "ShellDesktop", std::nullopt, ""},
+        {"an unknown class name", ComKind::kClass, "DefinitelyNotARealCom", std::nullopt, ""},
+        {"an unknown interface name", ComKind::kInterface, "AlsoNotReal", std::nullopt, ""},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const ComEntry* e = lookup_com(row.kind, row.name);
+        CHECK((e != nullptr) == row.guid.has_value());
+        if (e == nullptr || !row.guid.has_value()) { continue; }
+        CHECK(e->name == row.name);
+        CHECK(e->guid_string == *row.guid);
+        CHECK(papa::util::hex_digest(e->guid_bytes) == row.bytes_hex);
+        // The same name is absent from the other table
+        const ComKind other = row.kind == ComKind::kClass ? ComKind::kInterface : ComKind::kClass;
+        CHECK(lookup_com(other, row.name) == nullptr);
+    }
 }
 
 TEST_CASE("com_lookup: every entry keeps the little-endian bytes of its GUID") {
     struct Row {
-        ComKind     kind;
-        const char* name;
-        const char* bytes_hex;
+        ComKind          kind;
+        std::string_view name;
+        std::string_view bytes_hex;
     };
     constexpr std::array<Row, 16> kRows = {{
         {ComKind::kClass,     "BackgroundCopyManager",  "4bd39149a180914283b63328366b9097"},
@@ -100,7 +90,7 @@ TEST_CASE("com_lookup: every entry keeps the little-endian bytes of its GUID") {
         CAPTURE(row.name);
         const ComEntry* e = lookup_com(row.kind, row.name);
         REQUIRE(e != nullptr);
-        CHECK(papa::util::hex_digest(e->guid_bytes) == std::string{row.bytes_hex});
+        CHECK(papa::util::hex_digest(e->guid_bytes) == row.bytes_hex);
     }
 }
 
@@ -133,14 +123,14 @@ TEST_CASE("com_lookup: bytes_le reads either hex case and rejects malformed stri
     CHECK(bytes_le("{DC12A687-737F-11CF-884D-00AA004B2E24}") ==
           bytes_le("{dc12a687-737f-11cf-884d-00aa004b2e24}"));
 
-    constexpr std::array<const char*, 5> kMalformed = {{
+    constexpr std::array<std::string_view, 5> kMalformed = {{
         "dc12a687-737f-11cf-884d-00aa004b2e24",
         "(dc12a687-737f-11cf-884d-00aa004b2e24)",
         "{dc12a687-737f-11cf-884d-00aa004b2e2}",
         "{dc12a687+737f-11cf-884d-00aa004b2e24}",
         "{dc12a687-737f-11cf-884d-00aa004b2e2g}",
     }};
-    for (const char* guid : kMalformed) {
+    for (const std::string_view guid : kMalformed) {
         CAPTURE(guid);
         CHECK_THROWS_AS((void)bytes_le(guid), papa::PapaInvariantError);
     }

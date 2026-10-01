@@ -12,8 +12,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using papa::features::extractors::strings::ExtractedString;
@@ -23,109 +25,95 @@ using papa::features::extractors::strings::is_in_repeat_fill_region;
 
 namespace {
 
-[[nodiscard]] bool contains_value(const std::vector<ExtractedString>& v, std::string_view s) {
-    return std::any_of(v.begin(), v.end(),
-        [&](const ExtractedString& e) { return e.value == s; });
+// The strings an extractor is expected to return, in order
+struct Found {
+    std::string_view value;
+    std::uint64_t    offset;
+};
+
+void check_found(const std::vector<ExtractedString>& got, const std::vector<Found>& want) {
+    CHECK(got.size() == want.size());
+    for (std::size_t i = 0; i < got.size() && i < want.size(); ++i) {
+        CAPTURE(i);
+        CHECK(got[i].value == want[i].value);
+        CHECK(got[i].offset == want[i].offset);
+    }
+}
+
+[[nodiscard]] std::vector<std::byte> bytes_of(std::string_view text) {
+    const auto view = papa_tests::text_bytes(text);
+    return {view.begin(), view.end()};
 }
 
 }  // namespace
 
-TEST_CASE("strings: extract_ascii_strings finds runs above min_len") {
-    const std::string buf = std::string("\x01HelloWorld\x00", 12) + "ab" + std::string("\x00Greetings", 10);
-    auto found = extract_ascii_strings(papa_tests::text_bytes(buf));
-    CHECK(contains_value(found, "HelloWorld"));
-    CHECK(contains_value(found, "Greetings"));
-    // "ab" is below the default min length of 4
-    CHECK_FALSE(contains_value(found, "ab"));
+TEST_CASE("strings: extract_ascii_strings returns each printable run of at least min_len outside fill regions") {
+    struct Row {
+        std::string_view           label;
+        std::vector<std::byte>     buf;
+        std::optional<std::size_t> min_len;
+        std::vector<Found>         found;
+    };
+    const std::vector<Row> rows{
+        // "ab" is below the default min length of 4
+        {"runs above the default min_len",
+         bytes_of(std::string_view{"\x01HelloWorld\x00" "ab\x00Greetings", 24}), std::nullopt,
+         {{"HelloWorld", 1}, {"Greetings", 15}}},
+        {"a custom minimum length", bytes_of(std::string_view{"\x00" "abc\x00", 5}), 3,
+         {{"abc", 1}}},
+        {"a trailing run at the end of the buffer",
+         bytes_of(std::string_view{"\x00" "TailString", 11}), std::nullopt, {{"TailString", 1}}},
+        // The buffer is uniform 'A', so every window centered on a run holds only 0x41
+        {"runs in a fill region are suppressed", std::vector<std::byte>(4096, std::byte{0x41}), 4,
+         {}},
+        {"an empty input", {}, std::nullopt, {}},
+        {"a zero min_len", bytes_of("hi"), 0, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        check_found(row.min_len.has_value() ? extract_ascii_strings(row.buf, *row.min_len)
+                                            : extract_ascii_strings(row.buf),
+                    row.found);
+    }
 }
 
-TEST_CASE("strings: extract_ascii_strings honors a custom minimum length") {
-    const std::string buf = std::string("\x00", 1) + "abc" + std::string("\x00", 1);
-    auto found = extract_ascii_strings(papa_tests::text_bytes(buf), 3);
-    REQUIRE(found.size() == 1);
-    CHECK(found[0].value == "abc");
-    CHECK(found[0].offset == 1);
+TEST_CASE("strings: extract_unicode_strings decodes 2-byte-aligned UTF-16LE runs and stops at a non-printable unit") {
+    struct Row {
+        std::string_view       label;
+        std::vector<std::byte> buf;
+        std::vector<Found>     found;
+    };
+    const std::vector<Row> rows{
+        {"an aligned run", bytes_of(std::string_view{"H\0e\0l\0l\0o\0", 10}), {{"Hello", 0}}},
+        {"a NUL code unit ends a run",
+         bytes_of(std::string_view{"A\0B\0C\0D\0\0\0X\0Y\0Z\0" "1\0", 18}),
+         {{"ABCD", 0}, {"XYZ1", 10}}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        check_found(extract_unicode_strings(row.buf), row.found);
+    }
 }
 
-TEST_CASE("strings: extract_ascii_strings recovers a trailing run at EOB") {
-    const std::string buf = std::string("\x00prefix") + "TailString";
-    auto found = extract_ascii_strings(papa_tests::text_bytes(buf));
-    CHECK(contains_value(found, "TailString"));
-}
-
-TEST_CASE("strings: extract_unicode_strings decodes UTF-16LE") {
-    std::vector<std::byte> buf;
-    // 'X' to delimit
-    buf.push_back(std::byte{0x01});
-    // "Hi" in UTF-16LE
-    buf.push_back(std::byte{'H'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'e'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'l'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'l'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'o'}); buf.push_back(std::byte{0x00});
-    auto found = extract_unicode_strings(buf);
-    // The leading 0x01 byte misaligns the run start by one. The extractor walks in
-    // 2-byte steps from byte 0, so the run is found at 1
-    std::vector<std::byte> aligned;
-    aligned.push_back(std::byte{'H'}); aligned.push_back(std::byte{0x00});
-    aligned.push_back(std::byte{'e'}); aligned.push_back(std::byte{0x00});
-    aligned.push_back(std::byte{'l'}); aligned.push_back(std::byte{0x00});
-    aligned.push_back(std::byte{'l'}); aligned.push_back(std::byte{0x00});
-    aligned.push_back(std::byte{'o'}); aligned.push_back(std::byte{0x00});
-    auto found2 = extract_unicode_strings(aligned);
-    REQUIRE(found2.size() == 1);
-    CHECK(found2[0].value == "Hello");
-    CHECK(found2[0].offset == 0);
-}
-
-TEST_CASE("strings: extract_unicode_strings stops at non-printable code unit") {
-    std::vector<std::byte> buf;
-    buf.push_back(std::byte{'A'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'B'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'C'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'D'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{0x00}); buf.push_back(std::byte{0x00});  // NUL terminator
-    buf.push_back(std::byte{'X'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'Y'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'Z'}); buf.push_back(std::byte{0x00});
-    buf.push_back(std::byte{'1'}); buf.push_back(std::byte{0x00});
-    auto found = extract_unicode_strings(buf);
-    REQUIRE(found.size() == 2);
-    CHECK(found[0].value == "ABCD");
-    CHECK(found[1].value == "XYZ1");
-}
-
-TEST_CASE("strings: is_in_repeat_fill_region detects all-zero windows") {
-    std::vector<std::byte> buf(4096, std::byte{0x00});
-    CHECK(is_in_repeat_fill_region(buf, 1024));
-}
-
-TEST_CASE("strings: is_in_repeat_fill_region detects all-FF windows") {
-    std::vector<std::byte> buf(4096, std::byte{0xFF});
-    CHECK(is_in_repeat_fill_region(buf, 0));
-    CHECK(is_in_repeat_fill_region(buf, 4095));
-}
-
-TEST_CASE("strings: is_in_repeat_fill_region rejects mixed windows") {
-    std::vector<std::byte> buf(4096, std::byte{0x00});
-    buf[1000] = std::byte{'X'};
-    CHECK_FALSE(is_in_repeat_fill_region(buf, 1024));
-}
-
-TEST_CASE("strings: extract_ascii suppresses runs in fill regions") {
-    // Build a buffer that is mostly 0x41 padding
-    // The printable run inside is suppressed
-    std::vector<std::byte> buf(4096, std::byte{0x41});
-    // The buffer is uniform 'A' so any printable run would normally trigger
-    // But the entire window centered on any offset contains only 0x41
-    auto found = extract_ascii_strings(buf, 4);
-    CHECK(found.empty());
-}
-
-TEST_CASE("strings: extract_ascii_strings rejects empty inputs and zero min_len") {
-    auto found = extract_ascii_strings(std::span<const std::byte>{});
-    CHECK(found.empty());
-    std::vector<std::byte> buf{std::byte{'h'}, std::byte{'i'}};
-    auto none = extract_ascii_strings(buf, 0);
-    CHECK(none.empty());
+TEST_CASE("strings: is_in_repeat_fill_region holds only on a window of one repeated 0x00 or 0xFF byte") {
+    struct Row {
+        std::string_view label;
+        std::byte        fill;
+        bool             poke;
+        std::uint64_t    offset;
+        bool             in_fill;
+    };
+    const std::vector<Row> rows{
+        {"an all-zero window", std::byte{0x00}, false, 1024, true},
+        {"an all-FF window at the start", std::byte{0xFF}, false, 0, true},
+        {"an all-FF window at the end", std::byte{0xFF}, false, 4095, true},
+        // An 'X' at 1000 sits inside the window around 1024
+        {"a mixed window", std::byte{0x00}, true, 1024, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        std::vector<std::byte> buf(4096, row.fill);
+        if (row.poke) { buf[1000] = std::byte{'X'}; }
+        CHECK(is_in_repeat_fill_region(buf, row.offset) == row.in_fill);
+    }
 }
