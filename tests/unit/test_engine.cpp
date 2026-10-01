@@ -15,7 +15,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -25,31 +24,15 @@ using namespace papa;
 using namespace papa::engine;
 using namespace papa::features;
 
+using papa_tests::feat;
+using papa_tests::feature_set;
+using papa_tests::leaf;
+using papa_tests::va;
+
 namespace {
 
-template <typename T, typename... Args>
-FeaturePtr make_feat(Args&&... args) {
-    return std::make_shared<const T>(std::forward<Args>(args)...);
-}
-
-std::unique_ptr<Statement> leaf(FeaturePtr f) {
-    return std::make_unique<FeatureStatement>(std::move(f));
-}
-
 std::unique_ptr<Statement> api_leaf(std::string name) {
-    return leaf(make_feat<Api>(std::move(name)));
-}
-
-Address va(std::uint64_t v) {
-    return Address{AbsoluteVirtualAddress{v}};
-}
-
-FeatureSet fs_with(std::initializer_list<std::pair<FeaturePtr, Address>> items) {
-    FeatureSet out;
-    for (const auto& [f, a] : items) {
-        out.add(f, a);
-    }
-    return out;
+    return leaf(feat<Api>(std::move(name)));
 }
 
 }  // namespace
@@ -64,9 +47,9 @@ TEST_CASE("And: empty children succeed vacuously") {
 }
 
 TEST_CASE("And: all-true children succeed") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("a")), va(0x1)},
-        {make_feat<Api>(std::string("b")), va(0x2)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("a")), va(0x1)},
+        {feat<Api>(std::string("b")), va(0x2)},
     });
 
     std::vector<std::unique_ptr<Statement>> kids;
@@ -80,8 +63,8 @@ TEST_CASE("And: all-true children succeed") {
 }
 
 TEST_CASE("And: any-false fails and short-circuits") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("a")), va(0x1)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("a")), va(0x1)},
     });
 
     std::vector<std::unique_ptr<Statement>> kids;
@@ -101,8 +84,8 @@ TEST_CASE("And: any-false fails and short-circuits") {
 }
 
 TEST_CASE("Or: first-true short-circuits") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("hit")), va(0x1)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("hit")), va(0x1)},
     });
 
     std::vector<std::unique_ptr<Statement>> kids;
@@ -128,8 +111,8 @@ TEST_CASE("Or: all-false fails with full child list") {
 }
 
 TEST_CASE("Not negates its single child") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("x")), va(0x1)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("x")), va(0x1)},
     });
 
     Not present{api_leaf("x")};
@@ -153,10 +136,10 @@ TEST_CASE("Some: count == 0 is the optional idiom and is always true") {
 }
 
 TEST_CASE("Some: count == 2 requires at least two true children") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("a")), va(0x1)},
-        {make_feat<Api>(std::string("b")), va(0x2)},
-        {make_feat<Api>(std::string("c")), va(0x3)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("a")), va(0x1)},
+        {feat<Api>(std::string("b")), va(0x2)},
+        {feat<Api>(std::string("c")), va(0x3)},
     });
 
     // Exactly two matches of three must succeed
@@ -178,7 +161,7 @@ TEST_CASE("Some: count == 2 requires at least two true children") {
 
 TEST_CASE("Range: min == 0 absent feature is vacuously true with empty locations") {
     // Critical CAPA edge case, a zero minimum count holds when the feature is absent
-    auto fp = make_feat<Api>(std::string("never-seen"));
+    auto fp = feat<Api>(std::string("never-seen"));
     Range r{fp, /*min=*/0, /*max=*/0xFFFF};
 
     auto result = r.evaluate(FeatureSet{}, false);
@@ -187,10 +170,10 @@ TEST_CASE("Range: min == 0 absent feature is vacuously true with empty locations
 }
 
 TEST_CASE("Range: min == 0 with cnt > 0 checks the upper bound") {
-    auto fp = make_feat<Api>(std::string("x"));
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("x")), va(0x1)},
-        {make_feat<Api>(std::string("x")), va(0x2)},
+    auto fp = feat<Api>(std::string("x"));
+    auto fs = feature_set({
+        {feat<Api>(std::string("x")), va(0x1)},
+        {feat<Api>(std::string("x")), va(0x2)},
     });
 
     Range in_range{fp, 0, 2};
@@ -201,9 +184,9 @@ TEST_CASE("Range: min == 0 with cnt > 0 checks the upper bound") {
 }
 
 TEST_CASE("Range: min > 0 with insufficient count fails") {
-    auto fp = make_feat<Api>(std::string("x"));
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("x")), va(0x1)},
+    auto fp = feat<Api>(std::string("x"));
+    auto fs = feature_set({
+        {feat<Api>(std::string("x")), va(0x1)},
     });
 
     Range need_two{fp, 2, 10};
@@ -224,14 +207,14 @@ TEST_CASE("Subscope evaluation throws PapaInvariantError") {
 }
 
 TEST_CASE("FeatureStatement delegates to the wrapped feature") {
-    auto fs = fs_with({
-        {make_feat<Api>(std::string("hi")), va(0x1)},
+    auto fs = feature_set({
+        {feat<Api>(std::string("hi")), va(0x1)},
     });
 
-    FeatureStatement f{make_feat<Api>(std::string("hi"))};
+    FeatureStatement f{feat<Api>(std::string("hi"))};
     CHECK(f.evaluate(fs, false).success);
 
-    FeatureStatement g{make_feat<Api>(std::string("bye"))};
+    FeatureStatement g{feat<Api>(std::string("bye"))};
     CHECK_FALSE(g.evaluate(fs, false).success);
 }
 
@@ -247,9 +230,9 @@ TEST_CASE("Each statement reports its kind, and Some with count 0 is optional") 
     const Not              not_st{api_leaf("a")};
     const Some             some_st{2, {}};
     const Some             optional_st{0, {}};
-    const Range            range_st{make_feat<Api>(std::string("a")), 1, 2};
+    const Range            range_st{feat<Api>(std::string("a")), 1, 2};
     const Subscope         subscope_st{rules::Scope::kBasicBlock, api_leaf("a")};
-    const FeatureStatement feature_st{make_feat<Api>(std::string("a"))};
+    const FeatureStatement feature_st{feat<Api>(std::string("a"))};
 
     CHECK(and_st.kind() == StatementKind::kAnd);
     CHECK(or_st.kind() == StatementKind::kOr);
@@ -272,7 +255,7 @@ TEST_SUITE("engine.match") {
 TEST_CASE("index_rule_matches adds the rule name and each namespace level") {
     auto fs = FeatureSet{};
     auto inner = std::make_unique<FeatureStatement>(
-        make_feat<Api>(std::string("anything")));
+        feat<Api>(std::string("anything")));
     const auto r = papa_tests::make_rule(
         "my-rule",
         std::string("foo/bar/baz"),
@@ -305,7 +288,7 @@ TEST_CASE("index_rule_matches adds the rule name and each namespace level") {
 TEST_CASE("Rule without namespace only injects the rule name") {
     FeatureSet fs;
     auto inner = std::make_unique<FeatureStatement>(
-        make_feat<Api>(std::string("x")));
+        feat<Api>(std::string("x")));
     const auto r = papa_tests::make_rule(
         "no-namespace",
         std::nullopt,
@@ -320,14 +303,14 @@ TEST_CASE("Rule without namespace only injects the rule name") {
 TEST_CASE("match walks topologically ordered rules and publishes MatchedRule features") {
     // Build a feature set and two rules, where rule-2 depends on rule-1 via match
     FeatureSet fs0;
-    fs0.add(make_feat<Api>(std::string("CreateFile")), va(0x1000));
+    fs0.add(feat<Api>(std::string("CreateFile")), va(0x1000));
 
     // Rule 1: matches "api: CreateFile"
     auto rule1 = papa_tests::make_rule(
         "matches-createfile",
         std::nullopt,
         rules::Scope::kFile,
-        std::make_unique<FeatureStatement>(make_feat<Api>(std::string("CreateFile"))));
+        std::make_unique<FeatureStatement>(feat<Api>(std::string("CreateFile"))));
 
     // Rule 2: matches only if Rule 1 has matched
     // Uses "match: matches-createfile"
@@ -336,7 +319,7 @@ TEST_CASE("match walks topologically ordered rules and publishes MatchedRule fea
         std::nullopt,
         rules::Scope::kFile,
         std::make_unique<FeatureStatement>(
-            make_feat<MatchedRule>(std::string("matches-createfile"))));
+            feat<MatchedRule>(std::string("matches-createfile"))));
 
     const std::array<const rules::Rule*, 2> topo{rule1.get(), rule2.get()};
 
@@ -356,7 +339,7 @@ TEST_CASE("match stops early on rules that cannot succeed") {
         "never-matches",
         std::nullopt,
         rules::Scope::kFile,
-        std::make_unique<FeatureStatement>(make_feat<Api>(std::string("absent"))));
+        std::make_unique<FeatureStatement>(feat<Api>(std::string("absent"))));
 
     const std::array<const rules::Rule*, 1> topo{rule.get()};
     auto [fs_out, matches] = match(topo, FeatureSet{}, va(0x0));

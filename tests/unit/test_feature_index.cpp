@@ -10,10 +10,11 @@
 #include "papa/rules/feature_index.h"
 #include "papa/rules/rule.h"
 
+#include "test_support.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -25,56 +26,14 @@ namespace {
 using namespace papa;
 using features::FeaturePtr;
 using StatementPtr = std::unique_ptr<engine::Statement>;
-
-constexpr std::size_t kMany = std::numeric_limits<std::size_t>::max();
-
-[[nodiscard]] StatementPtr node(StatementPtr st) { return st; }
-
-[[nodiscard]] StatementPtr node(const FeaturePtr& f) {
-    return std::make_unique<engine::FeatureStatement>(f);
-}
-
-template <typename... Kids>
-[[nodiscard]] std::vector<StatementPtr> kids(Kids&&... k) {
-    std::vector<StatementPtr> out;
-    (out.push_back(node(std::forward<Kids>(k))), ...);
-    return out;
-}
-
-// Builders named after the rule keywords so each sample rule reads like its YAML
-// Not all_of and any_of, since ADL would hand three-argument calls to the std algorithms
-template <typename... Kids>
-[[nodiscard]] StatementPtr all(Kids&&... k) {
-    return std::make_unique<engine::And>(kids(std::forward<Kids>(k)...));
-}
-
-template <typename... Kids>
-[[nodiscard]] StatementPtr any(Kids&&... k) {
-    return std::make_unique<engine::Or>(kids(std::forward<Kids>(k)...));
-}
-
-template <typename... Kids>
-[[nodiscard]] StatementPtr at_least(std::size_t n, Kids&&... k) {
-    return std::make_unique<engine::Some>(n, kids(std::forward<Kids>(k)...));
-}
-
-template <typename... Kids>
-[[nodiscard]] StatementPtr opt(Kids&&... k) {
-    return at_least(0, std::forward<Kids>(k)...);
-}
-
-template <typename Kid>
-[[nodiscard]] StatementPtr negate(Kid&& k) {
-    return std::make_unique<engine::Not>(node(std::forward<Kid>(k)));
-}
-
-[[nodiscard]] StatementPtr count(const FeaturePtr& f, std::size_t min) {
-    return std::make_unique<engine::Range>(f, min, kMany);
-}
-
-[[nodiscard]] features::Address at(std::uint64_t va) {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
+using papa_tests::all;
+using papa_tests::any;
+using papa_tests::at_least;
+using papa_tests::count;
+using papa_tests::feature_set;
+using papa_tests::negate;
+using papa_tests::opt;
+using papa_tests::va;
 
 // Ten features small enough to enumerate every subset
 struct Universe {
@@ -129,12 +88,6 @@ struct Universe {
                        [name](const rules::Rule* r) { return r->name() == name; });
 }
 
-[[nodiscard]] features::FeatureSet only(const FeaturePtr& f) {
-    features::FeatureSet fs;
-    fs.add(f, at(0x1000));
-    return fs;
-}
-
 }  // namespace
 
 TEST_CASE("feature_index: select keeps every rule whose probe succeeds, in order") {
@@ -152,8 +105,8 @@ TEST_CASE("feature_index: select keeps every rule whose probe succeeds, in order
         for (std::size_t bit = 0; bit < universe.size(); ++bit) {
             if ((mask & (std::size_t{1} << bit)) == 0U) { continue; }
             // Two sites so count(min 2) can succeed
-            fs.add(universe[bit], at(0x1000));
-            fs.add(universe[bit], at(0x2000));
+            fs.add(universe[bit], va(0x1000));
+            fs.add(universe[bit], va(0x2000));
         }
         index.select(fs, selected);
         CAPTURE(mask);
@@ -174,20 +127,20 @@ TEST_CASE("feature_index: prunes by each rule's most selective required feature"
     index.build(order);
     std::vector<const rules::Rule*> selected;
 
-    index.select(only(u.mov), selected);
+    index.select(feature_set({{u.mov, va(0x1000)}}), selected);
     CHECK_FALSE(selects(selected, "and-api-mnemonic"));   // api A is required too
     CHECK_FALSE(selects(selected, "or-apis"));            // neither api is present
 
-    index.select(only(u.api_b), selected);
+    index.select(feature_set({{u.api_b, va(0x1000)}}), selected);
     CHECK(selects(selected, "or-apis"));
 
-    index.select(only(u.loop), selected);
+    index.select(feature_set({{u.loop, va(0x1000)}}), selected);
     CHECK(selects(selected, "and-optional"));   // an optional block requires nothing
 
-    index.select(only(u.api_c), selected);
+    index.select(feature_set({{u.api_c, va(0x1000)}}), selected);
     CHECK_FALSE(selects(selected, "and-optional"));   // indexed on loop, not the optional api
 
-    index.select(only(u.api_a), selected);
+    index.select(feature_set({{u.api_a, va(0x1000)}}), selected);
     CHECK_FALSE(selects(selected, "and-or-min"));   // or scores its weakest branch, so loop wins
     CHECK_FALSE(selects(selected, "and-or-tie"));   // equal scores prefer fewer features, so C
 

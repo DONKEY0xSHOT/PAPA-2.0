@@ -8,6 +8,8 @@
 #include "papa/features/insn.h"
 #include "papa/rules/optimizer.h"
 
+#include "test_support.h"
+
 #include <memory>
 #include <utility>
 #include <vector>
@@ -15,10 +17,6 @@
 namespace {
 
 using namespace papa;
-
-[[nodiscard]] std::unique_ptr<engine::Statement> feat(features::FeaturePtr f) {
-    return std::make_unique<engine::FeatureStatement>(std::move(f));
-}
 
 [[nodiscard]] features::FeatureTag tag_of(const engine::Statement& s) {
     return static_cast<const engine::FeatureStatement&>(s).feature()->tag();
@@ -28,9 +26,9 @@ using namespace papa;
 
 TEST_CASE("optimizer: sorts and/or children cheap-first like capa") {
     std::vector<std::unique_ptr<engine::Statement>> kids;
-    kids.push_back(feat(std::make_shared<features::Regex>("/foo/")));      // cost 2
-    kids.push_back(feat(std::make_shared<features::Os>("windows")));       // cost 0
-    kids.push_back(feat(std::make_shared<features::Api>("CreateFileA")));  // cost 1
+    kids.push_back(papa_tests::leaf(std::make_shared<features::Regex>("/foo/")));      // cost 2
+    kids.push_back(papa_tests::leaf(std::make_shared<features::Os>("windows")));       // cost 0
+    kids.push_back(papa_tests::leaf(std::make_shared<features::Api>("CreateFileA")));  // cost 1
     engine::And node(std::move(kids));
 
     papa::rules::optimize(node);
@@ -44,9 +42,9 @@ TEST_CASE("optimizer: sorts and/or children cheap-first like capa") {
 
 TEST_CASE("optimizer: stable among equal-cost children and recurses through not") {
     std::vector<std::unique_ptr<engine::Statement>> inner;
-    inner.push_back(feat(std::make_shared<features::Regex>("/z/")));        // cost 2
-    inner.push_back(feat(std::make_shared<features::Api>("A")));            // cost 1
-    inner.push_back(feat(std::make_shared<features::Mnemonic>("call")));    // cost 1
+    inner.push_back(papa_tests::leaf(std::make_shared<features::Regex>("/z/")));        // cost 2
+    inner.push_back(papa_tests::leaf(std::make_shared<features::Api>("A")));            // cost 1
+    inner.push_back(papa_tests::leaf(std::make_shared<features::Mnemonic>("call")));    // cost 1
     engine::Not node(std::make_unique<engine::And>(std::move(inner)));
 
     papa::rules::optimize(node);

@@ -14,7 +14,6 @@
 #include "papa/features/extractors/pefile_extractor.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
-#include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 
@@ -31,12 +30,6 @@ namespace {
 
 const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
-[[nodiscard]] std::unique_ptr<papa::rules::Rule> parse_rule(std::string_view yaml) {
-    auto r = papa::rules::RuleParser::parse(yaml, "test.yml");
-    REQUIRE(r);
-    return std::move(*r);
-}
-
 }  // namespace
 
 TEST_CASE("capabilities: find_file_capabilities matches a section feature on notepad") {
@@ -48,18 +41,16 @@ TEST_CASE("capabilities: find_file_capabilities matches a section feature on not
     REQUIRE(img.has_value());
     papa::features::extractors::PefileFeatureExtractor extractor(*img);
 
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: has-text-section\n"
         "    scope: file\n"
         "  features:\n"
-        "    - section: .text\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "    - section: .text\n"
+    });
 
-    auto file_caps = papa::capabilities::find_file_capabilities(*rs, extractor);
+    auto file_caps = papa::capabilities::find_file_capabilities(rs, extractor);
     REQUIRE(file_caps);
     CHECK(file_caps->matches.count("has-text-section") == 1);
     CHECK(file_caps->feature_count > 0U);
@@ -75,53 +66,47 @@ TEST_CASE("capabilities: has_static_limitation only fires on the limitation name
     papa::features::extractors::PefileFeatureExtractor extractor(*img);
 
     SUBCASE("regular rule does not trigger limitation") {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(
+        const auto rs = papa_tests::ruleset({
             "rule:\n"
             "  meta:\n"
             "    name: r1\n"
             "    scope: file\n"
             "  features:\n"
-            "    - section: .text\n"));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        auto caps = papa::capabilities::find_file_capabilities(*rs, extractor);
+            "    - section: .text\n"
+        });
+        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
         REQUIRE(caps);
-        CHECK_FALSE(papa::capabilities::has_static_limitation(*rs, *caps));
+        CHECK_FALSE(papa::capabilities::has_static_limitation(rs, *caps));
     }
 
     SUBCASE("rule under internal/limitation/static triggers limitation") {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(
+        const auto rs = papa_tests::ruleset({
             "rule:\n"
             "  meta:\n"
             "    name: limit-rule\n"
             "    namespace: internal/limitation/static/dotnet\n"
             "    scope: file\n"
             "  features:\n"
-            "    - section: .text\n"));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        auto caps = papa::capabilities::find_file_capabilities(*rs, extractor);
+            "    - section: .text\n"
+        });
+        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
         REQUIRE(caps);
-        CHECK(papa::capabilities::has_static_limitation(*rs, *caps));
+        CHECK(papa::capabilities::has_static_limitation(rs, *caps));
     }
 
     SUBCASE("similar but distinct namespace prefix does not trigger") {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(
+        const auto rs = papa_tests::ruleset({
             "rule:\n"
             "  meta:\n"
             "    name: not-limit\n"
             "    namespace: internal/limitation/staticy-thing\n"
             "    scope: file\n"
             "  features:\n"
-            "    - section: .text\n"));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        auto caps = papa::capabilities::find_file_capabilities(*rs, extractor);
+            "    - section: .text\n"
+        });
+        auto caps = papa::capabilities::find_file_capabilities(rs, extractor);
         REQUIRE(caps);
-        CHECK_FALSE(papa::capabilities::has_static_limitation(*rs, *caps));
+        CHECK_FALSE(papa::capabilities::has_static_limitation(rs, *caps));
     }
 }
 
@@ -139,25 +124,22 @@ TEST_CASE("capabilities: find_static_capabilities runs end-to-end on notepad") {
     papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
 
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: has-mov\n"
         "    scope: function\n"
         "  features:\n"
-        "    - mnemonic: mov\n"));
-    rules.push_back(parse_rule(
+        "    - mnemonic: mov\n",
         "rule:\n"
         "  meta:\n"
         "    name: has-text\n"
         "    scope: file\n"
         "  features:\n"
-        "    - section: .text\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "    - section: .text\n"
+    });
 
-    auto caps = papa::capabilities::static_::find_static_capabilities(*rs, extractor);
+    auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
     REQUIRE(caps);
     CHECK(caps->all_matches.count("has-text") == 1);
     CHECK(caps->all_matches.count("has-mov")  == 1);
@@ -165,49 +147,6 @@ TEST_CASE("capabilities: find_static_capabilities runs end-to-end on notepad") {
 }
 
 namespace {
-
-// Minimal extractor that yields exactly the file features a test requests. The gate
-// only reads globals and file features, so the per-function half is empty
-class FakeFileExtractor final : public papa::features::extractors::StaticFeatureExtractor {
-public:
-    explicit FakeFileExtractor(std::vector<papa::features::FeaturePtr> feats)
-        : feats_(std::move(feats)) {}
-
-    [[nodiscard]] papa::features::Address get_base_address() const override {
-        return papa::features::Address{papa::features::AbsoluteVirtualAddress{0x400000}};
-    }
-    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
-    extract_global_features() const override { return {}; }
-
-    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
-    extract_file_features() const override {
-        std::vector<papa::features::extractors::FeatureWithAddress> out;
-        const papa::features::Address a{papa::features::AbsoluteVirtualAddress{0x400000}};
-        out.reserve(feats_.size());
-        for (const auto& f : feats_) { out.emplace_back(f, a); }
-        return out;
-    }
-
-    [[nodiscard]] std::vector<papa::features::extractors::FunctionHandle>
-    get_functions() const override { return {}; }
-    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
-    extract_function_features(const papa::features::extractors::FunctionHandle&) const override { return {}; }
-    [[nodiscard]] std::vector<papa::features::extractors::BBHandle>
-    get_basic_blocks(const papa::features::extractors::FunctionHandle&) const override { return {}; }
-    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
-    extract_basic_block_features(const papa::features::extractors::FunctionHandle&,
-                                 const papa::features::extractors::BBHandle&) const override { return {}; }
-    [[nodiscard]] std::vector<papa::features::extractors::InsnHandle>
-    get_instructions(const papa::features::extractors::FunctionHandle&,
-                     const papa::features::extractors::BBHandle&) const override { return {}; }
-    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
-    extract_insn_features(const papa::features::extractors::FunctionHandle&,
-                          const papa::features::extractors::BBHandle&,
-                          const papa::features::extractors::InsnHandle&) const override { return {}; }
-
-private:
-    std::vector<papa::features::FeaturePtr> feats_;
-};
 
 [[nodiscard]] bool gate_contains(const std::vector<const papa::rules::Rule*>& gate,
                                  std::string_view name) {
@@ -218,32 +157,25 @@ private:
 // A file-scope rule keyed on a single section name, in the given namespace
 [[nodiscard]] std::string section_rule(std::string_view name, std::string_view ns,
                                        std::string_view section) {
-    return std::string("rule:\n  meta:\n    name: ").append(name)
-        .append("\n    namespace: ").append(ns)
-        .append("\n    scopes:\n      static: file\n      dynamic: unsupported\n")
-        .append("  features:\n    - section: ").append(section).append("\n");
+    return papa_tests::rule_yaml(name, "file", {"section: " + std::string(section)}, ns);
 }
 
 // A file-scope rule that fires when the referenced rule or namespace matched
 [[nodiscard]] std::string match_rule(std::string_view name, std::string_view ns,
                                      std::string_view ref) {
-    return std::string("rule:\n  meta:\n    name: ").append(name)
-        .append("\n    namespace: ").append(ns)
-        .append("\n    scopes:\n      static: file\n      dynamic: unsupported\n")
-        .append("  features:\n    - match: ").append(ref).append("\n");
+    return papa_tests::rule_yaml(name, "file", {"match: " + std::string(ref)}, ns);
 }
 
 }  // namespace
 
 TEST_CASE("limitation gate: closure follows a reference by rule name") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("packer-sig", "anti-analysis/packer/upx", ".upx0")));
-    rules.push_back(parse_rule(match_rule("lim", "internal/limitation/static", "packer-sig")));
-    rules.push_back(parse_rule(section_rule("unrelated", "host-interaction/file", ".text")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+    const auto rs = papa_tests::ruleset({
+        section_rule("packer-sig", "anti-analysis/packer/upx", ".upx0"),
+        match_rule("lim", "internal/limitation/static", "packer-sig"),
+        section_rule("unrelated", "host-interaction/file", ".text")
+    });
 
-    const auto gate = papa::capabilities::limitation_gate_rules(*rs);
+    const auto gate = papa::capabilities::limitation_gate_rules(rs);
     CHECK(gate_contains(gate, "lim"));
     CHECK(gate_contains(gate, "packer-sig"));
     CHECK_FALSE(gate_contains(gate, "unrelated"));
@@ -252,16 +184,15 @@ TEST_CASE("limitation gate: closure follows a reference by rule name") {
 TEST_CASE("limitation gate: closure expands a namespace reference to every rule beneath it") {
     // This is how every real limitation rule is written, so getting it wrong
     // would silently stop packed samples from being detected
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("upx", "anti-analysis/packer/upx", ".upx0")));
-    rules.push_back(parse_rule(section_rule("aspack", "anti-analysis/packer/aspack", ".aspack")));
-    rules.push_back(parse_rule(section_rule("deep", "anti-analysis/packer/x/y/z", ".deep")));
-    rules.push_back(parse_rule(section_rule("sibling", "anti-analysis/obfuscation", ".obf")));
-    rules.push_back(parse_rule(match_rule("lim", "internal/limitation/static", "anti-analysis/packer")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+    const auto rs = papa_tests::ruleset({
+        section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
+        section_rule("aspack", "anti-analysis/packer/aspack", ".aspack"),
+        section_rule("deep", "anti-analysis/packer/x/y/z", ".deep"),
+        section_rule("sibling", "anti-analysis/obfuscation", ".obf"),
+        match_rule("lim", "internal/limitation/static", "anti-analysis/packer")
+    });
 
-    const auto gate = papa::capabilities::limitation_gate_rules(*rs);
+    const auto gate = papa::capabilities::limitation_gate_rules(rs);
     CHECK(gate_contains(gate, "upx"));
     CHECK(gate_contains(gate, "aspack"));
     CHECK(gate_contains(gate, "deep"));      // nested below the referenced prefix
@@ -269,28 +200,26 @@ TEST_CASE("limitation gate: closure expands a namespace reference to every rule 
 }
 
 TEST_CASE("limitation gate: closure is transitive") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("leaf", "a/leaf", ".leaf")));
-    rules.push_back(parse_rule(match_rule("mid", "a/mid", "leaf")));
-    rules.push_back(parse_rule(match_rule("lim", "internal/limitation/static", "mid")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+    const auto rs = papa_tests::ruleset({
+        section_rule("leaf", "a/leaf", ".leaf"),
+        match_rule("mid", "a/mid", "leaf"),
+        match_rule("lim", "internal/limitation/static", "mid")
+    });
 
-    const auto gate = papa::capabilities::limitation_gate_rules(*rs);
+    const auto gate = papa::capabilities::limitation_gate_rules(rs);
     CHECK(gate_contains(gate, "lim"));
     CHECK(gate_contains(gate, "mid"));
     CHECK(gate_contains(gate, "leaf"));
 }
 
 TEST_CASE("limitation gate: closure keeps topological order") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(match_rule("lim", "internal/limitation/static", "mid")));
-    rules.push_back(parse_rule(match_rule("mid", "a/mid", "leaf")));
-    rules.push_back(parse_rule(section_rule("leaf", "a/leaf", ".leaf")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+    const auto rs = papa_tests::ruleset({
+        match_rule("lim", "internal/limitation/static", "mid"),
+        match_rule("mid", "a/mid", "leaf"),
+        section_rule("leaf", "a/leaf", ".leaf")
+    });
 
-    const auto gate = papa::capabilities::limitation_gate_rules(*rs);
+    const auto gate = papa::capabilities::limitation_gate_rules(rs);
     // A dependency has to be evaluated before the rule that references it or
     // the injected match feature would not be visible yet
     std::size_t i_leaf = 0, i_mid = 0, i_lim = 0;
@@ -304,33 +233,29 @@ TEST_CASE("limitation gate: closure keeps topological order") {
 }
 
 TEST_CASE("limitation gate: a corpus with no limitation rule produces an empty gate") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("a", "host-interaction/file", ".text")));
-    rules.push_back(parse_rule(section_rule("b", "anti-analysis/packer/upx", ".upx0")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    CHECK(papa::capabilities::limitation_gate_rules(*rs).empty());
+    const auto rs = papa_tests::ruleset({
+        section_rule("a", "host-interaction/file", ".text"),
+        section_rule("b", "anti-analysis/packer/upx", ".upx0")
+    });
+    CHECK(papa::capabilities::limitation_gate_rules(rs).empty());
 }
 
 TEST_CASE("limitation gate: a near-miss namespace is not treated as a limitation") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("x", "internal/limitation/static_other", ".text")));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    CHECK(papa::capabilities::limitation_gate_rules(*rs).empty());
+    const auto rs = papa_tests::ruleset({
+        section_rule("x", "internal/limitation/static_other", ".text")
+    });
+    CHECK(papa::capabilities::limitation_gate_rules(rs).empty());
 }
 
 TEST_CASE("limitation gate: verdict always agrees with the full file-scope pass") {
     // The gate exists only to answer has_static_limitation
     auto build = [] {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(section_rule("upx", "anti-analysis/packer/upx", ".upx0")));
-        rules.push_back(parse_rule(section_rule("noise1", "host-interaction/file", ".text")));
-        rules.push_back(parse_rule(section_rule("noise2", "communication/http", ".data")));
-        rules.push_back(parse_rule(match_rule("lim", "internal/limitation/static", "anti-analysis/packer")));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        return std::move(*rs);
+        return papa_tests::ruleset({
+            section_rule("upx", "anti-analysis/packer/upx", ".upx0"),
+            section_rule("noise1", "host-interaction/file", ".text"),
+            section_rule("noise2", "communication/http", ".data"),
+            match_rule("lim", "internal/limitation/static", "anti-analysis/packer")
+        });
     };
 
     const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
@@ -352,7 +277,7 @@ TEST_CASE("limitation gate: verdict always agrees with the full file-scope pass"
     for (const auto& c : cases) {
         CAPTURE(c.label);
         const auto rs = build();
-        FakeFileExtractor extractor(c.feats);
+        papa_tests::FakeExtractor extractor(c.feats);
 
         auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
         REQUIRE(gate_caps);
@@ -368,9 +293,8 @@ TEST_CASE("limitation gate: verdict always agrees with the full file-scope pass"
 
 TEST_CASE("limitation gate: a reference under not: is still in the closure") {
     // Monotonicity does not hold through a negation
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(section_rule("decoy", "misc/decoy", ".text")));
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
+        section_rule("decoy", "misc/decoy", ".text"),
         "rule:\n"
         "  meta:\n"
         "    name: lim-not\n"
@@ -382,21 +306,19 @@ TEST_CASE("limitation gate: a reference under not: is still in the closure") {
         "    - and:\n"
         "      - section: .data\n"
         "      - not:\n"
-        "        - match: decoy\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "        - match: decoy\n"
+    });
 
-    const auto gate = papa::capabilities::limitation_gate_rules(*rs);
+    const auto gate = papa::capabilities::limitation_gate_rules(rs);
     CHECK(gate_contains(gate, "lim-not"));
     CHECK(gate_contains(gate, "decoy"));
 }
 
 TEST_CASE("limitation gate: verdict agrees with the full pass through a negation") {
     auto build = [] {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(section_rule("decoy", "misc/decoy", ".text")));
-        rules.push_back(parse_rule(section_rule("noise", "host-interaction/file", ".rsrc")));
-        rules.push_back(parse_rule(
+        return papa_tests::ruleset({
+            section_rule("decoy", "misc/decoy", ".text"),
+            section_rule("noise", "host-interaction/file", ".rsrc"),
             "rule:\n"
             "  meta:\n"
             "    name: lim-not\n"
@@ -408,10 +330,8 @@ TEST_CASE("limitation gate: verdict agrees with the full pass through a negation
             "    - and:\n"
             "      - section: .data\n"
             "      - not:\n"
-            "        - match: decoy\n"));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        return std::move(*rs);
+            "        - match: decoy\n"
+        });
     };
 
     const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
@@ -436,7 +356,7 @@ TEST_CASE("limitation gate: verdict agrees with the full pass through a negation
     for (const auto& c : cases) {
         CAPTURE(c.label);
         const auto rs = build();
-        FakeFileExtractor extractor(c.feats);
+        papa_tests::FakeExtractor extractor(c.feats);
         auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
         REQUIRE(gate_caps);
         auto full_caps = papa::capabilities::find_file_capabilities(rs, extractor);
@@ -450,12 +370,10 @@ TEST_CASE("limitation gate: verdict agrees with the full pass through a negation
 
 TEST_CASE("limitation gate: a limitation rule with no match reference still fires") {
     auto build = [] {
-        std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-        rules.push_back(parse_rule(section_rule("noise", "host-interaction/file", ".text")));
-        rules.push_back(parse_rule(section_rule("lim-direct", "internal/limitation/static", ".packed")));
-        auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-        REQUIRE(rs);
-        return std::move(*rs);
+        return papa_tests::ruleset({
+            section_rule("noise", "host-interaction/file", ".text"),
+            section_rule("lim-direct", "internal/limitation/static", ".packed")
+        });
     };
     const auto section = [](std::string_view n) -> papa::features::FeaturePtr {
         return std::make_shared<const papa::features::Section>(std::string(n));
@@ -469,7 +387,7 @@ TEST_CASE("limitation gate: a limitation rule with no match reference still fire
         const std::vector<papa::features::FeaturePtr> feats =
             packed ? std::vector<papa::features::FeaturePtr>{section(".text"), section(".packed")}
                    : std::vector<papa::features::FeaturePtr>{section(".text")};
-        FakeFileExtractor extractor(feats);
+        papa_tests::FakeExtractor extractor(feats);
 
         auto gate_caps = papa::capabilities::find_limitation_capabilities(rs, extractor);
         REQUIRE(gate_caps);

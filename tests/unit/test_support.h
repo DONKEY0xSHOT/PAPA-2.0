@@ -1,14 +1,23 @@
 #pragma once
 
+#include <ostream>
+
+#include "doctest.h"
+
 #include "papa/constants.h"
 #include "papa/engine.h"
 #include "papa/exceptions.h"
+#include "papa/features/address.h"
+#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_tree.h"
+#include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
+#include "papa/rules/ruleset.h"
 #include "papa/rules/scope.h"
 
 #include <Zydis/Zydis.h>
@@ -17,7 +26,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -111,6 +122,118 @@ function(std::vector<papa::features::extractors::papa_native::BasicBlock> blocks
 single_block_function(std::vector<papa::features::extractors::papa_native::DecodedInsn> insns) {
     const std::uint64_t entry = insns.empty() ? 0U : insns.front().va;
     return function({{entry, std::move(insns)}});
+}
+
+/// The absolute virtual address v
+[[nodiscard]] inline papa::features::Address va(std::uint64_t v) {
+    return papa::features::Address{papa::features::AbsoluteVirtualAddress{v}};
+}
+
+/// A shared feature of type T built from args
+template <typename T, typename... Args>
+[[nodiscard]] papa::features::FeaturePtr feat(Args&&... args) {
+    return std::make_shared<const T>(std::forward<Args>(args)...);
+}
+
+/// A FeatureSet holding each feature at its address
+[[nodiscard]] inline papa::features::FeatureSet feature_set(
+    std::initializer_list<std::pair<papa::features::FeaturePtr, papa::features::Address>> items) {
+    papa::features::FeatureSet out;
+    for (const auto& [f, a] : items) { out.add(f, a); }
+    return out;
+}
+
+/// A statement that holds when f is present
+[[nodiscard]] inline std::unique_ptr<papa::engine::Statement> leaf(papa::features::FeaturePtr f) {
+    return std::make_unique<papa::engine::FeatureStatement>(std::move(f));
+}
+
+namespace detail {
+
+[[nodiscard]] inline std::unique_ptr<papa::engine::Statement>
+node(std::unique_ptr<papa::engine::Statement> st) {
+    return st;
+}
+
+[[nodiscard]] inline std::unique_ptr<papa::engine::Statement>
+node(const papa::features::FeaturePtr& f) {
+    return leaf(f);
+}
+
+template <typename... Kids>
+[[nodiscard]] std::vector<std::unique_ptr<papa::engine::Statement>> kids(Kids&&... k) {
+    std::vector<std::unique_ptr<papa::engine::Statement>> out;
+    (out.push_back(node(std::forward<Kids>(k))), ...);
+    return out;
+}
+
+}  // namespace detail
+
+/// An and: over the children, each a statement or a feature. Named after the rule
+/// keyword rather than all_of, which ADL would resolve to the std algorithm
+template <typename... Kids>
+[[nodiscard]] std::unique_ptr<papa::engine::Statement> all(Kids&&... k) {
+    return std::make_unique<papa::engine::And>(detail::kids(std::forward<Kids>(k)...));
+}
+
+/// An or: over the children, each a statement or a feature
+template <typename... Kids>
+[[nodiscard]] std::unique_ptr<papa::engine::Statement> any(Kids&&... k) {
+    return std::make_unique<papa::engine::Or>(detail::kids(std::forward<Kids>(k)...));
+}
+
+/// An "n or more" over the children, each a statement or a feature
+template <typename... Kids>
+[[nodiscard]] std::unique_ptr<papa::engine::Statement> at_least(std::size_t n, Kids&&... k) {
+    return std::make_unique<papa::engine::Some>(n, detail::kids(std::forward<Kids>(k)...));
+}
+
+/// An optional: block over the children, each a statement or a feature
+template <typename... Kids>
+[[nodiscard]] std::unique_ptr<papa::engine::Statement> opt(Kids&&... k) {
+    return at_least(0, std::forward<Kids>(k)...);
+}
+
+/// A not: around one child, a statement or a feature
+template <typename Kid>
+[[nodiscard]] std::unique_ptr<papa::engine::Statement> negate(Kid&& k) {
+    return std::make_unique<papa::engine::Not>(detail::node(std::forward<Kid>(k)));
+}
+
+/// A count(f) of at least min with no upper bound
+[[nodiscard]] inline std::unique_ptr<papa::engine::Statement>
+count(const papa::features::FeaturePtr& f, std::size_t min) {
+    return std::make_unique<papa::engine::Range>(f, min, std::numeric_limits<std::size_t>::max());
+}
+
+/// The rule parsed from yaml, which must parse
+[[nodiscard]] inline std::unique_ptr<papa::rules::Rule> rule(std::string_view yaml) {
+    auto r = papa::rules::RuleParser::parse(yaml, "test.yml");
+    REQUIRE(r);
+    return std::move(*r);
+}
+
+/// The RuleSet of the rules parsed from yamls, which must parse and link
+[[nodiscard]] inline papa::rules::RuleSet ruleset(std::initializer_list<std::string_view> yamls) {
+    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
+    for (const std::string_view yaml : yamls) { rules.push_back(rule(yaml)); }
+    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
+    REQUIRE(rs);
+    return std::move(*rs);
+}
+
+/// The YAML of a rule with one static scope, a feature list of one entry per line and
+/// an optional namespace
+[[nodiscard]] inline std::string rule_yaml(std::string_view name, std::string_view scope,
+                                           const std::vector<std::string>& features,
+                                           std::string_view ns = {}) {
+    std::string out = "rule:\n  meta:\n    name: ";
+    out.append(name);
+    if (!ns.empty()) { out.append("\n    namespace: ").append(ns); }
+    out.append("\n    scopes:\n      static: ").append(scope);
+    out.append("\n      dynamic: unsupported\n  features:\n");
+    for (const std::string& f : features) { out.append("    - ").append(f).append("\n"); }
+    return out;
 }
 
 /// A rule around stmt with only its name, namespace and static scope set
@@ -358,6 +481,101 @@ public_module(std::string name) {
         const auto it = table.find(b[0]);
         return it == table.end() ? std::vector<const FlirtModule*>{} : it->second;
     };
+}
+
+/// A StaticFeatureExtractor that yields the features it was given. File features sit
+/// at the base 0x400000, and function i at 0x401000 + 0x10 * i with no basic blocks
+class FakeExtractor final : public papa::features::extractors::StaticFeatureExtractor {
+public:
+    static constexpr std::uint64_t kBase          = 0x400000;
+    static constexpr std::uint64_t kFirstFunction = 0x401000;
+
+    explicit FakeExtractor(
+        std::vector<papa::features::FeaturePtr>              file_features,
+        std::vector<std::vector<papa::features::FeaturePtr>> function_features = {})
+        : file_features_(std::move(file_features)),
+          function_features_(std::move(function_features)) {}
+
+    [[nodiscard]] papa::features::Address get_base_address() const override { return va(kBase); }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_global_features() const override { return {}; }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_file_features() const override {
+        return at(file_features_, va(kBase));
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FunctionHandle>
+    get_functions() const override {
+        std::vector<papa::features::extractors::FunctionHandle> out;
+        for (std::size_t i = 0; i < function_features_.size(); ++i) {
+            out.push_back({va(kFirstFunction + 0x10U * i), &function_features_[i]});
+        }
+        return out;
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_function_features(const papa::features::extractors::FunctionHandle& fh) const override {
+        return at(*static_cast<const std::vector<papa::features::FeaturePtr>*>(fh.inner), fh.addr);
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::BBHandle>
+    get_basic_blocks(const papa::features::extractors::FunctionHandle&) const override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_basic_block_features(const papa::features::extractors::FunctionHandle&,
+                                 const papa::features::extractors::BBHandle&) const override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::InsnHandle>
+    get_instructions(const papa::features::extractors::FunctionHandle&,
+                     const papa::features::extractors::BBHandle&) const override {
+        return {};
+    }
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_insn_features(const papa::features::extractors::FunctionHandle&,
+                          const papa::features::extractors::BBHandle&,
+                          const papa::features::extractors::InsnHandle&) const override {
+        return {};
+    }
+
+private:
+    [[nodiscard]] static std::vector<papa::features::extractors::FeatureWithAddress>
+    at(const std::vector<papa::features::FeaturePtr>& feats, const papa::features::Address& a) {
+        std::vector<papa::features::extractors::FeatureWithAddress> out;
+        out.reserve(feats.size());
+        for (const auto& f : feats) { out.emplace_back(f, a); }
+        return out;
+    }
+
+    std::vector<papa::features::FeaturePtr>              file_features_;
+    std::vector<std::vector<papa::features::FeaturePtr>> function_features_;
+};
+
+/// The value of an environment variable, empty when it is unset. MSVC rejects
+/// std::getenv under /W4 /WX
+[[nodiscard]] inline std::string read_env(const char* name) {
+#if defined(_MSC_VER)
+    std::size_t required = 0;
+    if (getenv_s(&required, nullptr, 0, name) != 0 || required == 0) {
+        return {};
+    }
+    std::string buf(required, '\0');
+    if (getenv_s(&required, buf.data(), buf.size(), name) != 0) {
+        return {};
+    }
+    // getenv_s writes a trailing NUL inside the buffer
+    if (!buf.empty() && buf.back() == '\0') { buf.pop_back(); }
+    return buf;
+#else
+    const char* v = std::getenv(name);
+    return v != nullptr ? std::string(v) : std::string{};
+#endif
 }
 
 }  // namespace papa_tests

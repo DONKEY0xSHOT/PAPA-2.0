@@ -16,13 +16,10 @@
 #include "papa/features/feature.h"
 #include "papa/features/insn.h"
 #include "papa/pe/pe_parser.h"
-#include "papa/rules/parser.h"
-#include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -143,24 +140,11 @@ TEST_CASE("pipeline: a rule matches end to end against a synthetic PE") {
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 
     // A minimal function-scope rule over the api feature the call produces
-    const std::string yaml = R"(rule:
-  meta:
-    name: write file synthetic
-    scopes:
-      static: function
-      dynamic: unsupported
-  features:
-    - api: WriteFile
-)";
-    auto parsed = papa::rules::RuleParser::parse(yaml, "synthetic.yml");
-    REQUIRE(parsed.has_value());
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(std::move(*parsed));
-    auto ruleset = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(ruleset.has_value());
+    const auto ruleset = papa_tests::ruleset(
+        {papa_tests::rule_yaml("write file synthetic", "function", {"api: WriteFile"})});
 
     const auto caps = papa::capabilities::static_::find_static_capabilities(
-        *ruleset, extractor);
+        ruleset, extractor);
     REQUIRE(caps.has_value());
 
     const bool matched = caps->all_matches.count("write file synthetic") == 1;
@@ -186,12 +170,9 @@ TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {
     REQUIRE(backend.has_value());
     const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 
-    namespace pf  = papa::features;
-    const auto at = [text](std::uint64_t off) {
-        return pf::Address{pf::AbsoluteVirtualAddress{text + off}};
-    };
-    CHECK(extractor.is_library_function(at(0x04)));
-    CHECK_FALSE(extractor.is_library_function(at(0x00)));
-    CHECK_FALSE(extractor.is_library_function(at(0x02)));
+    namespace pf = papa::features;
+    CHECK(extractor.is_library_function(papa_tests::va(text + 0x04)));
+    CHECK_FALSE(extractor.is_library_function(papa_tests::va(text + 0x00)));
+    CHECK_FALSE(extractor.is_library_function(papa_tests::va(text + 0x02)));
     CHECK_FALSE(extractor.is_library_function(pf::Address{pf::NoAddress{}}));
 }

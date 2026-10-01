@@ -13,7 +13,6 @@
 #include "papa/render/json.h"
 #include "papa/render/result_document.h"
 #include "papa/render/text.h"
-#include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 #include "papa/version.h"
@@ -22,9 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 #include "fixture_paths.h"
@@ -35,37 +32,29 @@ namespace {
 
 const auto kNotepad = papa_tests::fixture_path("notepad.exe");
 
-[[nodiscard]] std::unique_ptr<papa::rules::Rule> parse_rule(std::string_view yaml) {
-    auto r = papa::rules::RuleParser::parse(yaml, "test.yml");
-    REQUIRE(r);
-    return std::move(*r);
-}
-
 }  // namespace
 
 TEST_CASE("render: build_document filters synthetic subscope rules") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: parent-rule\n"
         "    scope: function\n"
         "  features:\n"
         "    - basic block:\n"
-        "      - characteristic: tight loop\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "      - characteristic: tight loop\n"
+    });
 
     // Forge a MatchResults that contains both the parent and the synthetic
     papa::engine::MatchResults matches;
-    for (const auto& r : rs->all_rules()) {
+    for (const auto& r : rs.all_rules()) {
         matches[r->name()].emplace_back(
             papa::features::Address{papa::features::AbsoluteVirtualAddress{0x1000}},
             papa::engine::Result{});
     }
 
     papa::Metadata meta;
-    auto doc = papa::render::build_document(std::move(meta), *rs, matches);
+    auto doc = papa::render::build_document(std::move(meta), rs, matches);
     CHECK(doc.rules.count("parent-rule") == 1);
     // Every synthetic rule has the parent's name as a "/N" prefix
     for (const auto& [name, _rep] : doc.rules) {
@@ -245,18 +234,16 @@ TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
     papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
 
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: has-text\n"
         "    scope: file\n"
         "  features:\n"
-        "    - section: .text\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "    - section: .text\n"
+    });
 
-    auto caps = papa::capabilities::static_::find_static_capabilities(*rs, extractor);
+    auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
     REQUIRE(caps);
 
     auto meta = papa::collect_metadata(
@@ -266,7 +253,7 @@ TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
         *img,
         *caps);
 
-    auto doc = papa::render::build_document(std::move(meta), *rs, caps->all_matches);
+    auto doc = papa::render::build_document(std::move(meta), rs, caps->all_matches);
     const auto json_out = papa::render::json::render_to_string(doc, /*pretty=*/false);
     CHECK(json_out.find("\"sha256\":\"") != std::string::npos);
     CHECK(json_out.find("has-text")     != std::string::npos);

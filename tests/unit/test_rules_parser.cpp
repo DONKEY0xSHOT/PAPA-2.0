@@ -14,6 +14,8 @@
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
+#include "test_support.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -197,18 +199,9 @@ TEST_CASE("rules: minimal rule with single api leaf parses") {
 
 TEST_CASE("rules: api leaf trims the dll part like capa") {
     auto api_value = [](std::string_view api_line) -> std::string {
-        std::string text =
-            "rule:\n"
-            "  meta:\n"
-            "    name: r\n"
-            "    scope: function\n"
-            "  features:\n"
-            "    - api: ";
-        text.append(api_line);
-        text.push_back('\n');
-        auto r = RuleParser::parse(text, "r.yml");
-        REQUIRE(r);
-        return must_be<Api>(feat_of((*r)->statement())).value();
+        const auto r = papa_tests::rule(
+            papa_tests::rule_yaml("r", "function", {"api: " + std::string(api_line)}));
+        return must_be<Api>(feat_of(r->statement())).value();
     };
     // single-dot native names drop the dll
     CHECK(api_value("kernel32.GetTickCount") == "GetTickCount");

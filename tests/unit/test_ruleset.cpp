@@ -14,6 +14,8 @@
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
+#include "test_support.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -35,18 +37,10 @@ using papa::features::FeatureSet;
 using papa::features::FeatureTag;
 using papa::features::MatchedRule;
 using papa::rules::Rule;
-using papa::rules::RuleParser;
 using papa::rules::RuleSet;
 using papa::rules::Scope;
 
 namespace {
-
-// Build a Rule from a tiny YAML literal so each test reads as a real rule
-[[nodiscard]] std::unique_ptr<Rule> make_rule(std::string_view yaml) {
-    auto r = RuleParser::parse(yaml, "test.yml");
-    REQUIRE(r);
-    return std::move(*r);
-}
 
 // Verify a topo order: every dependency of B precedes B
 [[nodiscard]] bool precedes(std::span<const Rule* const> topo,
@@ -63,46 +57,39 @@ namespace {
 }  // namespace
 
 TEST_CASE("ruleset: from_rules with one rule yields find()-able RuleSet") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: solo\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: foo\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    CHECK(rs->size() == 1);
-    REQUIRE(rs->find("solo") != nullptr);
-    CHECK(rs->find("solo")->name() == "solo");
-    CHECK(rs->find("absent") == nullptr);
+        "    - api: foo\n"
+    });
+    CHECK(rs.size() == 1);
+    REQUIRE(rs.find("solo") != nullptr);
+    CHECK(rs.find("solo")->name() == "solo");
+    CHECK(rs.find("absent") == nullptr);
 }
 
 TEST_CASE("ruleset: rules_by_scope groups rules by their static scope") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: f-rule\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: a\n"));
-    rules.push_back(make_rule(
+        "    - api: a\n",
         "rule:\n"
         "  meta:\n"
         "    name: file-rule\n"
         "    scope: file\n"
         "  features:\n"
-        "    - import: kernel32.X\n"));
+        "    - import: kernel32.X\n"
+    });
 
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-
-    auto fn_rules   = rs->rules_by_scope(Scope::kFunction);
-    auto file_rules = rs->rules_by_scope(Scope::kFile);
-    auto bb_rules   = rs->rules_by_scope(Scope::kBasicBlock);
+    auto fn_rules   = rs.rules_by_scope(Scope::kFunction);
+    auto file_rules = rs.rules_by_scope(Scope::kFile);
+    auto bb_rules   = rs.rules_by_scope(Scope::kBasicBlock);
 
     REQUIRE(fn_rules.size() == 1);
     CHECK(fn_rules[0]->name() == "f-rule");
@@ -113,14 +100,14 @@ TEST_CASE("ruleset: rules_by_scope groups rules by their static scope") {
 
 TEST_CASE("ruleset: duplicate rule names are rejected") {
     std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    rules.push_back(papa_tests::rule(
         "rule:\n"
         "  meta:\n"
         "    name: dup\n"
         "    scope: function\n"
         "  features:\n"
         "    - api: a\n"));
-    rules.push_back(make_rule(
+    rules.push_back(papa_tests::rule(
         "rule:\n"
         "  meta:\n"
         "    name: dup\n"
@@ -136,87 +123,75 @@ TEST_CASE("ruleset: duplicate rule names are rejected") {
 TEST_CASE("ruleset: rule with unresolved match reference is dropped, not failed") {
     // Real CAPA corpora always contain a few rules whose match: targets were skipped
     // earlier in the load (irregular YAML, COM lookups, etc.)
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: needs-other\n"
         "    scope: function\n"
         "  features:\n"
-        "    - match: not-a-real-rule\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    CHECK(rs->find("needs-other") == nullptr);
-    CHECK(rs->size() == 0U);
+        "    - match: not-a-real-rule\n"
+    });
+    CHECK(rs.find("needs-other") == nullptr);
+    CHECK(rs.size() == 0U);
 }
 
 TEST_CASE("ruleset: known match reference is accepted and ordered") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: depends-on-a\n"
         "    scope: function\n"
         "  features:\n"
-        "    - match: rule-a\n"));
-    rules.push_back(make_rule(
+        "    - match: rule-a\n",
         "rule:\n"
         "  meta:\n"
         "    name: rule-a\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: foo\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    auto topo = rs->rules_by_scope(Scope::kFunction);
+        "    - api: foo\n"
+    });
+    auto topo = rs.rules_by_scope(Scope::kFunction);
     CHECK(precedes(topo, "rule-a", "depends-on-a"));
 }
 
 TEST_CASE("ruleset: namespace match reference resolves to every namespace member") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: depends-on-ns\n"
         "    scope: function\n"
         "  features:\n"
-        "    - match: anti-analysis/vm\n"));
-    rules.push_back(make_rule(
+        "    - match: anti-analysis/vm\n",
         "rule:\n"
         "  meta:\n"
         "    name: vm-probe-1\n"
         "    namespace: anti-analysis/vm\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: kernel32.IsDebuggerPresent\n"));
-    rules.push_back(make_rule(
+        "    - api: kernel32.IsDebuggerPresent\n",
         "rule:\n"
         "  meta:\n"
         "    name: vm-probe-2\n"
         "    namespace: anti-analysis/vm\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: kernel32.GetTickCount\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    auto topo = rs->rules_by_scope(Scope::kFunction);
+        "    - api: kernel32.GetTickCount\n"
+    });
+    auto topo = rs.rules_by_scope(Scope::kFunction);
     CHECK(precedes(topo, "vm-probe-1", "depends-on-ns"));
     CHECK(precedes(topo, "vm-probe-2", "depends-on-ns"));
 }
 
 TEST_CASE("ruleset: match cycle is rejected") {
     std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    rules.push_back(papa_tests::rule(
         "rule:\n"
         "  meta:\n"
         "    name: a\n"
         "    scope: function\n"
         "  features:\n"
         "    - match: b\n"));
-    rules.push_back(make_rule(
+    rules.push_back(papa_tests::rule(
         "rule:\n"
         "  meta:\n"
         "    name: b\n"
@@ -230,8 +205,7 @@ TEST_CASE("ruleset: match cycle is rejected") {
 }
 
 TEST_CASE("ruleset: subscope is extracted into a synthetic lib rule") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: parent-rule\n"
@@ -239,14 +213,12 @@ TEST_CASE("ruleset: subscope is extracted into a synthetic lib rule") {
         "  features:\n"
         "    - basic block:\n"
         "      - and:\n"
-        "        - characteristic: tight loop\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "        - characteristic: tight loop\n"
+    });
 
     // Two rules: the parent and the synthetic
-    CHECK(rs->size() == 2);
-    const Rule* parent = rs->find("parent-rule");
+    CHECK(rs.size() == 2);
+    const Rule* parent = rs.find("parent-rule");
     REQUIRE(parent != nullptr);
 
     // The parent's statement no longer contains a Subscope
@@ -260,7 +232,7 @@ TEST_CASE("ruleset: subscope is extracted into a synthetic lib rule") {
     const auto* mr = static_cast<const MatchedRule*>(fs_node->feature().get());
     const std::string& syn_name = mr->rule_name();
     CHECK(syn_name.rfind("parent-rule/", 0) == 0);
-    const Rule* syn = rs->find(syn_name);
+    const Rule* syn = rs.find(syn_name);
     REQUIRE(syn != nullptr);
     CHECK(syn->scope() == Scope::kBasicBlock);
     CHECK(syn->is_lib());
@@ -271,8 +243,7 @@ TEST_CASE("ruleset: subscope is extracted into a synthetic lib rule") {
 
 TEST_CASE("ruleset: deeply nested subscopes spawn a chain of synthetic rules") {
     // function -> basic block -> instruction
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: deep\n"
@@ -280,15 +251,13 @@ TEST_CASE("ruleset: deeply nested subscopes spawn a chain of synthetic rules") {
         "  features:\n"
         "    - basic block:\n"
         "      - instruction:\n"
-        "        - api: kernel32.X\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-    CHECK(rs->size() == 3);
+        "        - api: kernel32.X\n"
+    });
+    CHECK(rs.size() == 3);
 
     // Find the BB-scope synthetic
     const Rule* bb_syn = nullptr;
-    for (const auto& r : rs->all_rules()) {
+    for (const auto& r : rs.all_rules()) {
         if (r->scope() == Scope::kBasicBlock && r->is_lib()) {
             bb_syn = r.get();
             break;
@@ -298,7 +267,7 @@ TEST_CASE("ruleset: deeply nested subscopes spawn a chain of synthetic rules") {
 
     // Find the instruction-scope synthetic
     const Rule* insn_syn = nullptr;
-    for (const auto& r : rs->all_rules()) {
+    for (const auto& r : rs.all_rules()) {
         if (r->scope() == Scope::kInstruction && r->is_lib()) {
             insn_syn = r.get();
             break;
@@ -308,45 +277,39 @@ TEST_CASE("ruleset: deeply nested subscopes spawn a chain of synthetic rules") {
 }
 
 TEST_CASE("ruleset: match runs every rule at the requested scope") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: hits-foo\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: foo\n"));
-    rules.push_back(make_rule(
+        "    - api: foo\n",
         "rule:\n"
         "  meta:\n"
         "    name: hits-bar\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: bar\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "    - api: bar\n"
+    });
 
     FeatureSet fs;
     fs.add(std::make_shared<const Api>(std::string("foo")),
            Address{AbsoluteVirtualAddress{0x1000}});
 
-    auto [_fs, matches] = rs->match(Scope::kFunction, std::move(fs),
+    auto [_fs, matches] = rs.match(Scope::kFunction, std::move(fs),
                                     Address{AbsoluteVirtualAddress{0x1000}});
     CHECK(matches.count("hits-foo") == 1);
     CHECK(matches.count("hits-bar") == 0);
 }
 
 TEST_CASE("ruleset: match sees a same-scope match reference under an or") {
-    std::vector<std::unique_ptr<Rule>> rules;
-    rules.push_back(make_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: rule-a\n"
         "    scope: function\n"
         "  features:\n"
-        "    - api: foo\n"));
-    rules.push_back(make_rule(
+        "    - api: foo\n",
         "rule:\n"
         "  meta:\n"
         "    name: rule-b\n"
@@ -354,17 +317,15 @@ TEST_CASE("ruleset: match sees a same-scope match reference under an or") {
         "  features:\n"
         "    - or:\n"
         "      - match: rule-a\n"
-        "      - api: bar\n"));
-
-    auto rs = RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "      - api: bar\n"
+    });
 
     // rule-a's match is injected mid-cycle, after the index picked candidates from foo alone
     FeatureSet fs;
     fs.add(std::make_shared<const Api>(std::string("foo")),
            Address{AbsoluteVirtualAddress{0x1000}});
 
-    auto [_fs, matches] = rs->match(Scope::kFunction, std::move(fs),
+    auto [_fs, matches] = rs.match(Scope::kFunction, std::move(fs),
                                     Address{AbsoluteVirtualAddress{0x1000}});
     CHECK(matches.count("rule-a") == 1);
     CHECK(matches.count("rule-b") == 1);
