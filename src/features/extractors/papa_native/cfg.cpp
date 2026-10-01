@@ -3,9 +3,6 @@
 #include "papa/constants.h"
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/emu/emu_discovery.h"
-#include "papa/features/extractors/papa_native/jump_tables.h"
-#include "papa/features/extractors/papa_native/noreturn.h"
 #include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_image.h"
 
@@ -13,15 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <deque>
-#include <functional>
-#include <limits>
 #include <optional>
 #include <span>
-#include <string_view>
 #include <unordered_map>
-#include <unordered_set>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -46,63 +37,6 @@ template <typename T>
     }
     const std::uint64_t rva = va - base;
     return rva < image.size_of_image();
-}
-
-struct PdataRanges {
-    std::vector<std::pair<std::uint64_t, std::uint64_t>>  ranges;     // sorted by start
-    std::unordered_set<std::uint64_t>                     starts;     // VA set
-};
-
-/// Iterate the .pdata RUNTIME_FUNCTION array and harvest authoritative
-/// function entry points and end addresses. The end is exclusive
-[[nodiscard]] PdataRanges collect_pdata_ranges(const pe::PeImage& image) {
-    PdataRanges out;
-    if (!image.is_64bit()) { return out; }
-    const pe::ParsedSection* pdata = nullptr;
-    for (const auto& s : image.sections()) {
-        if (s.name == ".pdata") { pdata = &s; break; }
-    }
-    if (pdata == nullptr) { return out; }
-    // raw_size is an unvalidated section-header field, so it cannot size an
-    // allocation on its own. Clamp to the records the image can actually supply
-    const std::size_t count = std::min<std::size_t>(
-        {pdata->raw_size / constants::kRuntimeFunctionSize,
-         image.readable_bytes_at_rva(pdata->virtual_address) /
-             constants::kRuntimeFunctionSize,
-         constants::kMaxPdataEntries});
-    out.ranges.reserve(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        const std::uint64_t off = std::uint64_t{pdata->virtual_address} +
-                                  i * constants::kRuntimeFunctionSize;
-        auto bytes = image.read_at_rva(off, constants::kRuntimeFunctionSize);
-        if (!bytes) { break; }
-        std::uint32_t begin_rva  = 0;
-        std::uint32_t end_rva    = 0;
-        std::uint32_t unwind_rva = 0;
-        if (!read_le<std::uint32_t>(*bytes, 0, begin_rva))  { break; }
-        if (!read_le<std::uint32_t>(*bytes, 4, end_rva))    { break; }
-        if (!read_le<std::uint32_t>(*bytes, 8, unwind_rva)) { break; }
-        // Read the UNWIND_INFO VerFlags byte and classify the entry the way vivisect
-        // parsers/pe.py does
-        std::optional<std::uint8_t> verflags;
-        const std::uint64_t uiva = image.image_base() + unwind_rva;
-        if (va_in_image(image, uiva)) {
-            if (auto uw = image.read_at_rva(unwind_rva, 1); uw && !uw->empty()) {
-                verflags = static_cast<std::uint8_t>((*uw)[0]);
-            }
-        }
-        const PdataEntryKind kind = cfg::classify_pdata_unwind(verflags);
-        if (kind == PdataEntryKind::kStop) { break; }
-        if (kind == PdataEntryKind::kSkipChained) { continue; }
-
-        const std::uint64_t begin_va = image.image_base() + begin_rva;
-        const std::uint64_t end_va   = image.image_base() + end_rva;
-        if (!va_in_image(image, begin_va)) { continue; }
-        out.ranges.emplace_back(begin_va, end_va);
-        out.starts.insert(begin_va);
-    }
-    std::sort(out.ranges.begin(), out.ranges.end());
-    return out;
 }
 
 // Build the reverse-edge map: callees across all functions become callers
@@ -174,9 +108,49 @@ cfg::classify_pdata_unwind(std::optional<std::uint8_t> verflags) noexcept {
 }
 
 std::vector<std::uint64_t> cfg::pdata_function_begins(const pe::PeImage& image) {
-    const auto pdata = collect_pdata_ranges(image);
-    std::vector<std::uint64_t> begins(pdata.starts.begin(), pdata.starts.end());
+    std::vector<std::uint64_t> begins;
+    if (!image.is_64bit()) { return begins; }
+    const pe::ParsedSection* pdata = nullptr;
+    for (const auto& s : image.sections()) {
+        if (s.name == ".pdata") { pdata = &s; break; }
+    }
+    if (pdata == nullptr) { return begins; }
+    // raw_size is an unvalidated section-header field, so it cannot size an
+    // allocation on its own. Clamp to the records the image can actually supply
+    const std::size_t count = std::min<std::size_t>(
+        {pdata->raw_size / constants::kRuntimeFunctionSize,
+         image.readable_bytes_at_rva(pdata->virtual_address) /
+             constants::kRuntimeFunctionSize,
+         constants::kMaxPdataEntries});
+    begins.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::uint64_t off = std::uint64_t{pdata->virtual_address} +
+                                  i * constants::kRuntimeFunctionSize;
+        auto bytes = image.read_at_rva(off, constants::kRuntimeFunctionSize);
+        if (!bytes) { break; }
+        std::uint32_t begin_rva  = 0;
+        std::uint32_t unwind_rva = 0;
+        if (!read_le<std::uint32_t>(*bytes, 0, begin_rva))  { break; }
+        if (!read_le<std::uint32_t>(*bytes, 8, unwind_rva)) { break; }
+        // Read the UNWIND_INFO VerFlags byte and classify the entry the way vivisect
+        // parsers/pe.py does
+        std::optional<std::uint8_t> verflags;
+        const std::uint64_t uiva = image.image_base() + unwind_rva;
+        if (va_in_image(image, uiva)) {
+            if (auto uw = image.read_at_rva(unwind_rva, 1); uw && !uw->empty()) {
+                verflags = static_cast<std::uint8_t>((*uw)[0]);
+            }
+        }
+        const PdataEntryKind kind = classify_pdata_unwind(verflags);
+        if (kind == PdataEntryKind::kStop) { break; }
+        if (kind == PdataEntryKind::kSkipChained) { continue; }
+
+        const std::uint64_t begin_va = image.image_base() + begin_rva;
+        if (!va_in_image(image, begin_va)) { continue; }
+        begins.push_back(begin_va);
+    }
     std::sort(begins.begin(), begins.end());
+    begins.erase(std::unique(begins.begin(), begins.end()), begins.end());
     return begins;
 }
 
