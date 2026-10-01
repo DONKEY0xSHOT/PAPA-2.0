@@ -8,8 +8,10 @@
 #include "papa/features/common.h"
 #include "papa/features/feature.h"
 #include "papa/features/insn.h"
+#include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/indirect_calls.h"
 #include "papa/pe/pe_image.h"
@@ -17,14 +19,15 @@
 
 #include <Zydis/Zydis.h>
 
-#include <filesystem>
-
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
-#include "fixture_paths.h"
+#include <vector>
+#include "pe_builder.h"
 #include "test_support.h"
 
 using papa::features::AbsoluteVirtualAddress;
@@ -51,6 +54,10 @@ using papa::features::extractors::papa_native::insn::extract_segment_access;
 using papa::features::extractors::papa_native::insn::extract_nzxor;
 using papa::features::extractors::papa_native::insn::extract_string;
 using papa::features::extractors::papa_native::insn::is_security_cookie;
+
+namespace pn = papa::features::extractors::papa_native;
+
+namespace pt = papa_tests;
 
 namespace {
 
@@ -204,73 +211,248 @@ TEST_CASE("insn: extract_peb_access requires both the prefix and the offset") {
 
 namespace {
 
-// Cached image fixture. Tests share a single parse to keep total runtime low
-// notepad.exe is the lowest-cost real-PE fixture we ship for unit tests
-[[nodiscard]] const papa::pe::PeImage* notepad_image() {
-    static std::optional<papa::pe::PeImage> cached;
-    static bool tried = false;
-    if (!tried) {
-        tried = true;
-        const auto path = papa_tests::fixture_path("notepad.exe");
-        if (std::filesystem::exists(path)) {
-            auto r = papa::pe::PeParser::parse_file(path);
-            if (r) { cached.emplace(std::move(*r)); }
-        }
-    }
-    return cached.has_value() ? &*cached : nullptr;
+using Features = std::vector<papa::features::extractors::FeatureWithAddress>;
+
+// Where papa_tests::insn places an instruction, and so where its features land
+constexpr std::uint64_t kAt = 0x1000;
+
+// A parsed builder image and the builder that made it
+struct Image {
+    pt::PeBuilder     builder;
+    papa::pe::PeImage image;
+};
+
+// An image of the given bitness whose .data, the last section in the file, holds data
+[[nodiscard]] Image make_image(bool x64, std::vector<std::uint8_t> data) {
+    pt::PeBuilder b;
+    b.x64  = x64;
+    b.code = {0xC3};
+    b.data = std::move(data);
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    return {std::move(b), std::move(*img)};
 }
 
-// chrome.exe carries the indirect-call shellcode pattern the cross-section
-// extractor must recognize. Cached like notepad to keep runtime low
-[[nodiscard]] const papa::pe::PeImage* chrome_image() {
-    static std::optional<papa::pe::PeImage> cached;
-    static bool tried = false;
-    if (!tried) {
-        tried = true;
-        const auto path = papa_tests::fixture_path("chrome.exe");
-        if (std::filesystem::exists(path)) {
-            auto r = papa::pe::PeParser::parse_file(path);
-            if (r) { cached.emplace(std::move(*r)); }
-        }
-    }
-    return cached.has_value() ? &*cached : nullptr;
+[[nodiscard]] papa::features::extractors::FeatureWithAddress num(std::uint64_t v) {
+    return {pt::feat<Number>(Number::Value{v}), pt::va(kAt)};
 }
 
-// Everything.exe is the 32-bit fixture, needed to exercise x86-specific number
-// width handling. Cached like the others to keep runtime low
-[[nodiscard]] const papa::pe::PeImage* everything_image() {
-    static std::optional<papa::pe::PeImage> cached;
-    static bool tried = false;
-    if (!tried) {
-        tried = true;
-        const auto path = papa_tests::fixture_path("Everything.exe");
-        if (std::filesystem::exists(path)) {
-            auto r = papa::pe::PeParser::parse_file(path);
-            if (r) { cached.emplace(std::move(*r)); }
-        }
-    }
-    return cached.has_value() ? &*cached : nullptr;
+[[nodiscard]] papa::features::extractors::FeatureWithAddress opnum(std::size_t i, std::uint64_t v) {
+    return {pt::feat<OperandNumber>(i, OperandNumber::Value{v}), pt::va(kAt)};
+}
+
+[[nodiscard]] papa::features::extractors::FeatureWithAddress off(std::int64_t v) {
+    return {pt::feat<Offset>(v), pt::va(kAt)};
+}
+
+[[nodiscard]] papa::features::extractors::FeatureWithAddress opoff(std::size_t i, std::int64_t v) {
+    return {pt::feat<OperandOffset>(i, v), pt::va(kAt)};
+}
+
+// The instruction encoded by bytes, decoded at kAt
+template <std::size_t N>
+[[nodiscard]] DecodedInsn decode(bool x64, const std::array<std::byte, N>& bytes) {
+    const pn::Disassembler dis(x64);
+    auto ins = dis.decode(bytes, kAt);
+    REQUIRE(ins.has_value());
+    return *ins;
+}
+
+// A copy of ins whose memory operand i is marked SIB-encoded
+[[nodiscard]] DecodedInsn with_sib(DecodedInsn ins, std::size_t i) {
+    ins.operands[i].sib_encoded = true;
+    return ins;
 }
 
 }  // namespace
 
-TEST_CASE("insn: extract_number emits Number + OperandNumber for non-pointer immediates") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
+TEST_CASE("insn: extract_number emits each immediate at its operation width unless it is a pointer") {
+    const Image x64 = make_image(true, std::vector<std::uint8_t>(0x10, 0x11));
+    const Image x86 = make_image(false, std::vector<std::uint8_t>(0x10, 0x11));
+    struct Row {
+        const char*  label;
+        const Image* image;
+        DecodedInsn  ins;
+        Features     expected;
+    };
+    const std::vector<Row> rows{
+        {"mov reg, imm yields the number of its operand", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4), pt::imm(0x1234, 4)),
+         {num(0x1234), opnum(1, 0x1234)}},
+        {"a sign-extended immediate keeps the register's width", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_AL, 1), pt::imm(~0ULL, 1)),
+         {num(0xFF), opnum(1, 0xFF)}},
+        {"an immediate alone masks to 32 bits on x86", &x86,
+         pt::insn(ZYDIS_MNEMONIC_PUSH, pt::imm(0xFFFFFFFF80000002ULL, 4)),
+         {num(0x80000002), opnum(0, 0x80000002)}},
+        {"add esp, k is the one form whose number is dropped", &x86,
+         pt::insn(ZYDIS_MNEMONIC_ADD, pt::reg(ZYDIS_REGISTER_ESP, 4), pt::imm(0x20, 4)), {}},
+        {"sub esp, k keeps its number", &x86,
+         pt::insn(ZYDIS_MNEMONIC_SUB, pt::reg(ZYDIS_REGISTER_ESP, 4), pt::imm(0x64, 4)),
+         {num(0x64), opnum(1, 0x64)}},
+        {"add rsp, k keeps its number but adds no offset hint", &x64,
+         pt::insn(ZYDIS_MNEMONIC_ADD, pt::reg(ZYDIS_REGISTER_RSP, 8), pt::imm(0x20, 1)),
+         {num(0x20), opnum(1, 0x20)}},
+        {"add reg, small adds a structure offset hint", &x64,
+         pt::insn(ZYDIS_MNEMONIC_ADD, pt::reg(ZYDIS_REGISTER_EAX, 4), pt::imm(0x10, 4)),
+         {num(0x10), opnum(1, 0x10), off(0x10), opoff(1, 0x10)}},
+        {"sub reg, small adds no offset hint", &x64,
+         pt::insn(ZYDIS_MNEMONIC_SUB, pt::reg(ZYDIS_REGISTER_EAX, 4), pt::imm(0x10, 4)),
+         {num(0x10), opnum(1, 0x10)}},
+        {"an immediate that is a readable address is left to bytes and strings", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_RAX, 8),
+                  pt::imm(x64.builder.data_va(4), 8)),
+         {}},
+        {"an address no section maps is still a number", &x86,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4), pt::imm(0x00500000, 4)),
+         {num(0x00500000), opnum(1, 0x00500000)}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(pt::describe(extract_number(row.ins, row.image->image)) == pt::describe(row.expected));
     }
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].kind = OperandKind::kImm;
-    ins.operands[1].imm  = 0x1234U;          // not a valid VA in notepad
-    auto out = extract_number(ins, *img);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].first->tag() == FeatureTag::kNumber);
-    CHECK(out[1].first->tag() == FeatureTag::kOperandNumber);
+}
+
+TEST_CASE("insn: memory operands yield offsets, and a plain lea displacement a number too") {
+    const Image x64 = make_image(true, std::vector<std::uint8_t>(0x10, 0x11));
+    const Image x86 = make_image(false, std::vector<std::uint8_t>(0x10, 0x11));
+    const auto  data = static_cast<std::int64_t>(x86.builder.data_va(0));
+    struct Row {
+        const char*  label;
+        const Image* image;
+        DecodedInsn  ins;
+        Features     expected;  // what extract_offset then extract_number yield
+    };
+    const std::vector<Row> rows{
+        {"[reg+disp] yields the offset of its operand", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4),
+                  pt::mem(ZYDIS_REGISTER_EBX, 0x20, 4)),
+         {off(0x20), opoff(1, 0x20)}},
+        {"a bare [reg] is offset 0", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4),
+                  pt::mem(ZYDIS_REGISTER_EAX, 0, 4)),
+         {off(0), opoff(1, 0)}},
+        {"a frame pointer access is skipped on x64", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_RAX, 8),
+                  pt::mem(ZYDIS_REGISTER_RBP, 0x10, 8)),
+         {}},
+        {"a frame pointer access is skipped on x86", &x86,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4),
+                  pt::mem(ZYDIS_REGISTER_EBP, 0x10, 4)),
+         {}},
+        {"a stack pointer access is skipped on x86", &x86,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4),
+                  pt::mem(ZYDIS_REGISTER_ESP, 0x10, 4)),
+         {}},
+        {"an rsp access is kept on x64", &x64,
+         pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_RAX, 8),
+                  pt::mem(ZYDIS_REGISTER_RSP, 0x10, 8)),
+         {off(0x10), opoff(1, 0x10)}},
+        {"a SIB-encoded stack base is kept on x86", &x86,
+         with_sib(pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_EAX, 4),
+                           pt::mem(ZYDIS_REGISTER_ESP, 0x10, 4)),
+                  1),
+         {off(0x10), opoff(1, 0x10)}},
+        {"mov rax, gs:[0x30] is SIB-encoded with no base, so offset 0 and no number", &x64,
+         decode(true, pt::bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00)),
+         {off(0), opoff(1, 0)}},
+        {"lea rcx, [r12+0xB8] needs a SIB byte, so it yields no number", &x64,
+         decode(true, pt::bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00)),
+         {off(0xB8), opoff(1, 0xB8)}},
+        {"lea rcx, [rbx+0x10] also yields its displacement as a number", &x64,
+         decode(true, pt::bytes(0x48, 0x8D, 0x4B, 0x10)),
+         {off(0x10), opoff(1, 0x10), num(0x10), opnum(1, 0x10)}},
+        {"lea from a stack base yields no number", &x64,
+         pt::insn(ZYDIS_MNEMONIC_LEA, pt::reg(ZYDIS_REGISTER_RCX, 8),
+                  pt::mem(ZYDIS_REGISTER_RSP, 0x20, 8)),
+         {off(0x20), opoff(1, 0x20)}},
+        {"lea whose displacement is a readable address yields no number", &x86,
+         pt::insn(ZYDIS_MNEMONIC_LEA, pt::reg(ZYDIS_REGISTER_ECX, 4),
+                  pt::mem(ZYDIS_REGISTER_EBX, data, 4)),
+         {off(data), opoff(1, data)}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        Features got = extract_offset(row.ins, row.image->image);
+        for (auto& fa : extract_number(row.ins, row.image->image)) { got.push_back(std::move(fa)); }
+        CHECK(pt::describe(got) == pt::describe(row.expected));
+    }
+}
+
+TEST_CASE("insn: an operand pointing at data yields bytes unless they are zero or text, and a string") {
+    // .data, the last section in the file, holds each kind of target at its own offset
+    constexpr std::size_t kBlob = 0x000, kAscii = 0x040, kWide = 0x080, kZeros = 0x0A0;
+    constexpr std::size_t kFullAscii = 0x200, kFullWide = 0x300, kTail = 0x5F8;
+    std::vector<std::uint8_t> data(0x600, 0);
+    for (std::size_t i = 0; i < 8; ++i) {
+        data[kBlob + i] = static_cast<std::uint8_t>(0xF0 + i);
+        data[kTail + i] = static_cast<std::uint8_t>(0x81 + i);
+    }
+    const std::string ascii = "ascii text";
+    const std::string wide  = "wide text";
+    std::copy(ascii.begin(), ascii.end(), data.begin() + kAscii);
+    for (std::size_t i = 0; i < wide.size(); ++i) {
+        data[kWide + 2U * i] = static_cast<std::uint8_t>(wide[i]);
+    }
+    std::string full_ascii;
+    std::string full_wide;
+    for (std::size_t i = 0; i < 0x100; ++i) {
+        full_ascii.push_back(static_cast<char>('A' + i % 26U));
+        data[kFullAscii + i] = static_cast<std::uint8_t>(full_ascii.back());
+        if (i % 2U == 0U) {
+            full_wide.push_back(static_cast<char>('a' + i / 2U % 26U));
+            data[kFullWide + i] = static_cast<std::uint8_t>(full_wide.back());
+        }
+    }
+    const Image x64 = make_image(true, data);
+
+    const auto data_va = [&x64](std::size_t at) { return x64.builder.data_va(static_cast<std::uint32_t>(at)); };
+    const auto bytes_at = [&data](std::size_t at, std::size_t n) {
+        std::vector<std::byte> out;
+        for (std::size_t i = at; i < at + n; ++i) { out.push_back(std::byte{data[i]}); }
+        return papa::features::extractors::FeatureWithAddress{
+            pt::feat<papa::features::Bytes>(std::move(out)), pt::va(kAt)};
+    };
+    const auto text = [](std::string s) {
+        return papa::features::extractors::FeatureWithAddress{
+            pt::feat<papa::features::String>(std::move(s)), pt::va(kAt)};
+    };
+    const auto load = [](std::uint64_t target) {
+        return pt::insn(ZYDIS_MNEMONIC_MOV, pt::reg(ZYDIS_REGISTER_RCX, 8), pt::imm(target, 8));
+    };
+    DecodedInsn call = pt::insn(ZYDIS_MNEMONIC_CALL, pt::imm(data_va(kAscii), 8));
+    call.is_call     = true;
+
+    struct Row {
+        const char* label;
+        DecodedInsn ins;
+        Features    expected;  // what extract_bytes then extract_string yield
+    };
+    const std::vector<Row> rows{
+        {"binary data yields the bytes read from it", load(data_va(kBlob)),
+         {bytes_at(kBlob, 0x100)}},
+        {"a short string followed by other data yields bytes and the string",
+         load(data_va(kAscii)), {bytes_at(kAscii, 0x100), text(ascii)}},
+        {"a short UTF-16 string yields bytes and the string", load(data_va(kWide)),
+         {bytes_at(kWide, 0x100), text(wide)}},
+        {"all zero data yields nothing", load(data_va(kZeros)), {}},
+        {"a window of ASCII text yields only the string", load(data_va(kFullAscii)),
+         {text(full_ascii)}},
+        {"a window of UTF-16 text yields only the string", load(data_va(kFullWide)),
+         {text(full_wide)}},
+        {"data at the end of the file yields the bytes that are there", load(data_va(kTail)),
+         {bytes_at(kTail, 8)}},
+        {"an address below the image yields nothing", load(0xDEADBEEF), {}},
+        {"an address no section maps yields nothing", load(x64.image.image_base() + 0x00F00000U),
+         {}},
+        {"a call's operand yields no bytes but still its string", call, {text(ascii)}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        Features got = extract_bytes(row.ins, x64.image);
+        for (auto& fa : extract_string(row.ins, x64.image)) { got.push_back(std::move(fa)); }
+        CHECK(pt::describe(got) == pt::describe(row.expected));
+    }
 }
 
 TEST_CASE("insn: extract_flirt_call_api emits the FLIRT name and its stripped form") {
@@ -300,301 +482,6 @@ TEST_CASE("insn: extract_flirt_call_api emits the FLIRT name and its stripped fo
     }
     CHECK(has_full);
     CHECK(has_stripped);
-}
-
-TEST_CASE("insn: extract_number masks a high-bit imm-only value to 32 bits on x86") {
-    const auto* img = everything_image();
-    if (img == nullptr) {
-        MESSAGE("Everything.exe fixture missing, skipping");
-        return;
-    }
-    REQUIRE_FALSE(img->is_64bit());
-    // push 0x80000002. Zydis sign-extends the imm32, but on a 32-bit image the number
-    // must be the 32-bit value the way capa emits it
-    DecodedInsn ins = make_insn(0x401000, "push");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_PUSH;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kImm;
-    ins.operands[0].imm  = 0xFFFFFFFF80000002ULL;
-    auto out = extract_number(ins, *img);
-    REQUIRE(out.size() >= 1);
-    const auto* num = dynamic_cast<const Number*>(out[0].first.get());
-    REQUIRE(num != nullptr);
-    REQUIRE(std::holds_alternative<std::uint64_t>(num->value()));
-    CHECK(std::get<std::uint64_t>(num->value()) == 0x80000002ULL);
-}
-
-TEST_CASE("insn: extract_number suppresses the number only for 'add esp, k'") {
-    // capa's extract_op_number_features skips the immediate solely of `add esp, imm`
-    // (the cdecl cleanup after a call), keyed on opers[0].reg == REG_ESP
-    const auto* x86 = everything_image();   // 32-bit
-    const auto* x64 = notepad_image();       // 64-bit
-    if (x86 == nullptr || x64 == nullptr) {
-        MESSAGE("fixtures missing, skipping");
-        return;
-    }
-    REQUIRE_FALSE(x86->is_64bit());
-    REQUIRE(x64->is_64bit());
-
-    const auto arith = [](ZydisMnemonic m, ZydisRegister dst, std::uint64_t imm) {
-        DecodedInsn ins = make_insn(0x401000, "x");
-        ins.zyd_mnem = m;
-        ins.operand_count = 2;
-        ins.operands[0].kind = OperandKind::kReg;
-        ins.operands[0].base_reg = dst;
-        ins.operands[1].kind = OperandKind::kImm;
-        ins.operands[1].imm = imm;
-        return ins;
-    };
-    const auto has_number = [](const auto& out) {
-        for (const auto& fa : out) {
-            if (fa.first->tag() == FeatureTag::kNumber) { return true; }
-        }
-        return false;
-    };
-
-    // add esp, k -> suppressed (the one form capa skips)
-    CHECK(extract_number(arith(ZYDIS_MNEMONIC_ADD, ZYDIS_REGISTER_ESP, 0x20U), *x86).empty());
-    // sub esp, k -> Number kept (this closes the certutil_x86 sub esp, 0x64 FN)
-    CHECK(has_number(extract_number(arith(ZYDIS_MNEMONIC_SUB, ZYDIS_REGISTER_ESP, 0x64U), *x86)));
-    // add rsp, k -> Number kept (capa's REG_ESP check excludes the 64-bit rsp)
-    CHECK(has_number(extract_number(arith(ZYDIS_MNEMONIC_ADD, ZYDIS_REGISTER_RSP, 0x20U), *x64)));
-}
-
-TEST_CASE("insn: extract_number adds Offset hint for 'add reg, small'") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    DecodedInsn ins = make_insn(0x401000, "add");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_ADD;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].kind = OperandKind::kImm;
-    ins.operands[1].imm  = 0x10U;
-    auto out = extract_number(ins, *img);
-    // Expect Number + OperandNumber + Offset + OperandOffset
-    REQUIRE(out.size() == 4);
-    bool seen_offset = false;
-    for (const auto& [feat, _addr] : out) {
-        if (feat->tag() == FeatureTag::kOffset) { seen_offset = true; }
-    }
-    CHECK(seen_offset);
-}
-
-TEST_CASE("insn: extract_number does not add an Offset hint for 'sub reg, small'") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // capa adds the struct-offset hint only for add, never sub, so a sub
-    // immediate yields Number + OperandNumber but no Offset
-    DecodedInsn ins = make_insn(0x401000, "sub");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_SUB;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[0].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].kind = OperandKind::kImm;
-    ins.operands[1].imm  = 0x10U;
-    auto out = extract_number(ins, *img);
-    REQUIRE(out.size() == 2);
-    for (const auto& [feat, _addr] : out) {
-        CHECK(feat->tag() != FeatureTag::kOffset);
-        CHECK(feat->tag() != FeatureTag::kOperandOffset);
-    }
-}
-
-TEST_CASE("insn: extract_offset emits Offset + OperandOffset for non-stack base") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].base_reg = ZYDIS_REGISTER_EBX;
-    ins.operands[1].disp = 0x20;
-    auto out = extract_offset(ins, *img);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].first->tag() == FeatureTag::kOffset);
-    CHECK(out[1].first->tag() == FeatureTag::kOperandOffset);
-}
-
-TEST_CASE("insn: extract_offset emits Offset(0) for a bare [reg] dereference") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // capa yields offset(0) for [reg] with no displacement. The runtime-linking
-    // rules count these mov reg, [reg] Flink walk steps via count(offset(0))
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].base_reg = ZYDIS_REGISTER_EAX;
-    ins.operands[1].disp = 0;
-    auto out = extract_offset(ins, *img);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].first->tag() == FeatureTag::kOffset);
-    CHECK(out[1].first->tag() == FeatureTag::kOperandOffset);
-}
-
-TEST_CASE("insn: extract_offset skips stack-frame relative accesses") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].base_reg = img->is_64bit() ? ZYDIS_REGISTER_RBP : ZYDIS_REGISTER_EBP;
-    ins.operands[1].disp = 0x10;
-    auto out = extract_offset(ins, *img);
-    CHECK(out.empty());
-}
-
-TEST_CASE("insn: extract_offset keeps a SIB-encoded stack-base offset") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // capa excludes the stack/frame base only for a plain [reg+disp] without a SIB
-    // byte
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kRegMem;
-    ins.operands[1].base_reg = img->is_64bit() ? ZYDIS_REGISTER_RSP : ZYDIS_REGISTER_ESP;
-    ins.operands[1].disp = 0x10;
-    ins.operands[1].sib_encoded = true;
-    auto out = extract_offset(ins, *img);
-    REQUIRE(out.size() == 2);
-    CHECK(out[0].first->tag() == FeatureTag::kOffset);
-    CHECK(out[1].first->tag() == FeatureTag::kOperandOffset);
-}
-
-TEST_CASE("insn: SIB-encoded gs:[0x30] yields an offset, never a number") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // mov rax, gs:[0x30]. capa treats the SIB displacement as an offset only, so
-    // extract_number must stay silent and extract_offset must surface Offset(0x30)
-    papa::features::extractors::papa_native::Disassembler dis(true);
-    const auto bytes = papa_tests::bytes(0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00);
-    const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
-    REQUIRE(ins.has_value());
-    CHECK(ins->operands[1].kind == OperandKind::kSib);
-    CHECK(extract_number(*ins, *img).empty());
-    const auto offs = extract_offset(*ins, *img);
-    REQUIRE(offs.size() == 2);
-    CHECK(offs[0].first->tag() == FeatureTag::kOffset);
-    CHECK(offs[1].first->tag() == FeatureTag::kOperandOffset);
-    // The 0x30 is an absolute address with disp 0, so capa surfaces offset(0). This is
-    // what lets the runtime-linking rules count gs:[0x60] as an offset(0) step
-    CHECK(static_cast<const Offset&>(*offs[0].first).value() == 0);
-}
-
-TEST_CASE("insn: lea with a SIB-encoded base surfaces an offset, never a number") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // lea rcx, [r12 + 0xB8]. r12 forces a SIB byte, so capa emits no number from it and
-    // only the non-SIB lea surfaces the displacement as a number
-    papa::features::extractors::papa_native::Disassembler dis(true);
-    const auto bytes = papa_tests::bytes(0x49, 0x8D, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00);
-    const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
-    REQUIRE(ins.has_value());
-    REQUIRE(ins->zyd_mnem == ZYDIS_MNEMONIC_LEA);
-    REQUIRE(ins->operand_count == 2);
-
-    bool has_number = false;
-    bool has_offset = false;
-    for (const auto& fa : extract_offset(*ins, *img)) {
-        const auto t = fa.first->tag();
-        if (t == FeatureTag::kNumber || t == FeatureTag::kOperandNumber) {
-            has_number = true;
-        }
-        if (t == FeatureTag::kOffset || t == FeatureTag::kOperandOffset) {
-            has_offset = true;
-        }
-    }
-    CHECK(has_offset);
-    CHECK_FALSE(has_number);
-    // The number extractor itself never fires for a memory operand
-    CHECK(extract_number(*ins, *img).empty());
-}
-
-// A non-SIB base+disp lea is i386RegMemOper, where capa does surface the
-// displacement as a number, so papa must keep emitting it there
-TEST_CASE("insn: lea with a non-SIB base surfaces the displacement as a number") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    // 48 8D 4B 10 : lea rcx, [rbx + 0x10]  (rbx needs no SIB byte)
-    papa::features::extractors::papa_native::Disassembler dis(true);
-    const auto bytes = papa_tests::bytes(0x48, 0x8D, 0x4B, 0x10);
-    const auto ins = dis.decode(std::span<const std::byte>(bytes), 0x401000);
-    REQUIRE(ins.has_value());
-    REQUIRE(ins->zyd_mnem == ZYDIS_MNEMONIC_LEA);
-    bool has_number = false;
-    for (const auto& fa : extract_offset(*ins, *img)) {
-        const auto t = fa.first->tag();
-        if (t == FeatureTag::kNumber || t == FeatureTag::kOperandNumber) {
-            has_number = true;
-        }
-    }
-    CHECK(has_number);
-}
-
-TEST_CASE("insn: extract_bytes returns empty for unreadable target") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kImm;
-    ins.operands[1].imm  = 0xDEADBEEFULL;     // outside any section
-    auto out = extract_bytes(ins, *img);
-    CHECK(out.empty());
-}
-
-TEST_CASE("insn: extract_string returns empty when target is unreadable") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.operand_count = 2;
-    ins.operands[0].kind = OperandKind::kReg;
-    ins.operands[1].kind = OperandKind::kImm;
-    ins.operands[1].imm  = 0xDEADBEEFULL;
-    auto out = extract_string(ins, *img);
-    CHECK(out.empty());
 }
 
 TEST_CASE("insn: extract_nzxor fires on xor of distinct registers") {
@@ -737,115 +624,279 @@ TEST_CASE("indirect_calls: find_definition returns nullopt with no preceding wri
     CHECK_FALSE(def.has_value());
 }
 
-TEST_CASE("insn: build_import_table indexes imports by their IAT VA") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
+TEST_CASE("insn: build_import_table indexes every import, delayed or by ordinal, by its IAT VA") {
+    pt::PeBuilder b;
+    b.code          = {0xC3};
+    b.imports       = {{"kernel32.dll", {"CreateFileW", "#9"}}, {"ws2_32.dll", {"#6"}}};
+    b.delay_imports = {{"user32.dll", {"MessageBoxW"}}};
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+
+    const auto table = pn::build_import_table(*img);
+    const auto imps  = img->imports();
+    REQUIRE(imps.size() == 4);
+    CHECK(table.by_iat_va.size() == imps.size());
+    for (const papa::pe::ParsedImport& row : imps) {
+        CAPTURE(row.iat_va);
+        const auto it = table.by_iat_va.find(row.iat_va);
+        REQUIRE(it != table.by_iat_va.end());
+        CHECK(it->second == &row);
     }
-    auto table = papa::features::extractors::papa_native::build_import_table(*img);
-    CHECK(table.by_iat_va.size() > 0U);
-    // Every entry's recorded IAT VA must round-trip back to the original row
-    for (const auto& [va, row] : table.by_iat_va) {
-        REQUIRE(row != nullptr);
-        CHECK(row->iat_va == va);
+    CHECK(table.by_iat_va.count(b.iat_va("user32.dll", "MessageBoxW")) == 1);
+}
+
+namespace {
+
+// Points the rel32 at code offset disp_at of the instruction at offset at, len bytes
+// long, at target
+void point(pt::PeBuilder& b, std::uint32_t at, std::uint32_t len, std::uint32_t disp_at,
+           std::uint64_t target) {
+    pt::detail::poke(b.code, disp_at, static_cast<std::int32_t>(target - b.code_va(at + len)));
+}
+
+}  // namespace
+
+TEST_CASE("insn: extract_cross_section_flow flags a branch into another section that is no import") {
+    for (const bool x64 : {true, false}) {
+        CAPTURE(x64);
+        pt::PeBuilder b;
+        b.x64     = x64;
+        b.code    = std::vector<std::uint8_t>(0x20, 0x90);
+        b.imports = {{"kernel32.dll", {"VirtualAllocEx"}}};
+        b.data    = std::vector<std::uint8_t>(0x10, 0);
+        b.extra_sections = {{".text2", {0xC3},
+                             pt::PeBuilder::kScnCode | pt::PeBuilder::kScnExecute |
+                                 pt::PeBuilder::kScnRead,
+                             0}};
+        const std::uint64_t iat   = b.iat_va("kernel32.dll", "VirtualAllocEx");
+        const std::uint64_t slot  = b.data_va(8);
+        const std::uint64_t text2 = b.base() + b.section_rva(".text2");
+        const auto img = papa::pe::PeParser::parse(b.build());
+        REQUIRE(img.has_value());
+        const auto             table = pn::build_import_table(*img);
+        const pn::Disassembler dis(x64);
+
+        // The branch sits at code offset 0x10. Its operand reads the target through
+        // memory, absolute on x86 and rip-relative on x64
+        const std::uint64_t at       = b.code_va(0x10);
+        const auto          via_slot = [&](std::uint8_t modrm_op, std::uint64_t target) {
+            const std::uint32_t field = x64 ? static_cast<std::uint32_t>(target - (at + 6U))
+                                            : static_cast<std::uint32_t>(target);
+            return std::vector<std::uint8_t>{0xFF, modrm_op,
+                                             static_cast<std::uint8_t>(field),
+                                             static_cast<std::uint8_t>(field >> 8U),
+                                             static_cast<std::uint8_t>(field >> 16U),
+                                             static_cast<std::uint8_t>(field >> 24U)};
+        };
+        const auto direct = [at](std::uint8_t opcode, std::uint64_t target) {
+            const auto field = static_cast<std::uint32_t>(target - (at + 5U));
+            return std::vector<std::uint8_t>{opcode, static_cast<std::uint8_t>(field),
+                                             static_cast<std::uint8_t>(field >> 8U),
+                                             static_cast<std::uint8_t>(field >> 16U),
+                                             static_cast<std::uint8_t>(field >> 24U)};
+        };
+        struct Row {
+            const char*               label;
+            std::vector<std::uint8_t> code;
+            bool                      flagged;
+        };
+        const std::vector<Row> rows{
+            {"call [slot] with the slot in .data", via_slot(0x15, slot), true},
+            {"jmp [slot] with the slot in .data", via_slot(0x25, slot), true},
+            {"call [iat] is an import call", via_slot(0x15, iat), false},
+            {"call rel32 within .text", direct(0xE8, b.code_va(0)), false},
+            {"jmp rel32 into a second executable section", direct(0xE9, text2), true},
+            {"call rel32 to an address no section maps", direct(0xE8, b.base() + 0x00F00000U),
+             false},
+            {"call rel32 below the image base", direct(0xE8, at - 0x01000000U), false},
+            {"call through a register has no static target", {0xFF, 0xD0}, false},
+            {"mov is no branch", {0x8B, 0xC1}, false},
+        };
+        for (const Row& row : rows) {
+            CAPTURE(row.label);
+            const auto ins = dis.decode(std::as_bytes(std::span(row.code)), at);
+            REQUIRE(ins.has_value());
+            const auto got = extract_cross_section_flow(*ins, *img, table);
+            REQUIRE(got.has_value() == row.flagged);
+            if (row.flagged) {
+                CHECK(pt::describe(*got) ==
+                      pt::describe(papa::features::extractors::FeatureWithAddress{
+                          pt::feat<Characteristic>("cross section flow"), pt::va(at)}));
+            }
+        }
+
+        // A branch the image does not contain is not judged
+        const std::vector<std::uint8_t> call = direct(0xE8, slot);
+        const auto below = dis.decode(std::as_bytes(std::span(call)), 0x1000);
+        REQUIRE(below.has_value());
+        CHECK_FALSE(extract_cross_section_flow(*below, *img, table).has_value());
     }
 }
 
-TEST_CASE("insn: extract_cross_section_flow flags an indirect call through a non-import data slot") {
-    const auto* img = chrome_image();
-    if (img == nullptr) {
-        MESSAGE("chrome.exe fixture missing, skipping");
-        return;
-    }
-    papa::features::extractors::papa_native::Disassembler dis(img->is_64bit());
-    const auto table = papa::features::extractors::papa_native::build_import_table(*img);
+namespace {
 
-    const auto decode_at = [&](std::uint64_t va) -> DecodedInsn {
-        const auto bytes = img->read_at_rva(va - img->image_base(), 16);
-        REQUIRE(bytes.has_value());
-        auto ins = dis.decode(*bytes, va);
-        REQUIRE(ins.has_value());
-        return *ins;
+// The api features of every instruction of every function the backend recovers, keyed
+// by instruction address. No FLIRT signatures, so every build sees the same functions
+[[nodiscard]] std::map<std::uint64_t, Features> api_by_insn(const papa::pe::PeImage& img) {
+    const pn::flirt::FlirtSignatureSet no_sigs;
+    auto backend = pn::PapaNativeBackend::build(img, no_sigs);
+    REQUIRE(backend.has_value());
+    std::map<std::uint64_t, Features> out;
+    for (const Function& f : backend->functions()) {
+        for (const auto& bb : f.basic_blocks) {
+            for (const DecodedInsn& ins : bb.instructions) {
+                auto feats = pn::insn::extract_api_features(f, ins, img, backend->imports(),
+                                                            backend->disassembler());
+                if (!feats.empty()) { out.emplace(ins.va, std::move(feats)); }
+            }
+        }
+    }
+    return out;
+}
+
+// One expected api use: the instruction's code offset and the names it yields
+struct ApiRow {
+    const char*              label;
+    std::uint32_t            at;
+    std::vector<std::string> names;
+};
+
+// Checks that each row's instruction yields exactly its names, and nothing else does
+void check_api(const pt::PeBuilder& b, const std::vector<ApiRow>& rows) {
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    auto by_insn = api_by_insn(*img);
+    for (const ApiRow& row : rows) {
+        CAPTURE(row.label);
+        Features want;
+        for (const std::string& name : row.names) {
+            want.emplace_back(pt::feat<papa::features::Api>(name), pt::va(b.code_va(row.at)));
+        }
+        CHECK(pt::describe(by_insn[b.code_va(row.at)]) == pt::describe(want));
+        by_insn.erase(b.code_va(row.at));
+    }
+    for (const auto& [at, feats] : by_insn) {
+        CAPTURE(at);
+        CHECK(pt::describe(feats).empty());
+    }
+}
+
+const std::vector<std::string> kCreateFileW{"kernel32.CreateFileW", "CreateFileW",
+                                            "kernel32.CreateFile", "CreateFile"};
+const std::vector<std::string> kWriteFile{"kernel32.WriteFile", "WriteFile"};
+
+}  // namespace
+
+TEST_CASE("api: x64 calls through the IAT, thunk chains and registers name their import") {
+    pt::PeBuilder b;
+    b.imports = {{"kernel32.dll", {"CreateFileW", "WriteFile"}},
+                 {"ws2_32.dll", {"#6"}},
+                 {"mydll.dll", {"#3"}}};
+    b.data.assign(0x10, 0);
+
+    // Thunks, then one function per use, each its own .pdata row
+    const auto thunk     = b.add_function({0xFF, 0x25, 0, 0, 0, 0});            // jmp [rip+]
+    const auto endbr     = b.add_function({0xF3, 0x0F, 0x1E, 0xFA,              // endbr64
+                                           0xFF, 0x25, 0, 0, 0, 0});            // jmp [rip+]
+    const auto hop2      = b.add_function({0xE9, 0, 0, 0, 0});                  // jmp thunk
+    const auto hop1      = b.add_function({0xE9, 0, 0, 0, 0});                  // jmp hop2
+    const auto self_loop = b.add_function({0xEB, 0xFE});                        // jmp $
+    const auto not_thunk = b.add_function({0x33, 0xC0, 0xC3});                  // xor eax, eax
+    const auto reg_thunk = b.add_function({0xFF, 0xE0});                        // jmp rax
+    const std::vector<std::uint8_t> call_rel{0xE8, 0, 0, 0, 0, 0xC3};
+    const std::vector<std::uint8_t> call_mem{0xFF, 0x15, 0, 0, 0, 0, 0xC3};
+    const auto via_iat   = b.add_function(call_mem);
+    const auto ordinal   = b.add_function(call_mem);
+    const auto unnamed   = b.add_function(call_mem);
+    const auto via_slot  = b.add_function(call_mem);
+    const auto to_thunk  = b.add_function(call_rel);
+    const auto to_endbr  = b.add_function(call_rel);
+    const auto to_chain  = b.add_function(call_rel);
+    const auto to_loop   = b.add_function(call_rel);
+    const auto to_code   = b.add_function(call_rel);
+    const auto to_reg    = b.add_function(call_rel);
+    // mov rax, [rip+] / call rax / ret
+    const auto reg_same = b.add_function({0x48, 0x8B, 0x05, 0, 0, 0, 0, 0xFF, 0xD0, 0xC3});
+    const auto reg_slot = b.add_function({0x48, 0x8B, 0x05, 0, 0, 0, 0, 0xFF, 0xD0, 0xC3});
+    // mov rax, [rip+] / test ecx, ecx / jz L / nop / L: call rax / ret
+    const auto reg_pred = b.add_function(
+        {0x48, 0x8B, 0x05, 0, 0, 0, 0, 0x85, 0xC9, 0x74, 0x01, 0x90, 0xFF, 0xD0, 0xC3});
+    // The same with a second test edx, edx / jz / nop between, so the mov is two blocks up
+    const auto reg_far = b.add_function({0x48, 0x8B, 0x05, 0, 0, 0, 0, 0x85, 0xC9, 0x74, 0x01,
+                                         0x90, 0x85, 0xD2, 0x74, 0x01, 0x90, 0xFF, 0xD0, 0xC3});
+    // mov rax, [rip+] / ret
+    const auto no_call = b.add_function({0x48, 0x8B, 0x05, 0, 0, 0, 0, 0xC3});
+
+    const std::uint64_t create = b.iat_va("kernel32.dll", "CreateFileW");
+    const std::uint64_t write  = b.iat_va("kernel32.dll", "WriteFile");
+    point(b, thunk, 6, thunk + 2, create);
+    point(b, endbr + 4, 6, endbr + 6, write);
+    point(b, hop2, 5, hop2 + 1, b.code_va(thunk));
+    point(b, hop1, 5, hop1 + 1, b.code_va(hop2));
+    point(b, via_iat, 6, via_iat + 2, create);
+    point(b, ordinal, 6, ordinal + 2, b.iat_va("ws2_32.dll", "#6"));
+    point(b, unnamed, 6, unnamed + 2, b.iat_va("mydll.dll", "#3"));
+    point(b, via_slot, 6, via_slot + 2, b.data_va(0));
+    point(b, to_thunk, 5, to_thunk + 1, b.code_va(thunk));
+    point(b, to_endbr, 5, to_endbr + 1, b.code_va(endbr));
+    point(b, to_chain, 5, to_chain + 1, b.code_va(hop1));
+    point(b, to_loop, 5, to_loop + 1, b.code_va(self_loop));
+    point(b, to_code, 5, to_code + 1, b.code_va(not_thunk));
+    point(b, to_reg, 5, to_reg + 1, b.code_va(reg_thunk));
+    point(b, reg_same, 7, reg_same + 3, write);
+    point(b, reg_slot, 7, reg_slot + 3, b.data_va(0));
+    point(b, reg_pred, 7, reg_pred + 3, create);
+    point(b, reg_far, 7, reg_far + 3, write);
+    point(b, no_call, 7, no_call + 3, create);
+
+    check_api(b, {
+        {"a jmp [rip+iat] thunk", thunk, kCreateFileW},
+        {"the jmp after endbr64", endbr + 4, kWriteFile},
+        {"a jmp to a thunk", hop2, kCreateFileW},
+        {"a jmp to a jmp to a thunk", hop1, kCreateFileW},
+        {"call [rip+iat]", via_iat, kCreateFileW},
+        {"an ordinal the table names", ordinal, {"ws2_32.getsockname", "getsockname"}},
+        {"an ordinal the table cannot name", unnamed, {"mydll.#3", "#3"}},
+        {"call [rip+slot] where the slot is no import", via_slot, {}},
+        {"a call to a thunk", to_thunk, kCreateFileW},
+        {"a call to a thunk that starts with endbr64", to_endbr, kWriteFile},
+        {"a call through a two-hop jmp chain", to_chain, kCreateFileW},
+        {"a call to a jmp to itself stops at the depth limit", to_loop, {}},
+        {"a call to code that is no thunk", to_code, {}},
+        {"a call to a jmp through a register", to_reg, {}},
+        {"call rax after mov rax, [rip+iat] in the same block", reg_same + 7, kWriteFile},
+        {"call rax after mov rax from a slot that is no import", reg_slot + 7, {}},
+        {"call rax whose mov is in the block before", reg_pred + 12, kCreateFileW},
+        {"call rax whose mov is two blocks before", reg_far + 17, kWriteFile},
+        {"a mov from the IAT is no api use", no_call, {}},
+    });
+}
+
+TEST_CASE("api: x86 calls through the IAT, a thunk and a register name their import") {
+    pt::PeBuilder b;
+    b.x64     = false;
+    b.imports = {{"kernel32.dll", {"CreateFileW", "WriteFile"}}};
+    // jmp [iat] / int3 / call [iat] / call thunk / mov eax, [iat] / call eax / ret
+    b.code = {0xFF, 0x25, 0, 0, 0, 0, 0xCC,
+              0xFF, 0x15, 0, 0, 0, 0,
+              0xE8, 0, 0, 0, 0,
+              0xA1, 0, 0, 0, 0,
+              0xFF, 0xD0,
+              0xC3};
+    b.entry_offset = 7;
+    b.exports      = {{"thunk", 0, ""}};
+    const auto abs32 = [&b](std::uint32_t at, std::uint64_t target) {
+        pt::detail::poke(b.code, at, static_cast<std::uint32_t>(target));
     };
+    abs32(2, b.iat_va("kernel32.dll", "CreateFileW"));
+    abs32(9, b.iat_va("kernel32.dll", "CreateFileW"));
+    point(b, 13, 5, 14, b.code_va(0));
+    abs32(19, b.iat_va("kernel32.dll", "WriteFile"));
 
-    // 0x14003da3b: call qword ptr [rip+0x265d9f] reads a function pointer from a .rdata
-    // slot (not the IAT) in a different section than the .text call site
-    CHECK(extract_cross_section_flow(decode_at(0x14003da3bULL), *img, table).has_value());
-
-    // 0x14003d856: a call to the VirtualAllocEx IAT slot. capa skips import
-    // calls, so this must not be flagged as cross-section flow
-    CHECK_FALSE(extract_cross_section_flow(decode_at(0x14003d856ULL), *img, table).has_value());
-}
-
-TEST_CASE("insn: extract_api_features ignores non-call instructions") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    papa::features::extractors::papa_native::Disassembler disasm(img->is_64bit());
-    auto table = papa::features::extractors::papa_native::build_import_table(*img);
-
-    DecodedInsn ins = make_insn(0x401000, "mov");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_MOV;
-    ins.is_call  = false;
-    Function fn = papa_tests::single_block_function({ins});
-
-    auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, ins, *img, table, disasm);
-    CHECK(out.empty());
-}
-
-TEST_CASE("insn: extract_api_features yields names when target hits the IAT") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    papa::features::extractors::papa_native::Disassembler disasm(img->is_64bit());
-    auto table = papa::features::extractors::papa_native::build_import_table(*img);
-
-    // Pick any IAT VA from the table to drive the kImmMem path
-    REQUIRE_FALSE(table.by_iat_va.empty());
-    const std::uint64_t iat_va = table.by_iat_va.begin()->first;
-
-    DecodedInsn ins = make_insn(0x401000, "call");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_CALL;
-    ins.is_call  = true;
-    ins.length   = 6;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kImmMem;
-    ins.operands[0].disp = static_cast<std::int64_t>(iat_va);
-
-    Function fn = papa_tests::single_block_function({ins});
-    auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, ins, *img, table, disasm);
-    CHECK_FALSE(out.empty());
-    for (const auto& [feat, _addr] : out) {
-        CHECK(feat->tag() == FeatureTag::kApi);
-    }
-}
-
-TEST_CASE("insn: extract_api_features returns nothing when no IAT match found") {
-    const auto* img = notepad_image();
-    if (img == nullptr) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    papa::features::extractors::papa_native::Disassembler disasm(img->is_64bit());
-    auto table = papa::features::extractors::papa_native::build_import_table(*img);
-
-    DecodedInsn ins = make_insn(0x401000, "call");
-    ins.zyd_mnem = ZYDIS_MNEMONIC_CALL;
-    ins.is_call  = true;
-    ins.length   = 6;
-    ins.operand_count = 1;
-    ins.operands[0].kind = OperandKind::kImmMem;
-    ins.operands[0].disp = 0xDEADBEEF;             // no IAT lives there
-
-    Function fn = papa_tests::single_block_function({ins});
-    auto out = papa::features::extractors::papa_native::insn::extract_api_features(
-        fn, ins, *img, table, disasm);
-    CHECK(out.empty());
+    check_api(b, {
+        {"a jmp [iat] thunk", 0, kCreateFileW},
+        {"call [iat]", 7, kCreateFileW},
+        {"a call to a thunk", 13, kCreateFileW},
+        {"call eax after mov eax, [iat]", 23, kWriteFile},
+    });
 }

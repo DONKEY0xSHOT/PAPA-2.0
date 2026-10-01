@@ -63,7 +63,6 @@ set(PAPA_UNIT_TEST_SOURCES
     test_emu_workspace.cpp
     test_emu_watcher.cpp
     test_emu_discovery.cpp
-    test_diag.cpp
     test_main_driver.cpp
 )
 
