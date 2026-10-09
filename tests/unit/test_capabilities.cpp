@@ -10,15 +10,24 @@
 #include "papa/features/file.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/global_.h"
+#include "papa/features/extractors/papa_native/backend.h"
+#include "papa/features/extractors/papa_native/extractor.h"
+#include "papa/features/extractors/papa_native/flirt/flirt.h"
 #include "papa/features/extractors/pefile.h"
 #include "papa/features/extractors/pefile_extractor.h"
+#include "papa/loader.h"
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
+#include "papa/render/json.h"
+#include "papa/render/result_document.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -260,5 +269,88 @@ TEST_CASE("limitation gate: the verdict always agrees with the full file-scope p
         const bool via_gate = papa::capabilities::has_static_limitation(rs, *gate_caps);
         CHECK(via_gate == papa::capabilities::has_static_limitation(rs, *full_caps));
         CHECK(via_gate == row.limited);
+    }
+}
+
+TEST_CASE("capabilities: one, four and automatic worker threads give byte-identical reports") {
+    namespace pn = papa::features::extractors::papa_native;
+    // Four function shapes, repeated so the image has work for four workers at once
+    const std::vector<std::vector<std::uint8_t>> shapes{
+        {0x33, 0xC0, 0xC3},                                            // xor eax, eax | ret
+        {0xB8, 0x03, 0x00, 0x00, 0x00, 0xFF, 0xC8, 0x75, 0xFC, 0xC3},  // L: dec eax | jnz L
+        {0x48, 0x33, 0xCA, 0xC3},                                      // xor rcx, rdx | ret
+        {0xB8, 0x78, 0x56, 0x34, 0x12, 0xC3},                          // mov eax, 0x12345678
+    };
+    papa_tests::PeBuilder b;
+    b.x64 = true;
+    for (std::size_t i = 0; i < 160; ++i) { b.add_function(shapes[i % shapes.size()]); }
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    const pn::flirt::FlirtSignatureSet no_sigs;
+    auto backend = pn::PapaNativeBackend::build(*img, no_sigs);
+    REQUIRE(backend.has_value());
+    const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
+    REQUIRE(extractor.get_functions().size() == 160U);
+
+    // A rule at every scope, joined by match references within and across scopes
+    const auto rs = papa_tests::ruleset({
+        papa_tests::rule_yaml("nzxor", "instruction", {"characteristic: nzxor"}),
+        papa_tests::rule_yaml("tight-loop", "basic block", {"characteristic: tight loop"}),
+        papa_tests::rule_yaml("magic", "function", {"number: 0x12345678"}, "test/magic"),
+        papa_tests::rule_yaml("loop-or-xor", "function",
+                              {"or:\n      - match: nzxor\n      - match: tight-loop"}),
+        papa_tests::rule_yaml("file-magic", "file", {"match: test/magic"}),
+        papa_tests::rule_yaml("has-text", "file", {"section: .text"}),
+    });
+    const auto report = [&](unsigned threads) {
+        const auto caps =
+            papa::capabilities::static_::find_static_capabilities(rs, extractor, threads);
+        REQUIRE(caps.has_value());
+        auto meta = papa::collect_metadata("sample.exe", {"sample.exe"}, {}, *img, *caps);
+        meta.timestamp = "2026-01-01T00:00:00Z";
+        return papa::render::json::render_to_string(
+            papa::render::build_document(std::move(meta), rs, caps->all_matches), false);
+    };
+
+    const std::string serial = report(1U);
+    for (const std::string_view name :
+         {"nzxor", "tight-loop", "magic", "loop-or-xor", "file-magic", "has-text"}) {
+        CAPTURE(name);
+        CHECK(serial.find("\"" + std::string(name) + "\":{") != std::string::npos);
+    }
+    CHECK(report(4U) == serial);
+    CHECK(report(0U) == serial);
+}
+
+namespace {
+
+// A fake extractor with empty functions, the one at index throw_at failing to extract
+class ThrowingExtractor final : public papa_tests::FakeExtractor {
+public:
+    ThrowingExtractor(std::size_t functions, std::size_t throw_at)
+        : FakeExtractor({}, std::vector<std::vector<papa::features::FeaturePtr>>(functions)),
+          throw_at_(papa_tests::va(kFirstFunction + 0x10U * throw_at)) {}
+
+    [[nodiscard]] std::vector<papa::features::extractors::FeatureWithAddress>
+    extract_function_features(const papa::features::extractors::FunctionHandle& fh) const override {
+        if (fh.addr == throw_at_) { throw std::runtime_error("function 57 failed"); }
+        return FakeExtractor::extract_function_features(fh);
+    }
+
+private:
+    papa::features::Address throw_at_;
+};
+
+}  // namespace
+
+TEST_CASE("capabilities: an exception in one function reaches the caller with any worker count") {
+    const auto rs =
+        papa_tests::ruleset({papa_tests::rule_yaml("any-api", "function", {"api: a"})});
+    const ThrowingExtractor extractor(128U, 57U);
+    for (const unsigned threads : {1U, 4U, 0U}) {
+        CAPTURE(threads);
+        CHECK_THROWS_WITH_AS(
+            (void)papa::capabilities::static_::find_static_capabilities(rs, extractor, threads),
+            "function 57 failed", std::runtime_error);
     }
 }

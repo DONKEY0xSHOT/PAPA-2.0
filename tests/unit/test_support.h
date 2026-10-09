@@ -572,7 +572,7 @@ public_module(std::string name) {
 
 /// A StaticFeatureExtractor that yields the features it was given. File features sit
 /// at the base 0x400000, and function i at 0x401000 + 0x10 * i with no basic blocks
-class FakeExtractor final : public papa::features::extractors::StaticFeatureExtractor {
+class FakeExtractor : public papa::features::extractors::StaticFeatureExtractor {
 public:
     static constexpr std::uint64_t kBase          = 0x400000;
     static constexpr std::uint64_t kFirstFunction = 0x401000;
