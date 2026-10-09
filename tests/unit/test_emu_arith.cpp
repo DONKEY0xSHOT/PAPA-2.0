@@ -28,8 +28,6 @@ using emu::kEflagsOf;
 using emu::kEflagsPf;
 using emu::kEflagsSf;
 using emu::kEflagsZf;
-using emu::kRegCl;
-using emu::kRegDl;
 using emu::kRegEax;
 using emu::kRegEcx;
 using emu::kRegEdx;
@@ -107,6 +105,16 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
          {{kRegRax, 0x80000000ULL}}, {}, {{kRegRax, 0xFFFFFFFF80000000ULL}}, {}},
         {"amd64 cqo sign-extends rax into rdx", k64, insn(ZYDIS_MNEMONIC_CQO),
          {{kRegRax, 0x8000000000000000ULL}}, {}, {{kRegRdx, 0xFFFFFFFFFFFFFFFFULL}}, {}},
+        {"cwd sign-extends a negative ax into dx", k32, insn(ZYDIS_MNEMONIC_CWD),
+         {{kRegEax, 0x00008000U}, {kRegEdx, 0x12340000U}}, {}, {{kRegEdx, 0x1234FFFFU}}, {}},
+        {"cwd clears dx for a non-negative ax", k32, insn(ZYDIS_MNEMONIC_CWD),
+         {{kRegEax, 0xFFFF7FFFU}, {kRegEdx, 0x1234FFFFU}}, {}, {{kRegEdx, 0x12340000U}}, {}},
+        {"cbw sign-extends al into ax", k32, insn(ZYDIS_MNEMONIC_CBW),
+         {{kRegEax, 0x12345680U}}, {}, {{kRegEax, 0x1234FF80U}}, {}},
+        {"cwde sign-extends ax into eax", k32, insn(ZYDIS_MNEMONIC_CWDE),
+         {{kRegEax, 0x12348000U}}, {}, {{kRegEax, 0xFFFF8000U}}, {}},
+        {"amd64 cwde zero-extends its eax result into rax", k64, insn(ZYDIS_MNEMONIC_CWDE),
+         {{kRegRax, 0xAAAAAAAA00008000ULL}}, {}, {{kRegRax, 0x00000000FFFF8000ULL}}, {}},
 
         {"add sets the result and the arithmetic flags", k32,
          insn(ZYDIS_MNEMONIC_ADD, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4)),
@@ -180,6 +188,34 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
         {"imul two-operand multiplies into the destination", k32,
          insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4)),
          {{kRegEax, 4U}, {kRegEcx, 3U}}, {}, {{kRegEax, 12U}}, {}},
+        {"imul three-operand sign-extends the immediate and flags a product past the width", k32,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4),
+              imm(0xFEU, 1)),
+         {{kRegEcx, 3U}}, {}, {{kRegEax, 0xFFFFFFFAU}, {kRegEcx, 3U}},
+         {{kEflagsCf, true}, {kEflagsOf, true}}},
+        // vivisect tests the signed product with is_unsigned_carry, so any negative one carries
+        {"imul one-operand writes edx:eax and flags a negative product (vivisect quirk)", k32,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_ECX, 4)),
+         {{kRegEax, 0xFFFFFFFEU}, {kRegEcx, 3U}}, {},
+         {{kRegEax, 0xFFFFFFFAU}, {kRegEdx, 0xFFFFFFFFU}},
+         {{kEflagsCf, true}, {kEflagsOf, true}, {kEflagsPf, true}, {kEflagsSf, false}}},
+        {"imul one-operand clears CF and OF for a product that fits", k32,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_ECX, 4)),
+         {{kRegEax, 3U}, {kRegEcx, 4U}, {kRegEdx, 0xDEADBEEFU}}, {{kEflagsCf, true}},
+         {{kRegEax, 12U}, {kRegEdx, 0U}}, {{kEflagsCf, false}, {kEflagsOf, false}}},
+        {"imul of a byte writes the whole product into ax", k32,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_CL, 1)),
+         {{kRegEax, 0x123400FEU}, {kRegEcx, 3U}}, {}, {{kRegEax, 0x1234FFFAU}},
+         {{kEflagsCf, true}}},
+        {"amd64 imul r64 writes the signed rdx:rax product", k64,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_RCX, 8)),
+         {{kRegRax, static_cast<std::uint64_t>(-3)}, {kRegRcx, 5U}}, {{kEflagsCf, true}},
+         {{kRegRax, static_cast<std::uint64_t>(-15)}, {kRegRdx, 0xFFFFFFFFFFFFFFFFULL}},
+         {{kEflagsCf, false}, {kEflagsOf, false}}},
+        {"amd64 imul r64 flags a product past 64 bits", k64,
+         insn(ZYDIS_MNEMONIC_IMUL, reg(ZYDIS_REGISTER_RCX, 8)),
+         {{kRegRax, 0x4000000000000000ULL}, {kRegRcx, 4U}}, {}, {{kRegRax, 0U}, {kRegRdx, 1U}},
+         {{kEflagsCf, true}, {kEflagsOf, true}}},
         {"div computes quotient in eax and remainder in edx", k32,
          insn(ZYDIS_MNEMONIC_DIV, reg(ZYDIS_REGISTER_ECX, 4)),
          {{kRegEdx, 0U}, {kRegEax, 13U}, {kRegEcx, 3U}}, {}, {{kRegEax, 4U}, {kRegEdx, 1U}}, {}},
@@ -187,6 +223,20 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
          insn(ZYDIS_MNEMONIC_IDIV, reg(ZYDIS_REGISTER_ECX, 4)),
          {{kRegEdx, 0xFFFFFFFFU}, {kRegEax, static_cast<std::uint32_t>(-13)}, {kRegEcx, 3U}}, {},
          {{kRegEax, static_cast<std::uint32_t>(-4)}}, {}},
+        {"div of a byte writes (quotient << 8) + remainder over all of eax (vivisect quirk)", k32,
+         insn(ZYDIS_MNEMONIC_DIV, reg(ZYDIS_REGISTER_CL, 1)),
+         {{kRegEax, 0xAAAA000DU}, {kRegEcx, 3U}}, {}, {{kRegEax, 0x401U}}, {}},
+        {"div of a word divides dx:ax and keeps the upper halves", k32,
+         insn(ZYDIS_MNEMONIC_DIV, reg(ZYDIS_REGISTER_CX, 2)),
+         {{kRegEdx, 0xBBBB0001U}, {kRegEax, 0xAAAA0000U}, {kRegEcx, 3U}}, {},
+         {{kRegEax, 0xAAAA5555U}, {kRegEdx, 0xBBBB0001U}}, {}},
+        {"idiv of a byte packs the remainder into ah and the quotient into al", k32,
+         insn(ZYDIS_MNEMONIC_IDIV, reg(ZYDIS_REGISTER_CL, 1)),
+         {{kRegEax, 0x1234FFF9U}, {kRegEcx, 2U}}, {}, {{kRegEax, 0x1234FFFDU}}, {}},
+        {"idiv of a word divides the signed dx:ax", k32,
+         insn(ZYDIS_MNEMONIC_IDIV, reg(ZYDIS_REGISTER_CX, 2)),
+         {{kRegEdx, 0x0000FFFFU}, {kRegEax, 0x0000FF9CU}, {kRegEcx, 7U}}, {},
+         {{kRegEax, 0x0000FFF2U}, {kRegEdx, 0x0000FFFEU}}, {}},
         {"amd64 mul r64 produces the rdx:rax product", k64,
          insn(ZYDIS_MNEMONIC_MUL, reg(ZYDIS_REGISTER_RCX, 8)),
          {{kRegRax, 0x100000000ULL}, {kRegRcx, 0x100000000ULL}}, {},
@@ -210,17 +260,6 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
         {"setz writes 0 into AL when ZF is clear", k32,
          insn(ZYDIS_MNEMONIC_SETZ, reg(ZYDIS_REGISTER_AL, 1)),
          {{kRegEax, 0xFFFFFF01U}}, {{kEflagsZf, false}}, {{kRegEax, 0xFFFFFF00U}}, {}},
-        {"setnz is the inverse of setz", k32, insn(ZYDIS_MNEMONIC_SETNZ, reg(ZYDIS_REGISTER_CL, 1)),
-         {}, {{kEflagsZf, false}}, {{kRegCl, 1U}}, {}},
-        {"setl follows the signed less-than condition", k32,
-         insn(ZYDIS_MNEMONIC_SETL, reg(ZYDIS_REGISTER_DL, 1)),
-         {}, {{kEflagsSf, true}, {kEflagsOf, false}}, {{kRegDl, 1U}}, {}},
-        {"cmovz copies when ZF is set", k32,
-         insn(ZYDIS_MNEMONIC_CMOVZ, reg(ZYDIS_REGISTER_ECX, 4), reg(ZYDIS_REGISTER_EDX, 4)),
-         {{kRegEcx, 0x1111U}, {kRegEdx, 0x2222U}}, {{kEflagsZf, true}}, {{kRegEcx, 0x2222U}}, {}},
-        {"cmovz skips when ZF is clear", k32,
-         insn(ZYDIS_MNEMONIC_CMOVZ, reg(ZYDIS_REGISTER_ECX, 4), reg(ZYDIS_REGISTER_EDX, 4)),
-         {{kRegEcx, 0x1111U}, {kRegEdx, 0x2222U}}, {{kEflagsZf, false}}, {{kRegEcx, 0x1111U}}, {}},
         {"bt sets CF from a set addressed bit", k32,
          insn(ZYDIS_MNEMONIC_BT, reg(ZYDIS_REGISTER_EAX, 4), imm(3, 1)),
          {{kRegEax, 0x8U}}, {}, {}, {{kEflagsCf, true}}},
@@ -230,6 +269,35 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
         {"bts sets the addressed bit and reports the old value in CF", k32,
          insn(ZYDIS_MNEMONIC_BTS, reg(ZYDIS_REGISTER_EAX, 4), imm(5, 1)),
          {{kRegEax, 0U}}, {{kEflagsCf, true}}, {{kRegEax, 0x20U}}, {{kEflagsCf, false}}},
+        {"btr clears the addressed bit and reports the old value in CF", k32,
+         insn(ZYDIS_MNEMONIC_BTR, reg(ZYDIS_REGISTER_EAX, 4), imm(5, 1)),
+         {{kRegEax, 0x28U}}, {}, {{kRegEax, 0x08U}}, {{kEflagsCf, true}}},
+        {"btc flips a set addressed bit", k32,
+         insn(ZYDIS_MNEMONIC_BTC, reg(ZYDIS_REGISTER_EAX, 4), imm(3, 1)),
+         {{kRegEax, 0x08U}}, {}, {{kRegEax, 0U}}, {{kEflagsCf, true}}},
+        {"btc takes the bit index modulo the operand width", k32,
+         insn(ZYDIS_MNEMONIC_BTC, reg(ZYDIS_REGISTER_EAX, 4), imm(33, 1)),
+         {{kRegEax, 0U}}, {{kEflagsCf, true}}, {{kRegEax, 0x2U}}, {{kEflagsCf, false}}},
+
+        {"xchg swaps its operands", k32,
+         insn(ZYDIS_MNEMONIC_XCHG, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4)),
+         {{kRegEax, 1U}, {kRegEcx, 2U}}, {}, {{kRegEax, 2U}, {kRegEcx, 1U}}, {}},
+        {"xadd stores the sum and hands the old destination to the source", k32,
+         insn(ZYDIS_MNEMONIC_XADD, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4)),
+         {{kRegEax, 5U}, {kRegEcx, 3U}}, {}, {{kRegEax, 8U}, {kRegEcx, 5U}},
+         {{kEflagsZf, false}, {kEflagsCf, false}, {kEflagsSf, false}}},
+        {"xadd that wraps to zero sets ZF and CF", k32,
+         insn(ZYDIS_MNEMONIC_XADD, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_ECX, 4)),
+         {{kRegEax, 0xFFFFFFFFU}, {kRegEcx, 1U}}, {}, {{kRegEax, 0U}, {kRegEcx, 0xFFFFFFFFU}},
+         {{kEflagsZf, true}, {kEflagsCf, true}, {kEflagsPf, true}}},
+        {"cmpxchg stores the source when the accumulator equals the destination", k32,
+         insn(ZYDIS_MNEMONIC_CMPXCHG, reg(ZYDIS_REGISTER_ECX, 4), reg(ZYDIS_REGISTER_EDX, 4)),
+         {{kRegEax, 7U}, {kRegEcx, 7U}, {kRegEdx, 9U}}, {}, {{kRegEcx, 9U}, {kRegEax, 7U}},
+         {{kEflagsZf, true}}},
+        {"cmpxchg loads the destination into the accumulator when they differ", k32,
+         insn(ZYDIS_MNEMONIC_CMPXCHG, reg(ZYDIS_REGISTER_ECX, 4), reg(ZYDIS_REGISTER_EDX, 4)),
+         {{kRegEax, 7U}, {kRegEcx, 8U}, {kRegEdx, 9U}}, {{kEflagsZf, true}},
+         {{kRegEcx, 8U}, {kRegEax, 8U}}, {{kEflagsZf, false}}},
 
         {"shl shifts left and sets the carry out", k32,
          insn(ZYDIS_MNEMONIC_SHL, reg(ZYDIS_REGISTER_EAX, 4), imm(4U, 1)),
@@ -251,6 +319,23 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
         {"amd64 shr rax masks the shift count to 0x3f", k64,
          insn(ZYDIS_MNEMONIC_SHR, reg(ZYDIS_REGISTER_RAX, 8), imm(40, 1)),
          {{kRegRax, 0xFF00000000000000ULL}}, {}, {{kRegRax, 0x0000000000FF0000ULL}}, {}},
+        {"rol rotates the top bit around into bit 0 and CF", k32,
+         insn(ZYDIS_MNEMONIC_ROL, reg(ZYDIS_REGISTER_EAX, 4), imm(1U, 1)),
+         {{kRegEax, 0x80000001U}}, {}, {{kRegEax, 0x00000003U}}, {{kEflagsCf, true}}},
+        {"rol of a byte rotates within the byte", k32,
+         insn(ZYDIS_MNEMONIC_ROL, reg(ZYDIS_REGISTER_AL, 1), imm(4U, 1)),
+         {{kRegEax, 0xAABBCC81U}}, {{kEflagsCf, true}}, {{kRegEax, 0xAABBCC18U}},
+         {{kEflagsCf, false}}},
+        {"rol by zero leaves the value and flags unchanged", k32,
+         insn(ZYDIS_MNEMONIC_ROL, reg(ZYDIS_REGISTER_EAX, 4), imm(0U, 1)),
+         {{kRegEax, 0x2U}}, {{kEflagsCf, true}}, {{kRegEax, 0x2U}}, {{kEflagsCf, true}}},
+        {"ror rotates bit 0 around into the top bit and CF", k32,
+         insn(ZYDIS_MNEMONIC_ROR, reg(ZYDIS_REGISTER_EAX, 4), imm(1U, 1)),
+         {{kRegEax, 0x00000003U}}, {}, {{kRegEax, 0x80000001U}}, {{kEflagsCf, true}}},
+        {"amd64 ror rax keeps a count past 31", k64,
+         insn(ZYDIS_MNEMONIC_ROR, reg(ZYDIS_REGISTER_RAX, 8), imm(36U, 1)),
+         {{kRegRax, 0x000000F000000000ULL}}, {{kEflagsCf, true}}, {{kRegRax, 0xFULL}},
+         {{kEflagsCf, false}}},
     };
     for (const Row& row : rows) {
         CAPTURE(row.label);
@@ -269,38 +354,82 @@ TEST_CASE("emu arith: each data, arithmetic, logic and shift handler leaves vivi
     }
 }
 
-TEST_CASE("emu sse: movups, movq and pxor write the XMM destination, zero-extending a narrow move") {
+TEST_CASE("emu sse: each simd move, xor and byte shift writes its bytes, zero-extending a narrow move") {
+    struct XmmValue {
+        std::uint32_t id;
+        emu::Xmm      value;
+    };
     struct Row {
-        std::string_view label;
-        std::uint32_t    src;
-        emu::Xmm         value;
-        pn::DecodedInsn  ins;
-        std::uint32_t    dst;
-        emu::Xmm         expected;
+        std::string_view      label;
+        std::vector<XmmValue> xmm_in;
+        std::vector<Reg>      regs_in;
+        pn::DecodedInsn       ins;
+        std::vector<XmmValue> xmm_out;
+        std::vector<Reg>      regs_out;
     };
     emu::Xmm counting{};
     for (std::size_t i = 0; i < counting.size(); ++i) {
         counting[i] = static_cast<std::uint8_t>(i + 1);
     }
+    // counting moved n bytes down for a positive n or up for a negative one, zero filled
+    const auto shifted = [&counting](int n) {
+        emu::Xmm out{};
+        for (int i = 0; i < 16; ++i) {
+            const int from = i + n;
+            if (from >= 0 && from < 16) {
+                out[static_cast<std::size_t>(i)] = counting[static_cast<std::size_t>(from)];
+            }
+        }
+        return out;
+    };
     const std::vector<Row> rows{
-        {"movups copies a full XMM register", 1, counting,
+        {"movups copies a full XMM register", {{1, counting}}, {},
          insn(ZYDIS_MNEMONIC_MOVUPS, reg(ZYDIS_REGISTER_XMM0, 16), reg(ZYDIS_REGISTER_XMM1, 16)),
-         0, counting},
-        {"movq moves 8 bytes and zero-extends the XMM destination", 2, xmm_fill(0xFF),
+         {{0, counting}}, {}},
+        {"movq moves 8 bytes and zero-extends the XMM destination", {{2, xmm_fill(0xFF)}}, {},
          insn(ZYDIS_MNEMONIC_MOVQ, reg(ZYDIS_REGISTER_XMM0, 16), reg(ZYDIS_REGISTER_XMM2, 16)),
-         0, xmm_fill(0xFF, 8)},
-        {"pxor of a register with itself clears it", 3, xmm_fill(0xAB),
+         {{0, xmm_fill(0xFF, 8)}}, {}},
+        {"movss moves 4 bytes and zero-extends the XMM destination", {{2, xmm_fill(0xFF)}}, {},
+         insn(ZYDIS_MNEMONIC_MOVSS, reg(ZYDIS_REGISTER_XMM0, 16), reg(ZYDIS_REGISTER_XMM2, 16)),
+         {{0, xmm_fill(0xFF, 4)}}, {}},
+        {"movsd with an XMM operand moves 8 bytes", {{3, xmm_fill(0xAB)}}, {},
+         insn(ZYDIS_MNEMONIC_MOVSD, reg(ZYDIS_REGISTER_XMM0, 16), reg(ZYDIS_REGISTER_XMM3, 16)),
+         {{0, xmm_fill(0xAB, 8)}}, {}},
+        {"movd from a general register loads its 4 bytes", {}, {{kRegEax, 0x11223344U}},
+         insn(ZYDIS_MNEMONIC_MOVD, reg(ZYDIS_REGISTER_XMM0, 16), reg(ZYDIS_REGISTER_EAX, 4)),
+         {{0, emu::Xmm{0x44, 0x33, 0x22, 0x11}}}, {}},
+        {"movd to a general register stores the low 4 bytes", {{1, counting}}, {},
+         insn(ZYDIS_MNEMONIC_MOVD, reg(ZYDIS_REGISTER_EAX, 4), reg(ZYDIS_REGISTER_XMM1, 16)),
+         {}, {{kRegEax, 0x04030201U}}},
+        {"pxor of a register with itself clears it", {{3, xmm_fill(0xAB)}}, {},
          insn(ZYDIS_MNEMONIC_PXOR, reg(ZYDIS_REGISTER_XMM3, 16), reg(ZYDIS_REGISTER_XMM3, 16)),
-         3, emu::Xmm{}},
+         {{3, emu::Xmm{}}}, {}},
+        {"psrldq shifts the bytes down", {{0, counting}}, {},
+         insn(ZYDIS_MNEMONIC_PSRLDQ, reg(ZYDIS_REGISTER_XMM0, 16), imm(4U, 1)),
+         {{0, shifted(4)}}, {}},
+        {"pslldq shifts the bytes up", {{0, counting}}, {},
+         insn(ZYDIS_MNEMONIC_PSLLDQ, reg(ZYDIS_REGISTER_XMM0, 16), imm(4U, 1)),
+         {{0, shifted(-4)}}, {}},
+        {"psrldq by 16 or more clears the register", {{0, counting}}, {},
+         insn(ZYDIS_MNEMONIC_PSRLDQ, reg(ZYDIS_REGISTER_XMM0, 16), imm(20U, 1)),
+         {{0, emu::Xmm{}}}, {}},
     };
     for (const Row& row : rows) {
         CAPTURE(row.label);
         emu::IntelEmulator e;
         // A stale destination shows that the move replaced all 16 bytes
-        e.regs().set_xmm(row.dst, xmm_fill(0xEE));
-        e.regs().set_xmm(row.src, row.value);
-        e.execute_opcode(row.ins);
-        CHECK(e.regs().get_xmm(row.dst) == row.expected);
+        for (const XmmValue& out : row.xmm_out) { e.regs().set_xmm(out.id, xmm_fill(0xEE)); }
+        for (const XmmValue& in : row.xmm_in) { e.regs().set_xmm(in.id, in.value); }
+        for (const Reg& r : row.regs_in) { e.regs().set_register(r.id, r.value); }
+        CHECK(e.execute_opcode(row.ins) == emu::ExecResult::kContinue);
+        for (const XmmValue& want : row.xmm_out) {
+            CAPTURE(want.id);
+            CHECK(e.regs().get_xmm(want.id) == want.value);
+        }
+        for (const Reg& want : row.regs_out) {
+            CAPTURE(want.id);
+            CHECK(e.regs().get_register(want.id) == want.value);
+        }
     }
 }
 
@@ -322,6 +451,27 @@ TEST_CASE("emu exec: execute_opcode reports its result and advances the pc only 
         {"an unmodeled mnemonic reports unsupported",
          insn(ZYDIS_MNEMONIC_RDRAND, reg(ZYDIS_REGISTER_EAX, 4)), {},
          emu::ExecResult::kUnsupported, 0x1000},
+        {"movsd with no XMM operand is the string move, which is unmodeled",
+         insn(ZYDIS_MNEMONIC_MOVSD, mem(ZYDIS_REGISTER_EDI, 0, 4), mem(ZYDIS_REGISTER_ESI, 0, 4)),
+         {}, emu::ExecResult::kUnsupported, 0x1000},
+        {"int3 reports a breakpoint", insn(ZYDIS_MNEMONIC_INT3), {},
+         emu::ExecResult::kBreakpoint, 0x1000},
+        {"int reports a breakpoint", insn(ZYDIS_MNEMONIC_INT, imm(0x2EU, 1)), {},
+         emu::ExecResult::kBreakpoint, 0x1000},
+        {"int1 reports a breakpoint", insn(ZYDIS_MNEMONIC_INT1), {},
+         emu::ExecResult::kBreakpoint, 0x1000},
+        {"ud0 reports a bad opcode", insn(ZYDIS_MNEMONIC_UD0), {}, emu::ExecResult::kBadOpcode,
+         0x1000},
+        {"ud1 reports a bad opcode", insn(ZYDIS_MNEMONIC_UD1), {}, emu::ExecResult::kBadOpcode,
+         0x1000},
+        {"ud2 reports a bad opcode", insn(ZYDIS_MNEMONIC_UD2), {}, emu::ExecResult::kBadOpcode,
+         0x1000},
+        {"in reports a port instruction",
+         insn(ZYDIS_MNEMONIC_IN, reg(ZYDIS_REGISTER_AL, 1), reg(ZYDIS_REGISTER_DX, 2)), {},
+         emu::ExecResult::kOutInstruction, 0x1000},
+        {"out reports a port instruction",
+         insn(ZYDIS_MNEMONIC_OUT, reg(ZYDIS_REGISTER_DX, 2), reg(ZYDIS_REGISTER_AL, 1)), {},
+         emu::ExecResult::kOutInstruction, 0x1000},
     };
     for (const Row& row : rows) {
         CAPTURE(row.label);

@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -115,6 +116,47 @@ struct ReadRow {
 };
 
 }  // namespace
+
+TEST_CASE("emu operands: reg_index_from_zydis maps each register family to its register or lane") {
+    struct Row {
+        std::string_view             label;
+        bool                         is_64bit;
+        ZydisRegister                reg;
+        std::optional<std::uint32_t> expected;
+    };
+    const std::vector<Row> rows{
+        {"amd64 rax", k64, ZYDIS_REGISTER_RAX, emu::kRegRax},
+        {"amd64 r15", k64, ZYDIS_REGISTER_R15, emu::kRegR15},
+        {"amd64 rip", k64, ZYDIS_REGISTER_RIP, emu::kRegRip},
+        {"amd64 eax is the low 32 bits of rax", k64, ZYDIS_REGISTER_EAX,
+         emu::make_meta_reg(0, 32, emu::kRegRax)},
+        {"amd64 r9d is the low 32 bits of r9", k64, ZYDIS_REGISTER_R9D,
+         emu::make_meta_reg(0, 32, emu::kRegR9)},
+        {"amd64 eip is the low 32 bits of rip", k64, ZYDIS_REGISTER_EIP,
+         emu::make_meta_reg(0, 32, emu::kRegRip)},
+        {"amd64 ax", k64, ZYDIS_REGISTER_AX, emu::kRegAx},
+        {"amd64 r10w is the low 16 bits of r10", k64, ZYDIS_REGISTER_R10W,
+         emu::make_meta_reg(0, 16, emu::kRegR10)},
+        {"amd64 al", k64, ZYDIS_REGISTER_AL, emu::kRegAl},
+        {"amd64 spl is the low byte of rsp", k64, ZYDIS_REGISTER_SPL,
+         emu::make_meta_reg(0, 8, emu::kRegRsp)},
+        {"amd64 r11b is the low byte of r11", k64, ZYDIS_REGISTER_R11B,
+         emu::make_meta_reg(0, 8, emu::kRegR11)},
+        {"amd64 ah", k64, ZYDIS_REGISTER_AH, emu::kRegAh},
+        {"amd64 has no general register for xmm0", k64, ZYDIS_REGISTER_XMM0, std::nullopt},
+        {"i386 eax", k32, ZYDIS_REGISTER_EAX, emu::kRegEax},
+        {"i386 eip", k32, ZYDIS_REGISTER_EIP, emu::kRegEip},
+        {"i386 si", k32, ZYDIS_REGISTER_SI, emu::kRegSi},
+        {"i386 bl", k32, ZYDIS_REGISTER_BL, emu::kRegBl},
+        {"i386 bh", k32, ZYDIS_REGISTER_BH, emu::kRegBh},
+        {"i386 has no rax", k32, ZYDIS_REGISTER_RAX, std::nullopt},
+        {"i386 has no r8d", k32, ZYDIS_REGISTER_R8D, std::nullopt},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(emu::reg_index_from_zydis(row.reg, row.is_64bit) == row.expected);
+    }
+}
 
 TEST_CASE("emu operands: get_oper_value reads registers, lanes, immediates, branch targets and memory") {
     // vivisect i386PcRelOper.getOperValue = op.va + op.size + imm. papa already

@@ -25,6 +25,7 @@ using papa_tests::reg;
 
 using emu::kEflagsCf;
 using emu::kEflagsOf;
+using emu::kEflagsPf;
 using emu::kEflagsSf;
 using emu::kEflagsZf;
 
@@ -75,28 +76,10 @@ TEST_CASE("emu cf: each jump goes to its target when its condition holds and fal
         std::uint64_t        target;
     };
     const std::vector<Row> rows{
-        {"jz on ZF", branch_insn(ZYDIS_MNEMONIC_JZ, 0x2000), {.eflags = kEflagsZf}, State{},
-         0x2000},
-        {"jnz on clear ZF", branch_insn(ZYDIS_MNEMONIC_JNZ, 0x2000), {}, State{.eflags = kEflagsZf},
-         0x2000},
-        {"jb on CF", branch_insn(ZYDIS_MNEMONIC_JB, 0x2000), {.eflags = kEflagsCf}, State{},
-         0x2000},
-        {"jnb on clear CF", branch_insn(ZYDIS_MNEMONIC_JNB, 0x2000), {}, State{.eflags = kEflagsCf},
-         0x2000},
-        {"jbe on CF or ZF", branch_insn(ZYDIS_MNEMONIC_JBE, 0x2000), {.eflags = kEflagsZf}, State{},
-         0x2000},
-        {"jnbe (above) on CF and ZF both clear", branch_insn(ZYDIS_MNEMONIC_JNBE, 0x2000), {},
-         State{.eflags = kEflagsCf}, 0x2000},
-        {"jl on SF != OF", branch_insn(ZYDIS_MNEMONIC_JL, 0x2000), {.eflags = kEflagsSf},
-         State{.eflags = kEflagsSf | kEflagsOf}, 0x2000},
-        {"jle on SF != OF or ZF", branch_insn(ZYDIS_MNEMONIC_JLE, 0x2000), {.eflags = kEflagsZf},
-         State{}, 0x2000},
-        {"jnle (greater) on clear ZF and SF == OF", branch_insn(ZYDIS_MNEMONIC_JNLE, 0x2000),
-         {.eflags = kEflagsSf | kEflagsOf}, State{.eflags = kEflagsSf}, 0x2000},
-        {"js on SF", branch_insn(ZYDIS_MNEMONIC_JS, 0x2000), {.eflags = kEflagsSf}, State{},
-         0x2000},
         {"jecxz on a zero ECX", branch_insn(ZYDIS_MNEMONIC_JECXZ, 0x2000), {.ecx = 0}, State{},
          0x2000},
+        {"jcxz on a zero CX even when the upper half of ECX is set",
+         branch_insn(ZYDIS_MNEMONIC_JCXZ, 0x2000), {.ecx = 0x10000}, State{}, 0x2000},
         {"a direct jmp always goes to its target", branch_insn(ZYDIS_MNEMONIC_JMP, 0x2000), {},
          std::nullopt, 0x2000},
         {"an indirect jmp through a register goes to the register value", jmp_eax(),
@@ -117,6 +100,84 @@ TEST_CASE("emu cf: each jump goes to its target when its condition holds and fal
         CHECK(run(row.ins, row.taken) == row.target);
         if (row.not_taken.has_value()) {
             CHECK(run(row.ins, *row.not_taken) == row.ins.va + row.ins.length);
+        }
+    }
+}
+
+TEST_CASE("emu cc: each jcc, setcc and cmovcc follows its condition on every flag state that decides it") {
+    struct Row {
+        std::string_view           label;
+        ZydisMnemonic              jcc;
+        ZydisMnemonic              setcc;
+        ZydisMnemonic              cmovcc;
+        std::vector<std::uint32_t> holds;
+        std::vector<std::uint32_t> fails;
+    };
+    constexpr std::uint32_t kNone = 0;
+    const std::vector<Row> rows{
+        {"b", ZYDIS_MNEMONIC_JB, ZYDIS_MNEMONIC_SETB, ZYDIS_MNEMONIC_CMOVB,
+         {kEflagsCf}, {kNone, kEflagsZf}},
+        {"nb", ZYDIS_MNEMONIC_JNB, ZYDIS_MNEMONIC_SETNB, ZYDIS_MNEMONIC_CMOVNB,
+         {kNone, kEflagsZf}, {kEflagsCf}},
+        {"be", ZYDIS_MNEMONIC_JBE, ZYDIS_MNEMONIC_SETBE, ZYDIS_MNEMONIC_CMOVBE,
+         {kEflagsCf, kEflagsZf}, {kNone}},
+        {"nbe", ZYDIS_MNEMONIC_JNBE, ZYDIS_MNEMONIC_SETNBE, ZYDIS_MNEMONIC_CMOVNBE,
+         {kNone}, {kEflagsCf, kEflagsZf}},
+        {"z", ZYDIS_MNEMONIC_JZ, ZYDIS_MNEMONIC_SETZ, ZYDIS_MNEMONIC_CMOVZ,
+         {kEflagsZf}, {kNone}},
+        {"nz", ZYDIS_MNEMONIC_JNZ, ZYDIS_MNEMONIC_SETNZ, ZYDIS_MNEMONIC_CMOVNZ,
+         {kNone}, {kEflagsZf}},
+        {"l", ZYDIS_MNEMONIC_JL, ZYDIS_MNEMONIC_SETL, ZYDIS_MNEMONIC_CMOVL,
+         {kEflagsSf, kEflagsOf}, {kNone, kEflagsSf | kEflagsOf}},
+        {"nl", ZYDIS_MNEMONIC_JNL, ZYDIS_MNEMONIC_SETNL, ZYDIS_MNEMONIC_CMOVNL,
+         {kNone, kEflagsSf | kEflagsOf}, {kEflagsSf, kEflagsOf}},
+        {"le", ZYDIS_MNEMONIC_JLE, ZYDIS_MNEMONIC_SETLE, ZYDIS_MNEMONIC_CMOVLE,
+         {kEflagsZf, kEflagsSf, kEflagsOf}, {kNone, kEflagsSf | kEflagsOf}},
+        {"nle", ZYDIS_MNEMONIC_JNLE, ZYDIS_MNEMONIC_SETNLE, ZYDIS_MNEMONIC_CMOVNLE,
+         {kNone, kEflagsSf | kEflagsOf},
+         {kEflagsZf, kEflagsSf, kEflagsZf | kEflagsSf | kEflagsOf}},
+        {"o", ZYDIS_MNEMONIC_JO, ZYDIS_MNEMONIC_SETO, ZYDIS_MNEMONIC_CMOVO,
+         {kEflagsOf}, {kNone}},
+        {"no", ZYDIS_MNEMONIC_JNO, ZYDIS_MNEMONIC_SETNO, ZYDIS_MNEMONIC_CMOVNO,
+         {kNone}, {kEflagsOf}},
+        {"s", ZYDIS_MNEMONIC_JS, ZYDIS_MNEMONIC_SETS, ZYDIS_MNEMONIC_CMOVS,
+         {kEflagsSf}, {kNone}},
+        {"ns", ZYDIS_MNEMONIC_JNS, ZYDIS_MNEMONIC_SETNS, ZYDIS_MNEMONIC_CMOVNS,
+         {kNone}, {kEflagsSf}},
+        {"p", ZYDIS_MNEMONIC_JP, ZYDIS_MNEMONIC_SETP, ZYDIS_MNEMONIC_CMOVP,
+         {kEflagsPf}, {kNone}},
+        {"np", ZYDIS_MNEMONIC_JNP, ZYDIS_MNEMONIC_SETNP, ZYDIS_MNEMONIC_CMOVNP,
+         {kNone}, {kEflagsPf}},
+    };
+    // The program counter and ECX after ins runs with exactly the eflags bits set
+    struct After {
+        std::uint64_t pc;
+        std::uint64_t ecx;
+    };
+    const auto run = [](const pn::DecodedInsn& ins, std::uint32_t eflags) {
+        emu::IntelEmulator e;
+        for (const std::uint32_t f : {kEflagsCf, kEflagsZf, kEflagsSf, kEflagsOf, kEflagsPf}) {
+            e.regs().set_flag(f, (eflags & f) != 0);
+        }
+        e.regs().set_register(emu::kRegEcx, 0xAABBCC55U);
+        e.regs().set_register(emu::kRegEdx, 0x2222U);
+        e.execute_opcode(ins);
+        return After{e.program_counter(), e.regs().get_register(emu::kRegEcx)};
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const pn::DecodedInsn jcc   = branch_insn(row.jcc, 0x2000);
+        const pn::DecodedInsn setcc = insn(row.setcc, reg(ZYDIS_REGISTER_CL, 1));
+        const pn::DecodedInsn cmovcc =
+            insn(row.cmovcc, reg(ZYDIS_REGISTER_ECX, 4), reg(ZYDIS_REGISTER_EDX, 4));
+        for (const bool holds : {true, false}) {
+            for (const std::uint32_t eflags : holds ? row.holds : row.fails) {
+                CAPTURE(holds);
+                CAPTURE(eflags);
+                CHECK(run(jcc, eflags).pc == (holds ? 0x2000U : jcc.va + jcc.length));
+                CHECK(run(setcc, eflags).ecx == (holds ? 0xAABBCC01U : 0xAABBCC00U));
+                CHECK(run(cmovcc, eflags).ecx == (holds ? 0x2222U : 0xAABBCC55U));
+            }
         }
     }
 }
