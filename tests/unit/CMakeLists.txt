@@ -62,6 +62,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_emu_watcher.cpp
     test_emu_discovery.cpp
     test_main_driver.cpp
+    test_golden.cpp
 )
 
 add_executable(papa_unit_tests ${PAPA_UNIT_TEST_SOURCES})

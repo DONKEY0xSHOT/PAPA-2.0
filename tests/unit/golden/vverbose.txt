@@ -1,0 +1,109 @@
+PAPA <version>
+sample: sample.exe
+size:   3072 bytes
+md5:    2e5b0a22e6d126e511475f94c3a9d417
+sha1:   ce2acc3bafd8962d8a23975d0e6702962e261d44
+sha256: 8db58c38020a358419b8009aadbc4ec52ffad22b425695ebe8cf870256ae1309
+os:     windows amd64 pe
+
+collection
+  write and encode data
+    matches: 0x140000000
+
+data-manipulation/constant
+  reference a constant twice
+    matches: 0x140001040
+
+data-manipulation/encoding/xor
+  encode data using xor in a loop
+    matches: 0x140001030
+
+executable/pe/section
+  contain a text section
+    matches: 0x140000000
+
+host-interaction/file-system/write
+  write file
+    description: opens a file and writes a string to it
+    matches: 0x140001010
+
+----- rule sources -----
+
+# contain a text section
+rule:
+  meta:
+    name: contain a text section
+    namespace: executable/pe/section
+    scopes:
+      static: file
+      dynamic: unsupported
+  features:
+    - section: .text
+
+
+# encode data using xor in a loop
+rule:
+  meta:
+    name: encode data using xor in a loop
+    namespace: data-manipulation/encoding/xor
+    scopes:
+      static: function
+      dynamic: unsupported
+    att&ck:
+      - Defense Evasion::Obfuscated Files or Information [T1027]
+    mbc:
+      - Defense Evasion::Obfuscated Files or Information::Encoding-Standard Algorithm [E1027.m02]
+  features:
+    - and:
+      - basic block:
+        - and:
+          - characteristic: tight loop
+          - characteristic: nzxor
+
+
+# reference a constant twice
+rule:
+  meta:
+    name: reference a constant twice
+    namespace: data-manipulation/constant
+    scopes:
+      static: function
+      dynamic: unsupported
+  features:
+    - count(number(0x10)): 2 or more
+
+
+# write and encode data
+rule:
+  meta:
+    name: write and encode data
+    namespace: collection
+    scopes:
+      static: file
+      dynamic: unsupported
+    att&ck:
+      - Collection::Data Staged [T1074]
+  features:
+    - and:
+      - match: write file
+      - match: data-manipulation/encoding/xor
+
+
+# write file
+rule:
+  meta:
+    name: write file
+    namespace: host-interaction/file-system/write
+    description: opens a file and writes a string to it
+    scopes:
+      static: function
+      dynamic: unsupported
+    mbc:
+      - File System::Writes File [C0052]
+  features:
+    - and:
+      - match: open file
+      - api: WriteFile
+      - string: hello world
+
+
