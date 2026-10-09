@@ -29,14 +29,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <span>
 #include <sstream>
+#include <streambuf>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -658,6 +663,68 @@ private:
     const char* v = std::getenv(name);
     return v != nullptr ? std::string(v) : std::string{};
 #endif
+}
+
+/// A fresh directory under the system temp directory, removed with its contents when
+/// the guard goes out of scope, including when a check fails and the case unwinds
+class TempDir {
+public:
+    TempDir() {
+        const auto         base = std::filesystem::temp_directory_path();
+        std::random_device seed;
+        for (int attempt = 0; attempt < 16 && path_.empty(); ++attempt) {
+            auto            candidate = base / ("papa_unit_" + std::to_string(seed()));
+            std::error_code ec;
+            if (std::filesystem::create_directory(candidate, ec)) { path_ = std::move(candidate); }
+        }
+        REQUIRE_FALSE(path_.empty());
+    }
+    ~TempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+    TempDir(const TempDir&)            = delete;
+    TempDir& operator=(const TempDir&) = delete;
+    TempDir(TempDir&&)                 = delete;
+    TempDir& operator=(TempDir&&)      = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+/// Redirects a stream into a buffer while it lives
+class StreamCapture {
+public:
+    explicit StreamCapture(std::ostream& stream)
+        : stream_(stream), old_(stream.rdbuf(buf_.rdbuf())) {}
+    ~StreamCapture() { stream_.rdbuf(old_); }
+    StreamCapture(const StreamCapture&)            = delete;
+    StreamCapture& operator=(const StreamCapture&) = delete;
+    StreamCapture(StreamCapture&&)                 = delete;
+    StreamCapture& operator=(StreamCapture&&)      = delete;
+
+    [[nodiscard]] std::string text() const { return buf_.str(); }
+
+private:
+    std::ostringstream buf_;
+    std::ostream&      stream_;
+    std::streambuf*    old_ = nullptr;
+};
+
+/// Writes bytes to path, creating its parent directories
+inline void write_file(const std::filesystem::path& path, std::span<const std::byte> data) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(data.data()),
+              static_cast<std::streamsize>(data.size()));
+    REQUIRE(out.good());
+}
+
+/// Writes text to path byte for byte, creating its parent directories
+inline void write_file(const std::filesystem::path& path, std::string_view text) {
+    write_file(path, text_bytes(text));
 }
 
 }  // namespace papa_tests

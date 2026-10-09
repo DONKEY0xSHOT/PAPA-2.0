@@ -11,8 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -22,6 +20,7 @@
 #include <utility>
 #include <vector>
 #include "pe_builder.h"
+#include "test_support.h"
 
 namespace {
 
@@ -120,22 +119,16 @@ TEST_CASE("parse_file rejects a non-existent path") {
 }
 
 TEST_CASE("parse_file reads an image from disk and rejects an empty file") {
-    const auto dir = std::filesystem::temp_directory_path() / "papa_unit_parse_file";
-    std::filesystem::create_directories(dir);
-    papa_tests::PeBuilder b;
+    const papa_tests::TempDir dir;
+    papa_tests::PeBuilder     b;
     b.code         = {0x90, 0xC3};
     b.entry_offset = 1;
     const auto bytes = b.build();
-    {
-        std::ofstream out(dir / "sample.exe", std::ios::binary);
-        out.write(reinterpret_cast<const char*>(bytes.data()),
-                  static_cast<std::streamsize>(bytes.size()));
-        std::ofstream empty(dir / "empty.exe", std::ios::binary);
-    }
+    papa_tests::write_file(dir.path() / "sample.exe", bytes);
+    papa_tests::write_file(dir.path() / "empty.exe", std::string_view{});
 
-    const auto img = papa::pe::PeParser::parse_file(dir / "sample.exe");
-    const auto empty = papa::pe::PeParser::parse_file(dir / "empty.exe");
-    std::filesystem::remove_all(dir);
+    const auto img   = papa::pe::PeParser::parse_file(dir.path() / "sample.exe");
+    const auto empty = papa::pe::PeParser::parse_file(dir.path() / "empty.exe");
 
     REQUIRE(img.has_value());
     CHECK(img->raw_buffer().size() == bytes.size());

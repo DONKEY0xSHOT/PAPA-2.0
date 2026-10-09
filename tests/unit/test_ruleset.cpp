@@ -19,6 +19,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -277,4 +279,45 @@ TEST_CASE("ruleset: match sees a same-scope match reference under an or") {
                                     Address{AbsoluteVirtualAddress{0x1000}});
     CHECK(matches.count("rule-a") == 1);
     CHECK(matches.count("rule-b") == 1);
+}
+
+TEST_CASE("ruleset: from_directory loads the .yml and .yaml rules of a tree, skipping a hidden folder, other files and a rule that fails to parse") {
+    using papa_tests::rule_yaml;
+    using papa_tests::write_file;
+    const papa_tests::TempDir dir;
+    const auto&               root = dir.path();
+    write_file(root / "a.yml", rule_yaml("a", "function", {"api: a"}));
+    write_file(root / "b.yaml", rule_yaml("b", "function", {"api: b"}));
+    write_file(root / "sub" / "c.yml", rule_yaml("c", "function", {"api: c"}));
+    write_file(root / "x.txt", rule_yaml("x", "function", {"api: x"}));
+    write_file(root / ".github" / "d.yml", rule_yaml("d", "function", {"api: d"}));
+    write_file(root / "bad.yml", "rule:\n  meta: [unclosed\n");
+
+    struct Row {
+        std::string_view      label;
+        std::filesystem::path path;
+        std::string_view      detail;
+    };
+    const std::vector<Row> rows{
+        {"a missing path", root / "missing", "rules path does not exist"},
+        {"a file path", root / "a.yml", "rules path is not a directory"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto rs = RuleSet::from_directory(row.path);
+        REQUIRE_FALSE(rs.has_value());
+        CHECK(rs.error().kind == ErrorKind::kIoError);
+        CHECK(rs.error().detail.find(row.detail) != std::string::npos);
+    }
+
+    const papa_tests::StreamCapture warnings(std::cerr);
+    const auto                      rs = RuleSet::from_directory(root);
+    REQUIRE(rs.has_value());
+    std::vector<std::string> names;
+    for (const auto& r : rs->all_rules()) { names.push_back(r->name()); }
+    std::sort(names.begin(), names.end());
+    CHECK(names == std::vector<std::string>{"a", "b", "c"});
+    CHECK(warnings.text().find("warning: skipping rule") != std::string::npos);
+    CHECK(warnings.text().find("bad.yml") != std::string::npos);
+    CHECK(warnings.text().find("flow collections are not supported") != std::string::npos);
 }
