@@ -3,15 +3,12 @@
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/backend.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
-#include "papa/features/extractors/papa_native/library_signatures.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native {
@@ -67,12 +64,6 @@ public:
 
     [[nodiscard]] std::optional<std::string> get_function_name(
         const features::Address& addr) const override;
-
-    // Test and orchestrator hook for installing a symbol table after construction
-    // Names are typically derived from PE exports plus PDB lookup when available
-    void set_function_name(std::uint64_t va, std::string name);
-
-    [[nodiscard]] const PapaNativeBackend& backend() const noexcept { return backend_; }
 
     // The library name FLIRT assigned to the function at va, or nullopt when it is not
     // a named library function

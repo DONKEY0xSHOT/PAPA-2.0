@@ -3,10 +3,8 @@
 #include "papa/util/expected.h"
 
 #include <cstdint>
-#include <source_location>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 namespace papa {
 
@@ -18,13 +16,8 @@ enum class ErrorKind : std::uint8_t {
     kOutOfBounds,
     kDisassemblyFailed,
     kInvalidRule,
-    kRuleParseError,
-    kMissingDependency,
     kCycle,
-    kLimitation,
-    kUnsupportedFormat,
     kYamlParseError,
-    kInternalInvariant,
     kFlirtBadCompressedStream,
     kFlirtBadMagic,
     kFlirtUnsupportedVersion,
@@ -33,21 +26,15 @@ enum class ErrorKind : std::uint8_t {
     kFlirtTooDeep,
 };
 
-[[nodiscard]] std::string_view to_string(ErrorKind kind) noexcept;
-
 struct PapaError {
     ErrorKind   kind { ErrorKind::kOk };
     std::string detail;
-    std::string source_location;
 };
 
-[[nodiscard]] PapaError make_error(
-    ErrorKind kind,
-    std::string detail,
-    std::source_location loc = std::source_location::current());
+[[nodiscard]] PapaError make_error(ErrorKind kind, std::string detail);
 
 template <typename T>
-using Expected = ::papa::util::Expected<T, PapaError>;
+using Expected = ::papa::util::BasicExpected<T, PapaError>;
 
 using ::papa::util::BadExpectedAccess;
 using ::papa::util::Unexpected;

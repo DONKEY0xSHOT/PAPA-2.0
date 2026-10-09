@@ -14,7 +14,7 @@
 namespace papa::engine {
 
 // And
-And::And(std::vector<std::unique_ptr<Statement>> kids) {
+And::And(std::vector<std::unique_ptr<Statement>> kids) : Statement(StatementKind::kAnd) {
     children_ = std::move(kids);
 }
 
@@ -51,7 +51,7 @@ Result And::evaluate(const features::FeatureSet& fs, bool sc) const {
 }
 
 // Or
-Or::Or(std::vector<std::unique_ptr<Statement>> kids) {
+Or::Or(std::vector<std::unique_ptr<Statement>> kids) : Statement(StatementKind::kOr) {
     children_ = std::move(kids);
 }
 
@@ -76,7 +76,7 @@ Result Or::evaluate(const features::FeatureSet& fs, bool sc) const {
 }
 
 // Not
-Not::Not(std::unique_ptr<Statement> kid) {
+Not::Not(std::unique_ptr<Statement> kid) : Statement(StatementKind::kNot) {
     if (!kid) {
         throw PapaInvariantError("Not statement requires a non-null child");
     }
@@ -100,7 +100,8 @@ Result Not::evaluate(const features::FeatureSet& fs, bool /*sc*/) const {
 
 // Some
 Some::Some(std::size_t count, std::vector<std::unique_ptr<Statement>> kids)
-    : count_(count) {
+    : Statement(count == 0 ? StatementKind::kOptional : StatementKind::kSome),
+      count_(count) {
     children_ = std::move(kids);
 }
 
@@ -133,7 +134,7 @@ Result Some::evaluate(const features::FeatureSet& fs, bool sc) const {
 
 // Range
 Range::Range(features::FeaturePtr feat, std::size_t min, std::size_t max)
-    : feat_(std::move(feat)), min_(min), max_(max) {
+    : Statement(StatementKind::kRange), feat_(std::move(feat)), min_(min), max_(max) {
     if (!feat_) {
         throw PapaInvariantError("Range statement requires a non-null feature");
     }
@@ -162,7 +163,7 @@ Result Range::evaluate(const features::FeatureSet& fs, bool /*sc*/) const {
 
 // Subscope
 Subscope::Subscope(rules::Scope scope, std::unique_ptr<Statement> inner)
-    : scope_(scope), inner_(std::move(inner)) {
+    : Statement(StatementKind::kSubscope), scope_(scope), inner_(std::move(inner)) {
     if (!inner_) {
         throw PapaInvariantError("Subscope requires a non-null inner statement");
     }
@@ -177,7 +178,7 @@ Result Subscope::evaluate(const features::FeatureSet&, bool) const {
 
 // FeatureStatement
 FeatureStatement::FeatureStatement(features::FeaturePtr f)
-    : feature_(std::move(f)) {
+    : Statement(StatementKind::kFeature), feature_(std::move(f)) {
     if (!feature_) {
         throw PapaInvariantError("FeatureStatement requires a non-null feature");
     }
@@ -203,6 +204,34 @@ void index_rule_matches(features::FeatureSet& fs,
     emit(rule.name());
     for (auto ns : rule.namespace_hierarchy()) {
         emit(std::move(ns));
+    }
+}
+
+void collect_match_refs(const Statement& s, std::vector<std::string>& out) {
+    const auto note = [&out](const features::FeaturePtr& f) {
+        if (f && f->tag() == features::FeatureTag::kMatchedRule) {
+            out.emplace_back(static_cast<const features::MatchedRule&>(*f).rule_name());
+        }
+    };
+
+    // Both leaf kinds can wrap a MatchedRule, and neither has children
+    switch (s.kind()) {
+        case StatementKind::kFeature:
+            note(static_cast<const FeatureStatement&>(s).feature());
+            return;
+        case StatementKind::kRange:
+            note(static_cast<const Range&>(s).feature());
+            return;
+        case StatementKind::kAnd:
+        case StatementKind::kOr:
+        case StatementKind::kNot:
+        case StatementKind::kSome:
+        case StatementKind::kOptional:
+        case StatementKind::kSubscope:
+            break;
+    }
+    for (const auto& child : s.children()) {
+        if (child) { collect_match_refs(*child, out); }
     }
 }
 

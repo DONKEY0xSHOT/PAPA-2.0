@@ -1,17 +1,13 @@
 #pragma once
 
-#include "papa/features/address.h"
-#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::papa_native::function_ {
-
-using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Detect any non-trivial cycle in the function's CFG via Tarjan's SCC
 // Returns at most one feature even when the function contains many loops
@@ -36,9 +32,13 @@ extract_recursive_call(const Function& fn);
 [[nodiscard]] std::optional<FeatureWithAddress>
 extract_function_name(const Function& fn, std::string_view symbol);
 
-// Aggregate every function-scope feature for one function symbol may be empty when no
+// Aggregate every function-scope feature for one function. symbol may be empty when no
 // name is known
 [[nodiscard]] std::vector<FeatureWithAddress>
 extract_function_features(const Function& fn, std::string_view symbol);
+
+/// True when fn is structurally a thunk: a single basic block whose one
+/// instruction is an unconditional jmp or call through a memory operand
+[[nodiscard]] bool is_thunk(const Function& fn) noexcept;
 
 }  // namespace papa::features::extractors::papa_native::function_

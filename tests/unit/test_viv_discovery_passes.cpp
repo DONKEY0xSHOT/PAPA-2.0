@@ -11,6 +11,7 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/viv/discovery.h"
 #include "papa/features/extractors/papa_native/viv/discovery_passes.h"
+#include "test_support.h"
 
 namespace pn = papa::features::extractors::papa_native;
 namespace pv = papa::features::extractors::papa_native::viv;
@@ -33,7 +34,7 @@ std::array<std::byte, 0x1001> two_ret_region() {
 TEST_CASE("run_emucode makes undefined code candidates and iterates to a fixpoint") {
     const Disassembler d(/*is_64bit=*/false);
     const auto         region = two_ret_region();
-    const auto         reader = pn::cfg::make_span_reader(region, 0x2000, d);
+    const auto         reader = papa_tests::make_span_reader(region, 0x2000, d);
     const pv::Discovery::IsProbablyCode is_code = [](std::uint64_t va) {
         return va == 0x2000 || va == 0x3000;
     };
@@ -60,7 +61,7 @@ TEST_CASE("run_emucode makes undefined code candidates and iterates to a fixpoin
 TEST_CASE("run_emucode leaves an already-defined candidate alone") {
     const Disassembler d(/*is_64bit=*/false);
     const auto         region = two_ret_region();
-    const auto         reader = pn::cfg::make_span_reader(region, 0x2000, d);
+    const auto         reader = papa_tests::make_span_reader(region, 0x2000, d);
     pv::Discovery disc(reader, [](std::uint64_t) { return true; }, /*resolve_jt=*/{},
                        [](std::uint64_t) { return true; });
 
@@ -78,7 +79,7 @@ TEST_CASE("run_emucode leaves an already-defined candidate alone") {
 TEST_CASE("run_funcentries makes undefined prologue candidates to a fixpoint") {
     const Disassembler d(/*is_64bit=*/false);
     const auto         region = two_ret_region();
-    const auto         reader = pn::cfg::make_span_reader(region, 0x2000, d);
+    const auto         reader = papa_tests::make_span_reader(region, 0x2000, d);
     pv::Discovery      disc(reader, [](std::uint64_t) { return true; });
 
     // As with emucode, 0x3000 is only exposed once 0x2000 has been made

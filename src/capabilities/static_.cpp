@@ -1,5 +1,6 @@
 #include "papa/capabilities/static_.h"
 
+#include "papa/capabilities/common.h"
 #include "papa/engine.h"
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
@@ -22,6 +23,27 @@ namespace papa::capabilities::static_ {
 namespace {
 
 namespace base = ::papa::features::extractors;
+
+// Per-instruction result: post-injection feature set plus the rule matches
+struct InstructionCapabilities {
+    features::FeatureSet  features;
+    engine::MatchResults  matches;
+};
+
+// Per-basic-block result, accumulating the contained instruction matches too
+struct BasicBlockCapabilities {
+    features::FeatureSet  features;
+    engine::MatchResults  matches;
+    engine::MatchResults  insn_matches;
+};
+
+// Per-function aggregate over all contained BBs and instructions
+struct CodeCapabilities {
+    engine::MatchResults  function_matches;
+    engine::MatchResults  bb_matches;
+    engine::MatchResults  insn_matches;
+    std::size_t           feature_count{0};
+};
 
 // One recovered function's analysis output, held until the ordered reduction
 struct FunctionSlot {
@@ -99,23 +121,6 @@ void merge_into(::papa::engine::MatchResults& dst,
     }
 }
 
-// Append every (feature, address) pair from src into the target FeatureSet
-// add() handles structural deduplication so the resulting sets remain valid
-void absorb_into(features::FeatureSet&             dst,
-                 std::vector<base::FeatureWithAddress> src) {
-    for (auto& [feat, addr] : src) {
-        dst.add(std::move(feat), addr);
-    }
-}
-
-// Globals (Os, Arch, Format) are constant for the whole image
-void absorb_globals(features::FeatureSet& dst,
-                    const std::vector<base::FeatureWithAddress>& globals) {
-    for (const auto& [feat, addr] : globals) {
-        dst.add(feat, addr);
-    }
-}
-
 // Walk every match in matches and inject MatchedRule features for every rule at every
 // recorded address
 void inject_match_features(features::FeatureSet&                fs,
@@ -131,14 +136,9 @@ void inject_match_features(features::FeatureSet&                fs,
     }
 }
 
-}  // namespace
-
-/// Internal find_* overloads that take pre-extracted globals. The public
-/// wrappers below extract globals once and forward
-namespace {
-
+// Per-scope passes. Each takes the globals find_static_capabilities extracted once
 InstructionCapabilities
-find_instruction_capabilities_inner(
+find_instruction_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -146,8 +146,8 @@ find_instruction_capabilities_inner(
     const base::InsnHandle&                        ih,
     const std::vector<base::FeatureWithAddress>&   globals) {
     features::FeatureSet fs;
-    absorb_into(fs, extractor.extract_insn_features(fh, bbh, ih));
-    absorb_globals(fs, globals);
+    fs.add_all(extractor.extract_insn_features(fh, bbh, ih));
+    fs.add_all(globals);
 
     auto [merged_fs, matches] =
         rules.match(::papa::rules::Scope::kInstruction, std::move(fs), ih.addr);
@@ -155,7 +155,7 @@ find_instruction_capabilities_inner(
 }
 
 BasicBlockCapabilities
-find_basic_block_capabilities_inner(
+find_basic_block_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -165,16 +165,14 @@ find_basic_block_capabilities_inner(
     ::papa::engine::MatchResults insn_matches_acc;
 
     for (const auto& ih : extractor.get_instructions(fh, bbh)) {
-        auto insn_caps = find_instruction_capabilities_inner(
+        auto insn_caps = find_instruction_capabilities(
             rules, extractor, fh, bbh, ih, globals);
-        for (const auto& [feat, addrs] : insn_caps.features) {
-            for (const auto& a : addrs) { bb_fs.add(feat, a); }
-        }
+        bb_fs.merge_in(insn_caps.features);
         merge_into(insn_matches_acc, std::move(insn_caps.matches));
     }
 
-    absorb_into(bb_fs, extractor.extract_basic_block_features(fh, bbh));
-    absorb_globals(bb_fs, globals);
+    bb_fs.add_all(extractor.extract_basic_block_features(fh, bbh));
+    bb_fs.add_all(globals);
 
     auto [merged_fs, bb_matches] =
         rules.match(::papa::rules::Scope::kBasicBlock, std::move(bb_fs), bbh.addr);
@@ -186,7 +184,7 @@ find_basic_block_capabilities_inner(
 }
 
 CodeCapabilities
-find_code_capabilities_inner(
+find_code_capabilities(
     const ::papa::rules::RuleSet&                  rules,
     const base::StaticFeatureExtractor&            extractor,
     const base::FunctionHandle&                    fh,
@@ -196,17 +194,15 @@ find_code_capabilities_inner(
     ::papa::engine::MatchResults insn_matches_acc;
 
     for (const auto& bbh : extractor.get_basic_blocks(fh)) {
-        auto bb_caps = find_basic_block_capabilities_inner(
+        auto bb_caps = find_basic_block_capabilities(
             rules, extractor, fh, bbh, globals);
-        for (const auto& [feat, addrs] : bb_caps.features) {
-            for (const auto& a : addrs) { fn_fs.add(feat, a); }
-        }
+        fn_fs.merge_in(bb_caps.features);
         merge_into(bb_matches_acc,   std::move(bb_caps.matches));
         merge_into(insn_matches_acc, std::move(bb_caps.insn_matches));
     }
 
-    absorb_into(fn_fs, extractor.extract_function_features(fh));
-    absorb_globals(fn_fs, globals);
+    fn_fs.add_all(extractor.extract_function_features(fh));
+    fn_fs.add_all(globals);
 
     auto [merged_fs, fn_matches] =
         rules.match(::papa::rules::Scope::kFunction, std::move(fn_fs), fh.addr);
@@ -220,36 +216,6 @@ find_code_capabilities_inner(
 }
 
 }  // namespace
-
-InstructionCapabilities
-find_instruction_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh,
-    const base::BBHandle&                bbh,
-    const base::InsnHandle&              ih) {
-    return find_instruction_capabilities_inner(
-        rules, extractor, fh, bbh, ih, extractor.extract_global_features());
-}
-
-BasicBlockCapabilities
-find_basic_block_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh,
-    const base::BBHandle&                bbh) {
-    return find_basic_block_capabilities_inner(
-        rules, extractor, fh, bbh, extractor.extract_global_features());
-}
-
-CodeCapabilities
-find_code_capabilities(
-    const ::papa::rules::RuleSet&        rules,
-    const base::StaticFeatureExtractor&  extractor,
-    const base::FunctionHandle&          fh) {
-    return find_code_capabilities_inner(
-        rules, extractor, fh, extractor.extract_global_features());
-}
 
 ::papa::Expected<StaticCapabilities>
 find_static_capabilities(
@@ -280,7 +246,7 @@ find_static_capabilities(
             slots[i].library = true;
             return;
         }
-        slots[i].caps = find_code_capabilities_inner(rules, extractor, fhs[i], globals);
+        slots[i].caps = find_code_capabilities(rules, extractor, fhs[i], globals);
     };
 
     const unsigned workers = resolve_worker_count(threads, n);
@@ -304,17 +270,8 @@ find_static_capabilities(
 
     // Build the file-scope feature set from extractor-provided features plus
     // injected MatchedRule features for every match seen below file scope
-    features::FeatureSet file_fs;
-    if (cached_file_features != nullptr) {
-        // Shares the immutable feature objects rather than carving the file a
-        // second time. The pre-pass derived them from the same image
-        for (const auto& [feat, addr] : *cached_file_features) {
-            file_fs.add(feat, addr);
-        }
-    } else {
-        absorb_into(file_fs, extractor.extract_file_features());
-    }
-    absorb_into(file_fs, extractor.extract_global_features());
+    features::FeatureSet file_fs =
+        file_scope_feature_set(extractor, cached_file_features, globals);
     inject_match_features(file_fs, rules, all_fn_matches);
     inject_match_features(file_fs, rules, all_bb_matches);
     inject_match_features(file_fs, rules, all_insn_matches);

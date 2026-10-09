@@ -97,7 +97,7 @@ private:
 
     std::vector<Map>                                maps_;
     std::unordered_map<std::uint64_t, std::uint8_t> overlay_;
-    std::size_t                                     overlay_cap_;
+    std::size_t                                     overlay_cap_{0};
 };
 
 }  // namespace papa::features::extractors::papa_native::emu

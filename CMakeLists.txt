@@ -10,7 +10,6 @@ else()
 endif()
 
 project(papa
-    VERSION 0.1.0
     DESCRIPTION "C++ port of CAPA static PE capability detector"
     # C as well as C++, because Zydis and miniz are C libraries. Visual Studio's
     # generator tolerates the omission, so only Makefile and Ninja builds failed
@@ -24,7 +23,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "in-source builds are not permitted; use cmake -S . -B build")
 endif()
 
@@ -38,7 +37,10 @@ option(PAPA_ENABLE_SANITIZERS   "Enable ASan/UBSan in Debug builds"      OFF)
 option(PAPA_WARNINGS_AS_ERRORS  "Treat compiler warnings as errors"      ON)
 option(PAPA_ENABLE_HARDENING    "Enable hardening compiler/linker flags" ON)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+# PAPA's release version, stamped into the binary. CI sets it to the release tag
+set(PAPA_VERSION "0.1.0-dev" CACHE STRING "PAPA release version")
+
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 include(Hardening)
@@ -51,11 +53,11 @@ papa_set_hardening(papa_project_options)
 
 if(MSVC)
     target_compile_options(papa_project_options INTERFACE
-        "/d1trimfile:${CMAKE_SOURCE_DIR}/")
+        "/d1trimfile:${PROJECT_SOURCE_DIR}/")
 else()
     target_compile_options(papa_project_options INTERFACE
-        "-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/="
-        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=")
+        "-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/="
+        "-ffile-prefix-map=${PROJECT_SOURCE_DIR}/=")
 endif()
 
 # The gcc/clang half of the static-runtime option. CMAKE_MSVC_RUNTIME_LIBRARY
@@ -76,7 +78,7 @@ endif()
 
 message(STATUS "")
 message(STATUS "PAPA configuration:")
-message(STATUS "  Version            : ${PROJECT_VERSION}")
+message(STATUS "  Version            : ${PAPA_VERSION}")
 message(STATUS "  C++ standard       : ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build type         : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Compiler           : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

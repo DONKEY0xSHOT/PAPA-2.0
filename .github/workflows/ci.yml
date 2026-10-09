@@ -112,16 +112,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The build flags live in the project's CMake, so a plain Release configure
-      # applies them. Warnings are errors, so this is also the standard gate
+      # The build flags live in the project's CMake and warnings are errors. The version
+      # is the release job's tag number, so the released papa.exe reports its own tag
       - name: Configure (CMake, Visual Studio 2022, x64)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPAPA_STATIC_RUNTIME=ON "-DPAPA_VERSION=0.1.${{ github.run_number }}"
 
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
-      # Fixture-dependent cases self-skip when PAPA_TEST_FIXTURES is unset, so
-      # the suite runs green in CI without the (non-redistributed) samples
       - name: Test (Release)
         run: ctest --test-dir build --output-on-failure -C Release
 

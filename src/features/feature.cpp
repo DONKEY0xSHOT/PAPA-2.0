@@ -2,39 +2,15 @@
 
 #include "papa/engine.h"
 
+#include <cstddef>
+#include <functional>
 #include <memory>
-#include <string_view>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace papa::features {
-
-std::string_view to_string(FeatureTag t) noexcept {
-    switch (t) {
-        case FeatureTag::kString:         return "string";
-        case FeatureTag::kSubstring:      return "substring";
-        case FeatureTag::kRegex:          return "regex";
-        case FeatureTag::kBytes:          return "bytes";
-        case FeatureTag::kNumber:         return "number";
-        case FeatureTag::kOffset:         return "offset";
-        case FeatureTag::kMnemonic:       return "mnemonic";
-        case FeatureTag::kApi:            return "api";
-        case FeatureTag::kImport:         return "import";
-        case FeatureTag::kExport:         return "export";
-        case FeatureTag::kSection:        return "section";
-        case FeatureTag::kFunctionName:   return "function-name";
-        case FeatureTag::kClass:          return "class";
-        case FeatureTag::kNamespace:      return "namespace";
-        case FeatureTag::kProperty:       return "property";
-        case FeatureTag::kCharacteristic: return "characteristic";
-        case FeatureTag::kMatchedRule:    return "match";
-        case FeatureTag::kOs:             return "os";
-        case FeatureTag::kArch:           return "arch";
-        case FeatureTag::kFormat:         return "format";
-        case FeatureTag::kOperandNumber:  return "operand.number";
-        case FeatureTag::kOperandOffset:  return "operand.offset";
-        case FeatureTag::kBasicBlock:     return "basic block";
-    }
-    return "unknown";
-}
 
 std::size_t FeatureHashKey::operator()(const FeaturePtr& p) const noexcept {
     return p ? p->hash() : 0;
@@ -65,6 +41,15 @@ bool Feature::matches(const FeatureSet& fs) const {
     return fs.find(probe) != fs.end();
 }
 
+std::size_t ValueFeature::hash() const noexcept {
+    return mix_tag(tag_, std::hash<std::string>{}(value_));
+}
+
+bool ValueFeature::equals(const Feature& o) const noexcept {
+    // A matching tag implies the same concrete type, and every such type is a ValueFeature
+    return o.tag() == tag_ && value_ == static_cast<const ValueFeature&>(o).value_;
+}
+
 void FeatureSet::add(FeaturePtr f, const Address& a) {
     if (!f) { return; }
     const FeatureTag tag = f->tag();
@@ -78,6 +63,14 @@ void FeatureSet::add(FeaturePtr f, const Address& a) {
             bytes_.push_back(it->first);
         }
     }
+}
+
+void FeatureSet::add_all(std::span<const std::pair<FeaturePtr, Address>> batch) {
+    for (const auto& [f, a] : batch) { add(f, a); }
+}
+
+void FeatureSet::add_all(std::vector<std::pair<FeaturePtr, Address>>&& batch) {
+    for (auto& [f, a] : batch) { add(std::move(f), a); }
 }
 
 void FeatureSet::merge_in(const FeatureSet& other) {

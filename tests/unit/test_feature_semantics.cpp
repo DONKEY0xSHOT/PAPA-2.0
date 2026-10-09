@@ -9,68 +9,107 @@
 #include "papa/features/feature.h"
 #include "papa/features/file.h"
 #include "papa/features/insn.h"
+#include "papa/util/hashing.h"
+
+#include "test_support.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
-#include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 using namespace papa::features;
 
-namespace {
-
-// Convenience factory
-// Shared_ptr<const T> is the storage type in FeatureSet
-template <typename T, typename... Args>
-FeaturePtr make(Args&&... args) {
-    return std::make_shared<const T>(std::forward<Args>(args)...);
-}
-
-Address va(std::uint64_t v) {
-    return Address{AbsoluteVirtualAddress{v}};
-}
-
-std::vector<std::byte> bytes_of(std::initializer_list<std::uint8_t> ilist) {
-    std::vector<std::byte> out;
-    out.reserve(ilist.size());
-    for (auto b : ilist) { out.emplace_back(std::byte{b}); }
-    return out;
-}
-
-}  // namespace
+using papa_tests::feat;
+using papa_tests::va;
 
 TEST_SUITE("feature_semantics") {
 
-TEST_CASE("Structural equality compares tag and payload") {
-    auto s1 = make<String>(std::string("foo"));
-    auto s2 = make<String>(std::string("foo"));
-    auto s3 = make<String>(std::string("bar"));
-    CHECK(s1->equals(*s2));
-    CHECK_FALSE(s1->equals(*s3));
-    CHECK(s1->hash() == s2->hash());
+TEST_CASE("Structural equality compares tag and every part of the payload, and equal features hash equal") {
+    using Access = Property::Access;
+    struct Row {
+        std::string_view label;
+        FeaturePtr       a;
+        FeaturePtr       b;
+        bool             equal;
+    };
+    const auto opnum = [](std::size_t index) {
+        return feat<OperandNumber>(index, OperandNumber::Value{std::uint64_t{0x10}});
+    };
+    const std::vector<Row> rows{
+        {"two strings with one value", feat<String>(std::string("foo")),
+         feat<String>(std::string("foo")), true},
+        {"two strings with different values", feat<String>(std::string("foo")),
+         feat<String>(std::string("bar")), false},
+        {"properties with one name and access", feat<Property>(std::string("MyProp"), Access::kRead),
+         feat<Property>(std::string("MyProp"), Access::kRead), true},
+        {"properties differing in access", feat<Property>(std::string("MyProp"), Access::kRead),
+         feat<Property>(std::string("MyProp"), Access::kWrite), false},
+        {"properties differing in name", feat<Property>(std::string("MyProp"), Access::kRead),
+         feat<Property>(std::string("Other"), Access::kRead), false},
+        {"operand numbers on one index", opnum(0), opnum(0), true},
+        {"operand numbers on different indices", opnum(0), opnum(1), false},
+        // Different active alternatives of std::variant compare unequal even if their
+        // stored values would compare equal as their underlying numeric types
+        {"an unsigned and a signed zero", feat<Number>(Number::Value{std::uint64_t{0}}),
+         feat<Number>(Number::Value{std::int64_t{0}}), false},
+        {"an unsigned and a floating zero", feat<Number>(Number::Value{std::uint64_t{0}}),
+         feat<Number>(Number::Value{0.0}), false},
+        {"a signed and a floating zero", feat<Number>(Number::Value{std::int64_t{0}}),
+         feat<Number>(Number::Value{0.0}), false},
+        {"two basic blocks", feat<BasicBlock>(), feat<BasicBlock>(), true},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(row.a->equals(*row.b) == row.equal);
+        if (row.equal) { CHECK(row.a->hash() == row.b->hash()); }
+    }
 }
 
 TEST_CASE("FeatureSet deduplicates structurally equal features") {
     FeatureSet fs;
-    fs.add(make<String>(std::string("foo")), va(0x1));
-    fs.add(make<String>(std::string("foo")), va(0x2));
-    fs.add(make<String>(std::string("bar")), va(0x3));
+    fs.add(feat<String>(std::string("foo")), va(0x1));
+    fs.add(feat<String>(std::string("foo")), va(0x2));
+    fs.add(feat<String>(std::string("bar")), va(0x3));
     CHECK(fs.size() == 2);
     // The first entry still keyed by "foo" now holds both locations
-    auto probe = make<String>(std::string("foo"));
+    auto probe = feat<String>(std::string("foo"));
     auto it = fs.find(probe);
     REQUIRE(it != fs.end());
     CHECK(it->second.size() == 2);
 }
 
+TEST_CASE("FeatureSet add_all copies or moves a batch and keeps the string index in order") {
+    const std::vector<std::pair<FeaturePtr, Address>> shared = {
+        {feat<String>(std::string("foo")), va(0x1)},
+        {feat<Section>(std::string(".text")), va(0x2)},
+    };
+    std::vector<std::pair<FeaturePtr, Address>> handed_over = {
+        {feat<String>(std::string("bar")), va(0x3)},
+        {feat<String>(std::string("foo")), va(0x4)},
+    };
+
+    FeatureSet fs;
+    fs.add_all(shared);
+    fs.add_all(std::move(handed_over));
+    CHECK(shared[0].first != nullptr);
+    CHECK(fs.size() == 3);
+    CHECK(fs.find(feat<String>(std::string("foo")))->second.size() == 2);
+    REQUIRE(fs.strings().size() == 2);
+    CHECK(fs.strings()[0].get() == shared[0].first.get());
+    CHECK(fs.strings()[1]->equals(String{"bar"}));
+}
+
 TEST_CASE("Default evaluate is structural membership") {
     FeatureSet fs;
-    fs.add(make<Api>(std::string("kernel32.CreateFileA")), va(0x401000));
-    fs.add(make<Api>(std::string("kernel32.CreateFileA")), va(0x401020));
+    fs.add(feat<Api>(std::string("kernel32.CreateFileA")), va(0x401000));
+    fs.add(feat<Api>(std::string("kernel32.CreateFileA")), va(0x401020));
 
     Api probe{"kernel32.CreateFileA"};
     auto r = probe.evaluate(fs, /*sc=*/false);
@@ -83,238 +122,220 @@ TEST_CASE("Default evaluate is structural membership") {
     CHECK(r2.locations.empty());
 }
 
-TEST_CASE("Substring scans String features and reports all hits") {
-    FeatureSet fs;
-    fs.add(make<String>(std::string("hello world")), va(0x1));
-    fs.add(make<String>(std::string("world peace")), va(0x2));
-    fs.add(make<String>(std::string("goodbye")),     va(0x3));
-    // A Bytes feature containing the needle must not match
-    // Substring only scans String
-    fs.add(make<Bytes>(bytes_of({'w','o','r','l','d'})), va(0x4));
+TEST_CASE("Substring scans only String features, reporting every hit unless it short-circuits") {
+    FeatureSet worlds;
+    worlds.add(feat<String>(std::string("hello world")), va(0x1));
+    worlds.add(feat<String>(std::string("world peace")), va(0x2));
+    worlds.add(feat<String>(std::string("goodbye")), va(0x3));
+    // A Bytes feature containing the needle must not match, since Substring scans String
+    worlds.add(feat<Bytes>(papa_tests::byte_vec({'w', 'o', 'r', 'l', 'd'})), va(0x4));
+    FeatureSet foos;
+    foos.add(feat<String>(std::string("foo")), va(0x1));
+    foos.add(feat<String>(std::string("foobar")), va(0x2));
 
-    Substring needle{"world"};
-    auto r = needle.evaluate(fs, /*sc=*/false);
-    CHECK(r.success);
-    CHECK(r.locations.size() == 2);
-    CHECK(r.locations.count(va(0x1)) == 1);
-    CHECK(r.locations.count(va(0x2)) == 1);
+    struct Row {
+        std::string_view     label;
+        const FeatureSet*    fs;
+        std::string_view     needle;
+        bool                 sc;
+        std::size_t          min_locations;
+        std::size_t          max_locations;
+        std::vector<Address> must_include;
+    };
+    const std::vector<Row> rows{
+        {"every string holding the needle", &worlds, "world", false, 2, 2, {va(0x1), va(0x2)}},
+        // Under short-circuit the scan returns at the first hit, so the locations are
+        // non-empty but may cover only one of the matching strings
+        {"a short-circuited scan", &foos, "foo", true, 1, 2, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = Substring{std::string(row.needle)}.evaluate(*row.fs, row.sc);
+        CHECK(r.success);
+        CHECK(r.locations.size() >= row.min_locations);
+        CHECK(r.locations.size() <= row.max_locations);
+        for (const Address& at : row.must_include) { CHECK(r.locations.count(at) == 1); }
+    }
 }
 
-TEST_CASE("Substring short-circuits on first hit") {
-    FeatureSet fs;
-    fs.add(make<String>(std::string("foo")), va(0x1));
-    fs.add(make<String>(std::string("foobar")), va(0x2));
+TEST_CASE("Regex reads the /.../ literal and its i suffix and matches anywhere in a string") {
+    FeatureSet hello;
+    hello.add(feat<String>(std::string("HelloWorld")), va(0x1));
+    hello.add(feat<String>(std::string("goodbye")), va(0x2));
+    // A required literal must never hide a case-insensitive match
+    FeatureSet vbox;
+    vbox.add(feat<String>(std::string("C:\\Program Files\\VirtualBox Guest Additions")), va(0x1000));
 
-    Substring s{"foo"};
-    auto r = s.evaluate(fs, /*sc=*/true);
-    CHECK(r.success);
-    // Under short-circuit we return as soon as any match is found. Locations must be
-    // non-empty but may cover only one of the matching entries
-    CHECK(r.locations.size() >= 1);
-    CHECK(r.locations.size() <= 2);
+    struct Row {
+        std::string_view       label;
+        const FeatureSet*      fs;
+        std::string_view       literal;
+        bool                   success;
+        std::optional<Address> location;
+    };
+    const std::vector<Row> rows{
+        {"/i ignores case", &hello, "/hello/i", true, va(0x1)},
+        {"without /i case matters", &hello, "/hello/", false, std::nullopt},
+        {"an anchored pattern", &hello, "/^good/", true, va(0x2)},
+        {"a case-insensitive match with a required literal", &vbox, "/virtualbox guest/i", true,
+         va(0x1000)},
+        {"a case-sensitive literal", &vbox, "/VirtualBox/", true, std::nullopt},
+        {"a case-insensitive miss", &vbox, "/vmware tools/i", false, std::nullopt},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const Regex re{std::string(row.literal)};
+        const auto  r = re.evaluate(*row.fs, false);
+        CHECK(r.success == row.success);
+        CHECK(re.matches(*row.fs) == row.success);
+        if (row.location.has_value()) { CHECK(r.locations.count(*row.location) == 1); }
+    }
 }
 
-TEST_CASE("Regex literal forms parse slashes and case-insensitive suffix") {
-    FeatureSet fs;
-    fs.add(make<String>(std::string("HelloWorld")), va(0x1));
-    fs.add(make<String>(std::string("goodbye")),   va(0x2));
+TEST_CASE("Bytes matches a candidate it is a prefix of, never a shorter one or a middle occurrence") {
+    FeatureSet two;
+    two.add(feat<Bytes>(papa_tests::byte_vec({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE})), va(0x100));
+    two.add(feat<Bytes>(papa_tests::byte_vec({0x90, 0x90, 0x90})), va(0x200));
+    // The candidate contains the pattern, but not at offset 0
+    FeatureSet middle;
+    middle.add(feat<Bytes>(papa_tests::byte_vec({0x00, 0xDE, 0xAD})), va(0x1));
 
-    Regex r_ci{"/hello/i"};
-    auto ci_result = r_ci.evaluate(fs, false);
-    CHECK(ci_result.success);
-    CHECK(ci_result.locations.count(va(0x1)) == 1);
-
-    Regex r_sensitive{"/hello/"};
-    auto cs_result = r_sensitive.evaluate(fs, false);
-    CHECK_FALSE(cs_result.success);  // "Hello" != "hello" without /i
-
-    Regex r_anchored{"/^good/"};
-    auto r_anch = r_anchored.evaluate(fs, false);
-    CHECK(r_anch.success);
-    CHECK(r_anch.locations.count(va(0x2)) == 1);
-}
-
-TEST_CASE("Regex: a required literal never hides a case-insensitive match") {
-    FeatureSet fs;
-    fs.add(make<String>(std::string("C:\\Program Files\\VirtualBox Guest Additions")), va(0x1000));
-    CHECK(Regex("/virtualbox guest/i").matches(fs));
-    CHECK(Regex("/virtualbox guest/i").evaluate(fs, false).locations.count(va(0x1000)) == 1);
-    CHECK(Regex("/VirtualBox/").matches(fs));
-    CHECK_FALSE(Regex("/vmware tools/i").matches(fs));
-}
-
-TEST_CASE("Bytes matches when self is a prefix of a candidate") {
-    FeatureSet fs;
-    fs.add(make<Bytes>(bytes_of({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE})), va(0x100));
-    fs.add(make<Bytes>(bytes_of({0x90, 0x90, 0x90})),                   va(0x200));
-
-    Bytes short_prefix{bytes_of({0xDE, 0xAD})};
-    auto r = short_prefix.evaluate(fs, false);
-    CHECK(r.success);
-    CHECK(r.locations.count(va(0x100)) == 1);
-    CHECK_FALSE(r.locations.count(va(0x200)) == 1);
-
-    // A pattern longer than any candidate cannot match
-    Bytes too_long{bytes_of({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x00})};
-    auto r2 = too_long.evaluate(fs, false);
-    CHECK_FALSE(r2.success);
-
-    // Exact match is just a prefix of equal length
-    Bytes exact{bytes_of({0x90, 0x90, 0x90})};
-    auto r3 = exact.evaluate(fs, false);
-    CHECK(r3.success);
-    CHECK(r3.locations.count(va(0x200)) == 1);
-}
-
-TEST_CASE("Bytes non-prefix middle occurrence does not match") {
-    // The candidate contains the pattern but not at offset 0
-    // Prefix-only
-    FeatureSet fs;
-    fs.add(make<Bytes>(bytes_of({0x00, 0xDE, 0xAD})), va(0x1));
-
-    Bytes pat{bytes_of({0xDE, 0xAD})};
-    auto r = pat.evaluate(fs, false);
-    CHECK_FALSE(r.success);
-}
-
-TEST_CASE("Os rule side any matches any concrete Os in fs") {
-    FeatureSet fs;
-    fs.add(make<Os>(std::string("windows")), va(0x0));
-
-    Os any_rule{"any"};
-    auto r = any_rule.evaluate(fs, false);
-    CHECK(r.success);
-
-    Os concrete_match{"windows"};
-    auto r2 = concrete_match.evaluate(fs, false);
-    CHECK(r2.success);
-
-    Os mismatch{"linux"};
-    auto r3 = mismatch.evaluate(fs, false);
-    CHECK_FALSE(r3.success);
-}
-
-TEST_CASE("Os fs side any matches any concrete rule") {
-    FeatureSet fs;
-    fs.add(make<Os>(std::string("any")), va(0x0));
-
-    Os concrete{"windows"};
-    auto r = concrete.evaluate(fs, false);
-    CHECK(r.success);
-}
-
-TEST_CASE("Arch has no wildcard, so any matches only a literal any") {
-    FeatureSet fs;
-    fs.add(make<Arch>(std::string("amd64")), va(0x0));
-
-    Arch any_rule{"any"};
-    CHECK_FALSE(any_rule.evaluate(fs, false).success);
-
-    Arch exact{"amd64"};
-    CHECK(exact.evaluate(fs, false).success);
-
-    Arch mismatch{"i386"};
-    CHECK_FALSE(mismatch.evaluate(fs, false).success);
-
-    FeatureSet literal_any;
-    literal_any.add(make<Arch>(std::string("any")), va(0x0));
-    CHECK(any_rule.evaluate(literal_any, false).success);
+    struct Row {
+        std::string_view       label;
+        const FeatureSet*      fs;
+        std::vector<std::byte> pattern;
+        bool                   success;
+        std::vector<Address>   hit;
+        std::vector<Address>   missed;
+    };
+    const std::vector<Row> rows{
+        {"a short prefix", &two, papa_tests::byte_vec({0xDE, 0xAD}), true, {va(0x100)}, {va(0x200)}},
+        {"a pattern longer than any candidate", &two,
+         papa_tests::byte_vec({0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0x00}), false, {}, {}},
+        {"an exact match is a prefix of equal length", &two, papa_tests::byte_vec({0x90, 0x90, 0x90}),
+         true, {va(0x200)}, {}},
+        {"a middle occurrence", &middle, papa_tests::byte_vec({0xDE, 0xAD}), false, {}, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = Bytes{row.pattern}.evaluate(*row.fs, false);
+        CHECK(r.success == row.success);
+        for (const Address& at : row.hit) { CHECK(r.locations.count(at) == 1); }
+        for (const Address& at : row.missed) { CHECK(r.locations.count(at) == 0); }
+    }
 }
 
 TEST_CASE("Os and Arch: only os treats any as a wildcard, in both directions") {
-    const Address a = va(0x1000);
-
-    FeatureSet any_os;
-    any_os.add(make<Os>(std::string("any")), a);
-    CHECK(Os("windows").matches(any_os));
-    const auto r = Os("windows").evaluate(any_os, false);
-    CHECK(r.success);
-    CHECK(r.locations.size() == 1U);
-
-    FeatureSet windows;
-    windows.add(make<Os>(std::string("windows")), a);
-    CHECK(Os("any").matches(windows));
-    CHECK_FALSE(Os("linux").matches(windows));
-
-    FeatureSet i386;
-    i386.add(make<Arch>(std::string("i386")), a);
-    CHECK_FALSE(Arch("amd64").matches(i386));
-    CHECK_FALSE(Arch("any").matches(i386));
-    FeatureSet any_arch;
-    any_arch.add(make<Arch>(std::string("any")), a);
-    CHECK_FALSE(Arch("amd64").matches(any_arch));
-}
-
-TEST_CASE("Os: only the set side any contributes locations to a concrete rule") {
+    // Each set holds its features at the given addresses
+    using Entries = std::vector<std::pair<FeaturePtr, Address>>;
     const Address a = va(0x1000);
     const Address b = va(0x2000);
-    FeatureSet    fs;
-    fs.add(make<Os>(std::string("windows")), a);
-    fs.add(make<Os>(std::string("any")), b);
-
-    const auto r = Os("linux").evaluate(fs, false);
-    CHECK(r.success);
-    CHECK(r.locations == std::unordered_set<Address>{b});
-}
-
-TEST_CASE("Property equality requires both name and access to match") {
-    auto p1 = make<Property>(std::string("MyProp"), Property::Access::kRead);
-    auto p2 = make<Property>(std::string("MyProp"), Property::Access::kRead);
-    auto p3 = make<Property>(std::string("MyProp"), Property::Access::kWrite);
-    auto p4 = make<Property>(std::string("Other"),  Property::Access::kRead);
-
-    CHECK(p1->equals(*p2));
-    CHECK_FALSE(p1->equals(*p3));
-    CHECK_FALSE(p1->equals(*p4));
-}
-
-TEST_CASE("OperandNumber equality discriminates on index") {
-    auto a = make<OperandNumber>(0u, OperandNumber::Value{std::uint64_t{0x10}});
-    auto b = make<OperandNumber>(0u, OperandNumber::Value{std::uint64_t{0x10}});
-    auto c = make<OperandNumber>(1u, OperandNumber::Value{std::uint64_t{0x10}});
-
-    CHECK(a->equals(*b));
-    CHECK_FALSE(a->equals(*c));
-    CHECK(a->hash() == b->hash());
-}
-
-TEST_CASE("Number variant alternatives with same payload are not equal") {
-    auto u = make<Number>(Number::Value{std::uint64_t{0}});
-    auto i = make<Number>(Number::Value{std::int64_t{0}});
-    auto d = make<Number>(Number::Value{0.0});
-
-    // Different active alternatives of std::variant compare unequal even if
-    // their stored values would compare equal as their underlying numeric types
-    CHECK_FALSE(u->equals(*i));
-    CHECK_FALSE(u->equals(*d));
-    CHECK_FALSE(i->equals(*d));
-}
-
-TEST_CASE("BasicBlock instances are all structurally equal") {
-    auto b1 = make<BasicBlock>();
-    auto b2 = make<BasicBlock>();
-    CHECK(b1->equals(*b2));
-    CHECK(b1->hash() == b2->hash());
+    const auto os   = [](std::string v) { return feat<Os>(std::move(v)); };
+    const auto arch = [](std::string v) { return feat<Arch>(std::move(v)); };
+    struct Row {
+        std::string_view                           label;
+        Entries                                    set;
+        FeaturePtr                                 probe;
+        bool                                       success;
+        std::optional<std::unordered_set<Address>> locations;
+    };
+    const std::vector<Row> rows{
+        {"os any in a rule matches a concrete os", {{os("windows"), a}}, os("any"), true, {}},
+        {"os windows matches windows", {{os("windows"), a}}, os("windows"), true, {}},
+        {"os linux does not match windows", {{os("windows"), a}}, os("linux"), false, {}},
+        {"os any in the set matches a concrete rule", {{os("any"), a}}, os("windows"), true,
+         std::unordered_set<Address>{a}},
+        {"arch any in a rule does not match amd64", {{arch("amd64"), a}}, arch("any"), false, {}},
+        {"arch amd64 matches amd64", {{arch("amd64"), a}}, arch("amd64"), true, {}},
+        {"arch i386 does not match amd64", {{arch("amd64"), a}}, arch("i386"), false, {}},
+        {"arch any matches only a literal any", {{arch("any"), a}}, arch("any"), true, {}},
+        {"arch amd64 does not match i386", {{arch("i386"), a}}, arch("amd64"), false, {}},
+        {"arch any does not match i386", {{arch("i386"), a}}, arch("any"), false, {}},
+        {"arch any in the set does not match amd64", {{arch("any"), a}}, arch("amd64"), false, {}},
+        // Only the set side any contributes locations to a concrete rule
+        {"a concrete os takes its locations from the set's any", {{os("windows"), a}, {os("any"), b}},
+         os("linux"), true, std::unordered_set<Address>{b}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        FeatureSet fs;
+        for (const auto& [f, at] : row.set) { fs.add(f, at); }
+        const auto r = row.probe->evaluate(fs, false);
+        CHECK(r.success == row.success);
+        CHECK(row.probe->matches(fs) == row.success);
+        if (row.locations.has_value()) { CHECK(r.locations == *row.locations); }
+    }
 }
 
 TEST_CASE("Different feature kinds never collide in a FeatureSet") {
     // Each feature has a distinct tag so fs.size() must equal the insertion count
     FeatureSet fs;
-    fs.add(make<String>(std::string("foo")),                           va(0x1));
-    fs.add(make<Api>(std::string("foo")),                              va(0x2));
-    fs.add(make<Import>(std::string("foo")),                           va(0x3));
-    fs.add(make<Export>(std::string("foo")),                           va(0x4));
-    fs.add(make<Section>(std::string("foo")),                          va(0x5));
-    fs.add(make<FunctionName>(std::string("foo")),                     va(0x6));
-    fs.add(make<Mnemonic>(std::string("foo")),                         va(0x7));
-    fs.add(make<Characteristic>(std::string("foo")),                   va(0x8));
-    fs.add(make<Class>(std::string("foo")),                            va(0x9));
-    fs.add(make<Namespace>(std::string("foo")),                        va(0xA));
-    fs.add(make<MatchedRule>(std::string("foo")),                      va(0xB));
-    fs.add(make<Os>(std::string("foo")),                               va(0xC));
-    fs.add(make<Arch>(std::string("foo")),                             va(0xD));
-    fs.add(make<Format>(std::string("foo")),                           va(0xE));
+    fs.add(feat<String>(std::string("foo")),                           va(0x1));
+    fs.add(feat<Api>(std::string("foo")),                              va(0x2));
+    fs.add(feat<Import>(std::string("foo")),                           va(0x3));
+    fs.add(feat<Export>(std::string("foo")),                           va(0x4));
+    fs.add(feat<Section>(std::string("foo")),                          va(0x5));
+    fs.add(feat<FunctionName>(std::string("foo")),                     va(0x6));
+    fs.add(feat<Mnemonic>(std::string("foo")),                         va(0x7));
+    fs.add(feat<Characteristic>(std::string("foo")),                   va(0x8));
+    fs.add(feat<Class>(std::string("foo")),                            va(0x9));
+    fs.add(feat<Namespace>(std::string("foo")),                        va(0xA));
+    fs.add(feat<MatchedRule>(std::string("foo")),                      va(0xB));
+    fs.add(feat<Os>(std::string("foo")),                               va(0xC));
+    fs.add(feat<Arch>(std::string("foo")),                             va(0xD));
+    fs.add(feat<Format>(std::string("foo")),                           va(0xE));
     CHECK(fs.size() == 14);
+}
+
+TEST_CASE("Single-string features hash the tag mixed into the value hash") {
+    // One shared value, a regex literal so Regex must hash the literal, not its pattern
+    const std::string v = "/foo/i";
+    const std::pair<FeaturePtr, FeatureTag> rows[] = {
+        {feat<String>(v), FeatureTag::kString},
+        {feat<Substring>(v), FeatureTag::kSubstring},
+        {feat<Regex>(v), FeatureTag::kRegex},
+        {feat<MatchedRule>(v), FeatureTag::kMatchedRule},
+        {feat<Characteristic>(v), FeatureTag::kCharacteristic},
+        {feat<Class>(v), FeatureTag::kClass},
+        {feat<Namespace>(v), FeatureTag::kNamespace},
+        {feat<Os>(v), FeatureTag::kOs},
+        {feat<Arch>(v), FeatureTag::kArch},
+        {feat<Format>(v), FeatureTag::kFormat},
+        {feat<Import>(v), FeatureTag::kImport},
+        {feat<Export>(v), FeatureTag::kExport},
+        {feat<Section>(v), FeatureTag::kSection},
+        {feat<FunctionName>(v), FeatureTag::kFunctionName},
+        {feat<Api>(v), FeatureTag::kApi},
+        {feat<Mnemonic>(v), FeatureTag::kMnemonic},
+    };
+    for (const auto& [f, tag] : rows) {
+        CAPTURE(static_cast<int>(tag));
+        CHECK(f->tag() == tag);
+        CHECK(f->hash() == papa::util::hashing::hash_combine(static_cast<std::size_t>(tag),
+                                                             std::hash<std::string>{}(v)));
+        for (const auto& [other, other_tag] : rows) {
+            if (other_tag != tag) { CHECK_FALSE(f->equals(*other)); }
+        }
+    }
+}
+
+TEST_CASE("Number and OperandNumber hash the payload with its alternative index folded in") {
+    using papa::util::hashing::hash_combine;
+    // One value per alternative, each paired with the hash of its payload alone
+    const std::pair<Number::Value, std::size_t> rows[] = {
+        {Number::Value{std::uint64_t{0x40}}, std::hash<std::uint64_t>{}(0x40)},
+        {Number::Value{std::int64_t{-8}}, std::hash<std::int64_t>{}(-8)},
+        {Number::Value{2.5}, papa::util::hashing::hash_double_bits(2.5)},
+    };
+    for (const auto& [v, payload] : rows) {
+        CAPTURE(v.index());
+        const std::size_t value_hash = hash_combine(payload, v.index());
+        CHECK(feat<Number>(v)->hash() ==
+              hash_combine(static_cast<std::size_t>(FeatureTag::kNumber), value_hash));
+        CHECK(feat<OperandNumber>(std::size_t{1}, v)->hash() ==
+              hash_combine(static_cast<std::size_t>(FeatureTag::kOperandNumber),
+                           hash_combine(std::hash<std::size_t>{}(1), value_hash)));
+    }
 }
 
 }  // TEST_SUITE
@@ -322,65 +343,44 @@ TEST_CASE("Different feature kinds never collide in a FeatureSet") {
 TEST_CASE("feature semantics: matches agrees with evaluate success for every kind") {
     // The probe pass calls matches while the reporting pass calls evaluate
     FeatureSet fs;
-    fs.add(make<String>("hello world"), va(0x1000));
-    fs.add(make<String>("GetProcAddress"), va(0x1004));
-    fs.add(make<Bytes>(bytes_of({0xDE, 0xAD, 0xBE, 0xEF})), va(0x1008));
-    fs.add(make<Number>(0x40), va(0x100C));
-    fs.add(make<Number>(0x40), va(0x1010));
-    fs.add(make<Os>("windows"), va(0x1014));
-    fs.add(make<Arch>("amd64"), va(0x1018));
-    fs.add(make<Api>("CreateFileA"), va(0x101C));
+    fs.add(feat<String>("hello world"), va(0x1000));
+    fs.add(feat<String>("GetProcAddress"), va(0x1004));
+    fs.add(feat<Bytes>(papa_tests::byte_vec({0xDE, 0xAD, 0xBE, 0xEF})), va(0x1008));
+    fs.add(feat<Number>(0x40), va(0x100C));
+    fs.add(feat<Number>(0x40), va(0x1010));
+    fs.add(feat<Os>("windows"), va(0x1014));
+    fs.add(feat<Arch>("amd64"), va(0x1018));
+    fs.add(feat<Api>("CreateFileA"), va(0x101C));
 
     std::vector<FeaturePtr> probes;
-    probes.push_back(make<String>("hello world"));
-    probes.push_back(make<String>("absent"));
-    probes.push_back(make<Substring>("lo wo"));
-    probes.push_back(make<Substring>("nope"));
-    probes.push_back(make<Regex>("/Get.*Address/"));
-    probes.push_back(make<Regex>("/^nomatch$/"));
-    probes.push_back(make<Bytes>(bytes_of({0xDE, 0xAD})));
-    probes.push_back(make<Bytes>(bytes_of({0xAA, 0xBB})));
-    probes.push_back(make<Number>(0x40));
-    probes.push_back(make<Number>(0x41));
-    probes.push_back(make<Os>("windows"));
-    probes.push_back(make<Os>("linux"));
-    probes.push_back(make<Os>("any"));
-    probes.push_back(make<Arch>("amd64"));
-    probes.push_back(make<Arch>("i386"));
-    probes.push_back(make<Arch>("any"));
-    probes.push_back(make<Api>("CreateFileA"));
-    probes.push_back(make<Api>("NotPresent"));
+    probes.push_back(feat<String>("hello world"));
+    probes.push_back(feat<String>("absent"));
+    probes.push_back(feat<Substring>("lo wo"));
+    probes.push_back(feat<Substring>("nope"));
+    probes.push_back(feat<Regex>("/Get.*Address/"));
+    probes.push_back(feat<Regex>("/^nomatch$/"));
+    probes.push_back(feat<Bytes>(papa_tests::byte_vec({0xDE, 0xAD})));
+    probes.push_back(feat<Bytes>(papa_tests::byte_vec({0xAA, 0xBB})));
+    probes.push_back(feat<Number>(0x40));
+    probes.push_back(feat<Number>(0x41));
+    probes.push_back(feat<Os>("windows"));
+    probes.push_back(feat<Os>("linux"));
+    probes.push_back(feat<Os>("any"));
+    probes.push_back(feat<Arch>("amd64"));
+    probes.push_back(feat<Arch>("i386"));
+    probes.push_back(feat<Arch>("any"));
+    probes.push_back(feat<Api>("CreateFileA"));
+    probes.push_back(feat<Api>("NotPresent"));
 
-    for (const auto& p : probes) {
-        CAPTURE(p->to_string());
-        CHECK(p->matches(fs) == p->evaluate(fs, true).success);
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        CAPTURE(i);
+        CHECK(probes[i]->matches(fs) == probes[i]->evaluate(fs, true).success);
     }
 
     // The empty set must agree too
     const FeatureSet empty;
-    for (const auto& p : probes) {
-        CAPTURE(p->to_string());
-        CHECK(p->matches(empty) == p->evaluate(empty, true).success);
-    }
-}
-
-TEST_CASE("engine: Range evaluate_quick agrees with evaluate success") {
-    FeatureSet fs;
-    fs.add(make<Number>(7), va(0x2000));
-    fs.add(make<Number>(7), va(0x2004));
-    fs.add(make<Number>(7), va(0x2008));
-
-    struct Bound { std::size_t min; std::size_t max; };
-    const Bound bounds[] = {
-        {0, 0}, {0, 2}, {0, 3}, {1, 3}, {3, 3}, {4, 10},
-        {0, std::numeric_limits<std::size_t>::max()},
-    };
-    for (const auto& b : bounds) {
-        CAPTURE(b.min);
-        CAPTURE(b.max);
-        const papa::engine::Range present(make<Number>(7), b.min, b.max);
-        CHECK(present.evaluate_quick(fs) == present.evaluate(fs, true).success);
-        const papa::engine::Range absent(make<Number>(99), b.min, b.max);
-        CHECK(absent.evaluate_quick(fs) == absent.evaluate(fs, true).success);
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        CAPTURE(i);
+        CHECK(probes[i]->matches(empty) == probes[i]->evaluate(empty, true).success);
     }
 }

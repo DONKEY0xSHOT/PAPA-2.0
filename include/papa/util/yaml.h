@@ -12,11 +12,6 @@
 
 namespace papa::util::yaml {
 
-// Pull the single-argument Expected alias into this nested namespace
-// The two-argument primary template would otherwise shadow the alias
-template <typename T>
-using Expected = ::papa::Expected<T>;
-
 enum class NodeKind : std::uint8_t {
     kScalar,
     kSequence,
@@ -67,7 +62,7 @@ private:
 };
 
 // Deepest nesting the parser will descend before rejecting a document. Parsing is
-// recursive and a rules directory is untrusted input, so this is a. DoS bound
+// recursive and a rules directory is untrusted input, so this is a DoS bound
 inline constexpr std::size_t kMaxNestingDepth = 64;
 
 // Parse a YAML document

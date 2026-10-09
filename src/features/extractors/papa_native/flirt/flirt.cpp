@@ -56,11 +56,6 @@ FlirtSignatureSet FlirtSignatureSet::make_embedded() {
     return set;
 }
 
-const FlirtSignatureSet& FlirtSignatureSet::embedded() {
-    static const FlirtSignatureSet set = make_embedded();
-    return set;
-}
-
 bool FlirtSignatureSet::add_from_buffer(std::span<const std::uint8_t> sig_bytes) noexcept {
     auto parsed = parse_sig_buffer(sig_bytes);
     if (!parsed.has_value()) {
@@ -78,16 +73,6 @@ bool FlirtSignatureSet::classify(std::span<const std::uint8_t> function_bytes) c
         }
     }
     return false;
-}
-
-std::vector<const FlirtModule*>
-FlirtSignatureSet::match(std::span<const std::uint8_t> function_bytes) const {
-    std::vector<const FlirtModule*> out;
-    for (const FlirtTree& tree : trees_) {
-        const auto hits = match_flirt_modules(tree, function_bytes);
-        out.insert(out.end(), hits.begin(), hits.end());
-    }
-    return out;
 }
 
 }  // namespace papa::features::extractors::papa_native::flirt

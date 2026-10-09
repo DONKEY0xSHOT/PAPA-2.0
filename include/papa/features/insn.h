@@ -5,42 +5,26 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <string_view>
+#include <utility>
 #include <variant>
 
 namespace papa::features {
 
 // API call or reference
-class Api : public Feature {
+class Api : public ValueFeature {
 public:
-    explicit Api(std::string value, std::string desc = {});
-
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
-
-private:
-    std::string value_;
+    explicit Api(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kApi, std::move(value), std::move(desc)) {}
 };
 
 // Decoded instruction mnemonic stored as its lowercase spelling
-class Mnemonic : public Feature {
+class Mnemonic : public ValueFeature {
 public:
-    explicit Mnemonic(std::string value, std::string desc = {});
-
-    [[nodiscard]] const std::string& value() const noexcept { return value_; }
-
-    [[nodiscard]] std::size_t hash()   const noexcept override;
-    [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
-
-private:
-    std::string value_;
+    explicit Mnemonic(std::string value, std::string desc = {})
+        : ValueFeature(FeatureTag::kMnemonic, std::move(value), std::move(desc)) {}
 };
 
-// Managed-language property access kind kNone is reserved for implementations that
+// Managed-language property access kind. kNone is reserved for implementations that
 // cannot distinguish read from write and therefore must match both
 class Property : public Feature {
 public:
@@ -53,14 +37,11 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
     std::string value_;
-    Access      access_;
+    Access      access_{Access::kNone};
 };
-
-[[nodiscard]] std::string_view to_string(Property::Access a) noexcept;
 
 // operand[i].number is a Number feature scoped to a specific operand index
 class OperandNumber : public Feature {
@@ -74,10 +55,9 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
-    std::size_t index_;
+    std::size_t index_{0};
     Value       value_;
 };
 
@@ -91,11 +71,10 @@ public:
 
     [[nodiscard]] std::size_t hash()   const noexcept override;
     [[nodiscard]] bool        equals(const Feature& o) const noexcept override;
-    [[nodiscard]] std::string to_string() const override;
 
 private:
-    std::size_t  index_;
-    std::int64_t value_;
+    std::size_t  index_{0};
+    std::int64_t value_{0};
 };
 
 }  // namespace papa::features

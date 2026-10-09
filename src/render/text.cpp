@@ -6,6 +6,7 @@
 #include "papa/render/spec.h"
 #include "papa/render/table.h"
 #include "papa/rules/rule.h"
+#include "papa/version.h"
 
 #include <algorithm>
 #include <charconv>
@@ -92,12 +93,7 @@ constexpr std::string_view kNoNamespace = "(no namespace)";
 capability_rules(const ResultDocument& doc) {
     std::vector<const RuleReport*> out;
     for (const auto& [_name, rep] : doc.rules) {
-        const auto& m = rep.meta;
-        if (m.lib || m.is_subscope_rule) { continue; }
-        if (m.namespace_.has_value() && m.namespace_->starts_with("internal/")) {
-            continue;
-        }
-        out.push_back(&rep);
+        if (is_capability_rule(rep.meta)) { out.push_back(&rep); }
     }
     std::sort(out.begin(), out.end(), [](const RuleReport* a, const RuleReport* b) {
         const std::string na = a->meta.namespace_.value_or(std::string{});
@@ -205,9 +201,10 @@ void emit_default(const ResultDocument& doc, std::ostream& out, bool color) {
     out << report;
 }
 
-// Plain header used by the verbose modes, which keep PAPA's own layout
+// Plain header used by the verbose modes, which keep PAPA's own layout.
+// It names PAPA's version, as the report's version field is capa's
 void emit_header(const ResultDocument& doc, std::ostream& out) {
-    out << "PAPA " << doc.meta.version << '\n';
+    out << "PAPA " << version::version() << '\n';
     out << "sample: " << doc.meta.sample_path.string() << '\n';
     out << "size:   " << doc.meta.sample_size_bytes << " bytes\n";
     out << "md5:    " << doc.meta.hashes.md5    << '\n';
@@ -219,8 +216,8 @@ void emit_header(const ResultDocument& doc, std::ostream& out) {
     out << '\n';
 }
 
-// Group rules by their (possibly empty) namespace std::map sort makes the namespace
-// listing alphabetical, matching CAPA's default output ordering
+// Group rules by their (possibly empty) namespace. The std::map sort makes the
+// namespace listing alphabetical, matching CAPA's default output ordering
 [[nodiscard]] std::map<std::string, std::vector<const RuleReport*>>
 group_by_namespace(const ResultDocument& doc) {
     std::map<std::string, std::vector<const RuleReport*>> groups;

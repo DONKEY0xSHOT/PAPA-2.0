@@ -28,6 +28,13 @@ find_file_capabilities(
     const std::vector<::papa::features::extractors::FeatureWithAddress>*
         cached_file_features = nullptr);
 
+// The file-scope feature set, the file features followed by the globals. cached_file_features
+// stands in for a fresh extraction when a caller already has them
+[[nodiscard]] features::FeatureSet file_scope_feature_set(
+    const ::papa::features::extractors::StaticFeatureExtractor&          extractor,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>* cached_file_features,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>& globals);
+
 // The file-scope rules that can decide whether a static-limitation rule matches,
 // in topological order. Exposed for testing
 [[nodiscard]] std::vector<const ::papa::rules::Rule*>

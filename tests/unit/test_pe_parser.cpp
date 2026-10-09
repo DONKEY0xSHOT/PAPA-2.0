@@ -8,46 +8,106 @@
 #include "papa/pe/pe_image.h"
 #include "papa/pe/pe_parser.h"
 
-#include <algorithm>
-#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
+#include <functional>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
-#include "fixture_paths.h"
 #include "pe_builder.h"
+#include "test_support.h"
 
 namespace {
 
-// Paths to stock binaries used as parser fixtures
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-const auto kChrome = papa_tests::fixture_path("chrome.exe");
-const auto kCff = papa_tests::fixture_path("CFF Explorer.exe");
-const auto kCapa = papa_tests::fixture_path("capa.exe");
-const auto kEverything = papa_tests::fixture_path("Everything.exe");
-
-[[nodiscard]] std::optional<std::uint32_t> read_u32_at_rva(
-    const papa::pe::PeImage& img, std::uint64_t rva) {
-    auto bytes = img.read_at_rva(rva, sizeof(std::uint32_t));
-    if (!bytes) { return std::nullopt; }
-    std::uint32_t value = 0;
-    std::memcpy(&value, bytes->data(), sizeof(value));
-    return value;
+[[nodiscard]] std::uint32_t u32_at(std::span<const std::byte> buf, std::size_t off) {
+    std::uint32_t v = 0;
+    std::memcpy(&v, buf.data() + off, sizeof v);
+    return v;
 }
 
-[[nodiscard]] bool has_section(const papa::pe::PeImage& img, std::string_view name) {
-    const auto secs = img.sections();
-    return std::any_of(secs.begin(), secs.end(),
-        [&](const papa::pe::ParsedSection& s) { return s.name == name; });
+template <typename T>
+void put(std::vector<std::byte>& buf, std::size_t off, T value) {
+    std::memcpy(buf.data() + off, &value, sizeof value);
 }
 
-[[nodiscard]] bool has_import_from(const papa::pe::PeImage& img, std::string_view dll) {
-    const auto imps = img.imports();
-    return std::any_of(imps.begin(), imps.end(),
-        [&](const papa::pe::ParsedImport& p) { return p.dll == dll; });
+// An image with every structure the parser walks: named and ordinal imports, a delay
+// import, exports with a forwarder, a TLS callback, a relocation and, on x64, .pdata
+[[nodiscard]] papa_tests::PeBuilder rich_builder(bool x64) {
+    papa_tests::PeBuilder b;
+    b.x64 = x64;
+    const std::uint32_t first  = b.add_function({0x33, 0xC0, 0xC3});
+    const std::uint32_t second = b.add_function({0x90, 0xC3});
+    // A pointer slot holding the first function's address, listed for relocation
+    const auto slot = static_cast<std::uint32_t>(b.code.size());
+    b.code.resize(b.code.size() + 8U, 0);
+    if (x64) {
+        papa_tests::detail::poke(b.code, slot, b.code_va(first));
+    } else {
+        papa_tests::detail::poke(b.code, slot, static_cast<std::uint32_t>(b.code_va(first)));
+    }
+    b.reloc_code_offsets = {slot};
+    b.entry_offset       = second;
+    b.imports            = {{"KERNEL32.dll", {"ExitProcess", "GetTickCount"}},
+                            {"ws2_32.dll", {"#6"}}};
+    b.delay_imports      = {{"user32.dll", {"MessageBoxA"}}};
+    b.exports            = {{"First", first, ""},
+                            {"Second", second, ""},
+                            {"Forwarded", 0, "ntdll.RtlAllocateHeap"}};
+    b.tls_callbacks      = {second};
+    b.data               = {1, 2, 3, 4};
+    return b;
+}
+
+// A rich image, its header layout, its bytes and their honest parse
+struct Sample {
+    papa_tests::PeBuilder             builder;
+    papa_tests::HeaderLayout          layout;
+    std::vector<std::byte>            bytes;
+    papa::Expected<papa::pe::PeImage> honest;
+
+    explicit Sample(bool x64)
+        : builder(rich_builder(x64)),
+          layout(builder.header_layout()),
+          bytes(builder.build()),
+          honest(papa::pe::PeParser::parse(bytes)) {}
+
+    /// File offset of the structure that data directory index points at
+    [[nodiscard]] std::size_t dir_offset(std::size_t index) const {
+        const auto off = honest->rva_to_file_offset(u32_at(bytes, layout.data_directory(index)));
+        REQUIRE(off.has_value());
+        return static_cast<std::size_t>(*off);
+    }
+};
+
+// The first way the readers of an image serve bytes outside its own buffer, or past
+// what readable_bytes_at_rva promises, and empty when they never do
+[[nodiscard]] std::string reader_violation(const papa::pe::PeImage& img) {
+    const auto buf = img.raw_buffer();
+    for (const papa::pe::ParsedSection& s : img.sections()) {
+        const std::size_t n = img.readable_bytes_at_rva(s.virtual_address);
+        if (n > 0U) {
+            const auto run = img.read_at_rva(s.virtual_address, n);
+            if (!run.has_value()) { return s.name + " does not read its readable bytes"; }
+            if (run->data() < buf.data() || run->data() + run->size() > buf.data() + buf.size()) {
+                return s.name + " reads outside the buffer";
+            }
+        }
+        if (img.read_at_rva(std::uint64_t{s.virtual_address} + n, 1).has_value()) {
+            return s.name + " reads past its readable bytes";
+        }
+    }
+    if (!img.read_at_file_offset(buf.size(), 0).has_value()) {
+        return "an empty read at the end of the file fails";
+    }
+    if (img.read_at_file_offset(buf.size(), 1).has_value()) {
+        return "a read past the end of the file succeeds";
+    }
+    return {};
 }
 
 }  // namespace
@@ -58,148 +118,125 @@ TEST_CASE("parse_file rejects a non-existent path") {
     CHECK(res.error().kind == papa::ErrorKind::kIoError);
 }
 
-TEST_CASE("parse rejects a buffer without MZ") {
-    std::vector<std::byte> junk(128, std::byte{0x00});
-    const auto res = papa::pe::PeParser::parse(std::move(junk));
-    CHECK_FALSE(res.has_value());
-    CHECK(res.error().kind == papa::ErrorKind::kNotPe);
+TEST_CASE("parse_file reads an image from disk and rejects an empty file") {
+    const papa_tests::TempDir dir;
+    papa_tests::PeBuilder     b;
+    b.code         = {0x90, 0xC3};
+    b.entry_offset = 1;
+    const auto bytes = b.build();
+    papa_tests::write_file(dir.path() / "sample.exe", bytes);
+    papa_tests::write_file(dir.path() / "empty.exe", std::string_view{});
+
+    const auto img   = papa::pe::PeParser::parse_file(dir.path() / "sample.exe");
+    const auto empty = papa::pe::PeParser::parse_file(dir.path() / "empty.exe");
+
+    REQUIRE(img.has_value());
+    CHECK(img->raw_buffer().size() == bytes.size());
+    CHECK(img->entry_point_rva() == papa_tests::PeBuilder::kTextRva + 1U);
+    REQUIRE_FALSE(empty.has_value());
+    CHECK(empty.error().kind == papa::ErrorKind::kIoError);
 }
 
-TEST_CASE("parses notepad.exe and enumerates headers") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
+TEST_CASE("pe_image: the bounded readers stay inside the file and its sections") {
+    using papa_tests::PeBuilder;
+    PeBuilder b;
+    b.code           = std::vector<std::uint8_t>(0x10, 0x90);
+    b.data           = std::vector<std::uint8_t>(0x10, 0x11);
+    b.extra_sections = {
+        {".bss2", std::vector<std::uint8_t>(0x10, 0xAB),
+         PeBuilder::kScnInitializedData | PeBuilder::kScnRead, 0x2000},
+        {".noread", {1, 2, 3, 4}, PeBuilder::kScnInitializedData, 0},
+    };
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+    // .text, an empty .rdata, .data, .bss2 and .noread
+    REQUIRE(img->sections().size() == 5);
+    const std::uint64_t text      = PeBuilder::kTextRva;
+    const std::uint64_t bss       = b.section_rva(".bss2");
+    const std::uint64_t file_size = img->raw_buffer().size();
+    const std::uint64_t unmapped  = 0xF0000000U;
 
-    CHECK(img.machine() == papa::constants::kImageFileMachineAmd64);
-    CHECK(img.is_64bit());
-    CHECK(img.image_base() != 0);
-    CHECK(img.entry_point_rva() != 0);
-    CHECK(img.size_of_image() > 0);
-    CHECK(img.sections().size() > 0);
-    CHECK(has_section(img, ".text"));
-    CHECK(has_import_from(img, "kernel32"));
-}
-
-TEST_CASE("parses chrome.exe") {
-    if (!std::filesystem::exists(kChrome)) {
-        MESSAGE("fixture missing: " << kChrome);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kChrome);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    CHECK(img.size_of_image() > 0);
-    CHECK(img.sections().size() > 0);
-    CHECK(has_section(img, ".text"));
-}
-
-TEST_CASE("parses CFF Explorer.exe") {
-    if (!std::filesystem::exists(kCff)) {
-        MESSAGE("fixture missing: " << kCff);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kCff);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    CHECK(img.sections().size() > 0);
-}
-
-TEST_CASE("parses capa.exe") {
-    if (!std::filesystem::exists(kCapa)) {
-        MESSAGE("fixture missing: " << kCapa);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kCapa);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    CHECK(img.sections().size() > 0);
-    CHECK(img.size_of_image() > 0);
-}
-
-TEST_CASE("read_at_rva rejects out-of-bounds access") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    const std::uint64_t huge_rva = std::uint64_t{img.size_of_image()} + 0x10000ULL;
-    const auto oob = img.read_at_rva(huge_rva, 16);
-    CHECK_FALSE(oob.has_value());
-    CHECK(oob.error().kind == papa::ErrorKind::kOutOfBounds);
-}
-
-TEST_CASE("read_at_file_offset rejects out-of-bounds access") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    const std::uint64_t past_eof = img.raw_buffer().size() + 1;
-    const auto oob = img.read_at_file_offset(past_eof, 8);
-    CHECK_FALSE(oob.has_value());
-    CHECK(oob.error().kind == papa::ErrorKind::kOutOfBounds);
-}
-
-TEST_CASE("read_at_file_offset zero-size at end is allowed") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    const auto ok = img.read_at_file_offset(img.raw_buffer().size(), 0);
-    CHECK(ok.has_value());
-    CHECK(ok->size() == 0);
-}
-
-TEST_CASE("section_containing_rva maps entry point back to a section") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    const auto* s = img.section_containing_rva(img.entry_point_rva());
-    REQUIRE(s != nullptr);
-    CHECK((s->characteristics & papa::constants::kImageScnMemRead) != 0);
-}
-
-TEST_CASE("imports carry lowercased dll names with no extension") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    for (const auto& imp : img.imports()) {
-        CHECK_FALSE(imp.dll.empty());
-        // lowercase
-        for (char c : imp.dll) {
-            CHECK((c < 'A' || c > 'Z'));
+    enum class Reader { kRva, kFileOffset, kSection, kReadable, kProbe };
+    struct Row {
+        std::string_view label;
+        Reader           reader;
+        std::uint64_t    at;
+        std::size_t      n;
+        // bytes read or -1 when out of bounds, the section index or -1, the readable
+        // count, or 1 when probe_readable holds
+        std::int64_t     expected;
+    };
+    const std::vector<Row> rows{
+        {"read the code", Reader::kRva, text, 4, 4},
+        {"read past the image", Reader::kRva, img->size_of_image() + 0x10000U, 16, -1},
+        {"read a header rva straight from the file", Reader::kRva, 0, 2, 2},
+        {"read a section's zero fill", Reader::kRva, bss + 0x1000U, 1, -1},
+        {"read past the end of the file", Reader::kFileOffset, file_size + 1U, 8, -1},
+        {"read zero bytes at the end of the file", Reader::kFileOffset, file_size, 0, 0},
+        {"read across the end of the file", Reader::kFileOffset, file_size - 1U, 2, -1},
+        {"the entry point is in .text", Reader::kSection, img->entry_point_rva(), 0, 0},
+        {"a header rva is in no section", Reader::kSection, 0x10, 0, -1},
+        {"an unmapped rva is in no section", Reader::kSection, unmapped, 0, -1},
+        {"a virtual tail belongs to its section", Reader::kSection, bss + 0x1FFFU, 0, 3},
+        {"nothing is readable when unmapped", Reader::kReadable, unmapped, 0, 0},
+        {"the code reads to its raw end", Reader::kReadable, text, 0, PeBuilder::kFileAlign},
+        {"the last raw byte reads alone", Reader::kReadable, text + PeBuilder::kFileAlign - 1U,
+         0, 1},
+        {"a header rva reads to the end of the file", Reader::kReadable, 0x10, 0,
+         static_cast<std::int64_t>(file_size) - 0x10},
+        {"a zero fill reads nothing", Reader::kReadable, bss + 0x1000U, 0, 0},
+        {"probe inside the code", Reader::kProbe, text, 4, 1},
+        {"probe up to the raw end", Reader::kProbe, text + PeBuilder::kFileAlign - 4U, 4, 1},
+        {"probe across the raw end", Reader::kProbe, text + PeBuilder::kFileAlign - 3U, 4, 0},
+        {"probe a section without read access", Reader::kProbe, b.section_rva(".noread"), 1, 0},
+        {"probe an unmapped rva", Reader::kProbe, unmapped, 1, 0},
+        {"probe a length that wraps", Reader::kProbe, text,
+         std::numeric_limits<std::size_t>::max(), 0},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        std::int64_t got = 0;
+        switch (row.reader) {
+            case Reader::kRva:
+            case Reader::kFileOffset: {
+                const auto r = row.reader == Reader::kRva
+                                   ? img->read_at_rva(row.at, row.n)
+                                   : img->read_at_file_offset(row.at, row.n);
+                if (r.has_value()) {
+                    got = static_cast<std::int64_t>(r->size());
+                } else {
+                    CHECK(r.error().kind == papa::ErrorKind::kOutOfBounds);
+                    got = -1;
+                }
+                break;
+            }
+            case Reader::kSection: {
+                const auto* s = img->section_containing_rva(row.at);
+                got = s == nullptr ? -1 : s - img->sections().data();
+                break;
+            }
+            case Reader::kReadable:
+                got = static_cast<std::int64_t>(img->readable_bytes_at_rva(row.at));
+                break;
+            case Reader::kProbe:
+                got = img->probe_readable(row.at, row.n) ? 1 : 0;
+                break;
         }
-        // extension stripped
-        CHECK(imp.dll.find(".dll") == std::string::npos);
-        CHECK(imp.dll.find(".drv") == std::string::npos);
+        CHECK(got == row.expected);
     }
+}
+
+TEST_CASE("normalize_dll_name lowercases and strips known extensions") {
+    using papa::pe::normalize_dll_name;
+    CHECK(normalize_dll_name("KERNEL32.DLL") == "kernel32");
+    CHECK(normalize_dll_name("kernel32.dll") == "kernel32");
+    CHECK(normalize_dll_name("WS2_32.DLL")   == "ws2_32");
+    CHECK(normalize_dll_name("driver.drv")   == "driver");
+    CHECK(normalize_dll_name("libc.so")      == "libc");
+    // Unknown extension is preserved
+    CHECK(normalize_dll_name("Mod.exe")      == "mod.exe");
+    // No extension
+    CHECK(normalize_dll_name("KERNEL32")     == "kernel32");
 }
 
 TEST_CASE("lookup_ordinal_name resolves ws2_32 ordinals like vivisect ordlookup") {
@@ -214,170 +251,266 @@ TEST_CASE("lookup_ordinal_name resolves ws2_32 ordinals like vivisect ordlookup"
     CHECK_FALSE(lookup_ordinal_name("ws2_32", 99999).has_value());
 }
 
-TEST_CASE("parses Everything.exe and resolves ws2_32 ordinal imports to names") {
-    if (!std::filesystem::exists(kEverything)) {
-        MESSAGE("fixture missing: " << kEverything);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kEverything);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    // Everything imports ws2_32 by ordinal
-    const auto imps = img.imports();
-    const bool has_getsockname = std::any_of(imps.begin(), imps.end(),
-        [](const papa::pe::ParsedImport& p) {
-            return p.dll == "ws2_32" && p.name == "getsockname" && !p.by_ordinal;
-        });
-    CHECK(has_getsockname);
-}
-
-TEST_CASE("parses Everything.exe base relocations including the .text island pointers") {
-    if (!std::filesystem::exists(kEverything)) {
-        MESSAGE("fixture missing: " << kEverything);
-        return;
-    }
-    auto res = papa::pe::PeParser::parse_file(kEverything);
-    REQUIRE(res.has_value());
-    const auto& img = *res;
-
-    CHECK_FALSE(img.is_64bit());
-    CHECK(img.image_base() == 0x400000ULL);
-
-    const auto relocs = img.relocations();
-    REQUIRE_FALSE(relocs.empty());
-
-    // Faithful to vivisect PE.getRelocations: every base-relocation entry is retained,
-    // including the type-0 ABSOLUTE block padding
-    std::size_t highlow = 0;
-    std::size_t absolute = 0;
-    for (const auto& r : relocs) {
-        if (r.type == 3) { ++highlow; }
-        else if (r.type == 0) { ++absolute; }
-    }
-    CHECK(highlow == 25697);
-    CHECK(absolute == 159);
-
-    // The three socket-island entry pointers are stored at reloc sites inside .text.
-    // Each site is a HIGHLOW fixup whose stored dword is an island function entry
-    struct SiteExpectation {
-        std::uint32_t rva;
-        std::uint32_t value;
-    };
-    constexpr std::array<SiteExpectation, 3> kIslandSites{{
-        {0x925f0u, 0x00492230u},
-        {0x9539cu, 0x00493d20u},
-        {0x95b14u, 0x00493570u},
-    }};
-    for (const auto& site : kIslandSites) {
-        const bool present = std::any_of(relocs.begin(), relocs.end(),
-            [&](const papa::pe::ParsedRelocation& r) {
-                return r.rva == site.rva && r.type == 3;
-            });
-        CHECK(present);
-        const auto dword = read_u32_at_rva(img, site.rva);
-        REQUIRE(dword.has_value());
-        CHECK(*dword == site.value);
-    }
-}
-
-TEST_CASE("readable_bytes_at_rva is bounded by the file and the section's raw data") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    const auto res = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(res.has_value());
-    const papa::pe::PeImage& img = *res;
-
-    // An unmapped RVA supplies nothing
-    CHECK(img.readable_bytes_at_rva(0xF0000000u) == 0);
-
-    // Inside a real section the answer is non-zero and never exceeds the file
-    const auto secs = img.sections();
-    REQUIRE_FALSE(secs.empty());
-    const papa::pe::ParsedSection& text = secs.front();
-    const std::size_t avail = img.readable_bytes_at_rva(text.virtual_address);
-    CHECK(avail > 0);
-    CHECK(avail <= img.raw_buffer().size());
-    // and it stops at the end of that section's raw bytes
-    CHECK(avail <= text.raw_size);
-
-    // One byte before the section's raw end supplies exactly one byte
-    const std::uint64_t last_rva =
-        std::uint64_t{text.virtual_address} + text.raw_size - 1U;
-    CHECK(img.readable_bytes_at_rva(last_rva) == 1U);
-}
-
-TEST_CASE("a crafted export count cannot drive a huge allocation") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("fixture missing: " << kNotepad);
-        return;
-    }
-    const auto base = papa::pe::PeParser::parse_file(kNotepad);
-    REQUIRE(base.has_value());
-    const std::size_t honest_exports = base->exports().size();
-
-    // Locate the export directory by walking the headers, then overwrite.
-    // NumberOfFunctions and NumberOfNames with 0xFFFFFFFF
-    const auto src = base->raw_buffer();
-    const auto read_u32_at = [&src](std::size_t off) -> std::uint32_t {
-        std::uint32_t v = 0;
-        std::memcpy(&v, src.data() + off, sizeof(v));
-        return v;
-    };
-    const std::uint32_t e_lfanew = read_u32_at(0x3CU);
-    const std::size_t   opt_off  = std::size_t{e_lfanew} + 4U + 20U;
-    std::uint16_t       magic    = 0;
-    std::memcpy(&magic, src.data() + opt_off, sizeof(magic));
-    // The export directory is entry 0 of the data-directory array, which follows
-    // the optional header (0x60 into it for PE32, 0x70 for PE32+)
-    const std::size_t   dd_off  = opt_off + (magic == 0x20BU ? 0x70U : 0x60U);
-    const std::uint32_t dd_rva  = read_u32_at(dd_off);
-    if (dd_rva == 0) {
-        MESSAGE("fixture has no export directory, skipping");
-        return;
-    }
-    const auto dir_off = base->rva_to_file_offset(dd_rva);
-    REQUIRE(dir_off.has_value());
-
-    std::vector<std::byte> buf(src.begin(), src.end());
-    // IMAGE_EXPORT_DIRECTORY: NumberOfFunctions at +0x14, NumberOfNames at +0x18
-    const std::size_t     n_funcs_off = static_cast<std::size_t>(*dir_off) + 0x14U;
-    REQUIRE(n_funcs_off + 8U <= buf.size());
-    for (std::size_t i = 0; i < 8U; ++i) {
-        buf[n_funcs_off + i] = std::byte{0xFFU};
-    }
-
-    const auto crafted = papa::pe::PeParser::parse(std::move(buf));
-    REQUIRE(crafted.has_value());
-    // The clamp holds the list to what the image can actually supply, so the
-    // parse stays bounded rather than attempting a multi-gigabyte allocation
-    CHECK(crafted->exports().size() <= papa::constants::kMaxExportsPerImage);
-    CHECK(crafted->exports().size() <=
-          crafted->raw_buffer().size() / sizeof(std::uint32_t));
-    CHECK(crafted->exports().size() >= honest_exports);
-}
-
-TEST_CASE("a crafted section count cannot drive a huge allocation") {
-    // NumberOfSections is a raw 16-bit header field
+TEST_CASE("parse names the ordinal imports of a 32-bit image the ordinal table knows") {
     papa_tests::PeBuilder b;
-    b.code = std::vector<std::uint8_t>{0xC3};
-    std::vector<std::byte> buf = b.build();
+    b.x64     = false;
+    b.code    = {0xC3};
+    b.imports = {
+        {"WS2_32.dll", {"#6", "#9999"}},
+        {"wsock32.dll", {"#1"}},
+        {"kernel32.dll", {"#6", "ExitProcess"}},
+    };
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
 
-    std::uint32_t e_lfanew = 0;
-    std::memcpy(&e_lfanew, buf.data() + 0x3CU, sizeof(e_lfanew));
-    // IMAGE_FILE_HEADER follows the 4-byte signature, NumberOfSections at +2
-    const std::size_t n_sections_off = std::size_t{e_lfanew} + 4U + 2U;
-    REQUIRE(n_sections_off + 2U <= buf.size());
-    buf[n_sections_off]      = std::byte{0xFFU};
-    buf[n_sections_off + 1U] = std::byte{0xFFU};
+    struct Row {
+        std::string_view dll_spec;
+        std::string_view fn_spec;
+        std::string_view dll;
+        std::string_view name;
+        std::uint32_t    ordinal;
+        bool             by_ordinal;
+    };
+    const std::vector<Row> rows{
+        {"WS2_32.dll", "#6", "ws2_32", "getsockname", 6, false},
+        {"WS2_32.dll", "#9999", "ws2_32", "", 9999, true},
+        {"wsock32.dll", "#1", "wsock32", "accept", 1, false},
+        {"kernel32.dll", "#6", "kernel32", "", 6, true},
+        {"kernel32.dll", "ExitProcess", "kernel32", "ExitProcess", 0, false},
+    };
+    const auto imps = img->imports();
+    REQUIRE(imps.size() == rows.size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        CAPTURE(rows[i].fn_spec);
+        CHECK(imps[i].dll == rows[i].dll);
+        CHECK(imps[i].name == rows[i].name);
+        CHECK(imps[i].ordinal == rows[i].ordinal);
+        CHECK(imps[i].by_ordinal == rows[i].by_ordinal);
+        CHECK(imps[i].iat_va == b.iat_va(rows[i].dll_spec, rows[i].fn_spec));
+    }
+}
 
-    // Either the truncated table is rejected or the clamp holds the list to something
-    // the image could plausibly supply
-    const auto crafted = papa::pe::PeParser::parse(std::move(buf));
-    if (crafted.has_value()) {
-        CHECK(crafted->sections().size() <= papa::constants::kMaxSectionsPerImage);
+TEST_CASE("parse keeps every base relocation with its block padding, and the sites hold the pointers") {
+    papa_tests::PeBuilder b;
+    b.x64 = false;
+    b.code.assign(0x1100, 0x90);
+    // Three sites on the first code page and one on the second, so each block is padded
+    // with an ABSOLUTE entry
+    const std::vector<std::pair<std::uint32_t, std::uint32_t>> sites{
+        {0x0010, 0x40}, {0x0020, 0x50}, {0x0030, 0x60}, {0x1004, 0x1080}};
+    for (const auto& [site, target] : sites) {
+        b.reloc_code_offsets.push_back(site);
+        papa_tests::detail::poke(b.code, site, static_cast<std::uint32_t>(b.code_va(target)));
+    }
+    const auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
+
+    const std::vector<std::pair<std::uint32_t, std::uint32_t>> expected{
+        {0x1010, 3}, {0x1020, 3}, {0x1030, 3}, {0x1000, 0}, {0x2004, 3}, {0x2000, 0}};
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> got;
+    for (const papa::pe::ParsedRelocation& r : img->relocations()) {
+        got.emplace_back(r.rva, r.type);
+    }
+    CHECK(got == expected);
+
+    for (const auto& [site, target] : sites) {
+        CAPTURE(site);
+        const auto slot = img->read_at_rva(papa_tests::PeBuilder::kTextRva + site, 4);
+        REQUIRE(slot.has_value());
+        CHECK(u32_at(*slot, 0) == b.code_va(target));
+    }
+}
+
+TEST_CASE("parse rejects each malformed header with its error and survives a bad section or count") {
+    using papa::ErrorKind;
+    using papa::pe::PeImage;
+    const Sample x64(true);
+    const Sample x86(false);
+    REQUIRE(x64.honest.has_value());
+    REQUIRE(x86.honest.has_value());
+
+    using Buf    = std::vector<std::byte>;
+    using Patch  = std::function<void(Buf&, const Sample&)>;
+    using Verify = std::function<void(const PeImage&, const Sample&)>;
+    const Patch none = [](Buf&, const Sample&) {};
+
+    // The honest image carries every directory, so the rows below break live ones
+    const Verify every_directory = [](const PeImage& img, const Sample& s) {
+        const std::vector<std::string_view> names{"ExitProcess", "GetTickCount", "getsockname",
+                                                  "MessageBoxA"};
+        REQUIRE(img.imports().size() == names.size());
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            CHECK(img.imports()[i].name == names[i]);
+            CHECK(img.imports()[i].delayed == (i == 3U));
+        }
+        REQUIRE(img.exports().size() == 3U);
+        CHECK(img.exports()[2].forwarder == "ntdll.RtlAllocateHeap");
+        REQUIRE(img.tls_callbacks_va().size() == 1U);
+        CHECK(img.tls_callbacks_va()[0] == s.builder.code_va(s.builder.entry_offset));
+        CHECK_FALSE(img.relocations().empty());
+    };
+    // A count clamped to the function slots .rdata holds makes every non-zero dword from
+    // AddressOfFunctions to the end of its raw data an export
+    const Verify clamped_exports = [](const PeImage& img, const Sample& s) {
+        const std::size_t dir   = s.dir_offset(0);
+        const auto*       rdata = s.honest->section_containing_rva(
+            u32_at(s.bytes, s.layout.data_directory(0)));
+        const auto functions = s.honest->rva_to_file_offset(u32_at(s.bytes, dir + 0x1CU));
+        REQUIRE(rdata != nullptr);
+        REQUIRE(functions.has_value());
+        std::size_t nonzero = 0;
+        for (std::size_t off = *functions; off + 4U <= rdata->raw_offset + rdata->raw_size;
+             off += 4U) {
+            nonzero += u32_at(s.bytes, off) != 0U ? 1U : 0U;
+        }
+        CHECK(img.exports().size() == nonzero);
+        REQUIRE(img.exports().size() > 3U);
+        CHECK(img.exports()[0].va == s.builder.code_va(s.builder.exports[0].code_offset));
+        CHECK(img.exports()[1].va == s.builder.code_va(s.builder.exports[1].code_offset));
+    };
+    const Verify code_unreadable = [](const PeImage& img, const Sample& s) {
+        const auto code = img.read_at_rva(papa_tests::PeBuilder::kTextRva, 1);
+        CHECK_FALSE(code.has_value());
+        if (!code.has_value()) { CHECK(code.error().kind == ErrorKind::kOutOfBounds); }
+        CHECK(img.readable_bytes_at_rva(papa_tests::PeBuilder::kTextRva) == 0U);
+        CHECK(img.imports().size() == s.honest->imports().size());
+    };
+    const Verify no_callbacks = [](const PeImage& img, const Sample& s) {
+        CHECK(img.tls_callbacks_va().empty());
+        CHECK(img.imports().size() == s.honest->imports().size());
+        CHECK(img.exports().size() == s.honest->exports().size());
+    };
+
+    // An address that no section or header covers
+    constexpr std::uint64_t kUnmapped = 0x7FFF0000U;
+    struct Row {
+        std::string_view         label;
+        bool                     x64;
+        Patch                    patch;
+        std::optional<ErrorKind> kind;  // nullopt when the image parses
+        std::string_view         detail;
+        Verify                   verify;
+    };
+    const std::vector<Row> rows{
+        {"the honest PE32+ image", true, none, std::nullopt, "", every_directory},
+        {"the honest PE32 image", false, none, std::nullopt, "", every_directory},
+        {"a buffer shorter than the DOS header", true, [](Buf& b, const Sample&) { b.resize(0x30); },
+         ErrorKind::kNotPe, "buffer too small for DOS header", {}},
+        {"no MZ signature", true, [](Buf& b, const Sample&) { put<std::uint16_t>(b, 0, 0x5A5AU); },
+         ErrorKind::kNotPe, "missing MZ signature", {}},
+        {"e_lfanew past the end of the file", true,
+         [](Buf& b, const Sample& s) {
+             put(b, s.layout.e_lfanew, static_cast<std::uint32_t>(b.size()));
+         },
+         ErrorKind::kBadPe, "e_lfanew out of range", {}},
+        {"a negative e_lfanew", true,
+         [](Buf& b, const Sample& s) { put<std::uint32_t>(b, s.layout.e_lfanew, 0x80000000U); },
+         ErrorKind::kBadPe, "e_lfanew out of range", {}},
+        {"e_lfanew leaving no room for the PE signature", true,
+         [](Buf& b, const Sample& s) {
+             put(b, s.layout.e_lfanew, static_cast<std::uint32_t>(b.size() - 2U));
+         },
+         ErrorKind::kBadPe, "NT header truncated", {}},
+        {"a bad NT signature", true,
+         [](Buf& b, const Sample& s) { put<std::uint32_t>(b, s.layout.nt_headers, 0x00014550U); },
+         ErrorKind::kNotPe, "missing PE signature", {}},
+        {"a cut file header", true,
+         [](Buf& b, const Sample& s) { b.resize(s.layout.file_header + 10U); },
+         ErrorKind::kBadPe, "file header truncated", {}},
+        {"a cut optional header magic", true,
+         [](Buf& b, const Sample& s) { b.resize(s.layout.optional_header + 1U); },
+         ErrorKind::kBadPe, "optional header truncated", {}},
+        {"a cut PE32+ optional header", true,
+         [](Buf& b, const Sample& s) { b.resize(s.layout.optional_header + 64U); },
+         ErrorKind::kBadPe, "PE32+ optional header truncated", {}},
+        {"a cut PE32 optional header", false,
+         [](Buf& b, const Sample& s) { b.resize(s.layout.optional_header + 64U); },
+         ErrorKind::kBadPe, "PE32 optional header truncated", {}},
+        {"a cut data directory table", true,
+         [](Buf& b, const Sample& s) { b.resize(s.layout.data_directory(3)); },
+         ErrorKind::kBadPe, "data directory truncated", {}},
+        {"NumberOfSections 0xFFFF", true,
+         [](Buf& b, const Sample& s) { put<std::uint16_t>(b, s.layout.file_header + 2U, 0xFFFFU); },
+         ErrorKind::kBadPe, "section header truncated", {}},
+        {"a .text raw pointer past the end of the file", true,
+         [](Buf& b, const Sample& s) {
+             put<std::uint32_t>(b, s.layout.section_header(0) + 20U, 0x10000000U);
+         },
+         std::nullopt, "", code_unreadable},
+        {"export counts of 0xFFFFFFFF", true,
+         [](Buf& b, const Sample& s) {
+             // NumberOfFunctions and NumberOfNames sit at +0x14 and +0x18
+             put<std::uint32_t>(b, s.dir_offset(0) + 0x14U, 0xFFFFFFFFU);
+             put<std::uint32_t>(b, s.dir_offset(0) + 0x18U, 0xFFFFFFFFU);
+         },
+         std::nullopt, "", clamped_exports},
+        {"an unmapped PE32+ TLS callback array", true,
+         [](Buf& b, const Sample& s) {
+             put<std::uint64_t>(b, s.dir_offset(9) + 24U, s.builder.base() + kUnmapped);
+         },
+         std::nullopt, "", no_callbacks},
+        {"an unmapped PE32 TLS callback array", false,
+         [](Buf& b, const Sample& s) {
+             put(b, s.dir_offset(9) + 12U, static_cast<std::uint32_t>(s.builder.base() + kUnmapped));
+         },
+         std::nullopt, "", no_callbacks},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const Sample& s   = row.x64 ? x64 : x86;
+        Buf           buf = s.bytes;
+        row.patch(buf, s);
+        const auto r = papa::pe::PeParser::parse(std::move(buf));
+        if (row.kind.has_value()) {
+            CHECK_FALSE(r.has_value());
+            if (r.has_value()) { continue; }
+            CHECK(r.error().kind == *row.kind);
+            CHECK(r.error().detail.find(row.detail) != std::string::npos);
+            continue;
+        }
+        CHECK(r.has_value());
+        if (!r.has_value()) { continue; }
+        CHECK(reader_violation(*r) == "");
+        row.verify(*r, s);
+    }
+}
+
+TEST_CASE("parse survives every prefix of a rich image, failing with a pe error or yielding bounded readers") {
+    using papa::ErrorKind;
+    for (const bool x64 : {true, false}) {
+        CAPTURE(x64);
+        const Sample s(x64);
+        REQUIRE(s.honest.has_value());
+        std::size_t not_pe        = 0;
+        std::size_t bad_pe        = 0;
+        std::size_t parsed        = 0;
+        std::size_t problem_count = 0;
+        std::string problems;
+        for (std::size_t n = 0; n < s.bytes.size(); ++n) {
+            const auto r = papa::pe::PeParser::parse(std::vector<std::byte>(
+                s.bytes.begin(), s.bytes.begin() + static_cast<std::ptrdiff_t>(n)));
+            std::string problem;
+            if (r.has_value()) {
+                ++parsed;
+                problem = reader_violation(*r);
+            } else if (r.error().kind == ErrorKind::kNotPe) {
+                ++not_pe;
+            } else if (r.error().kind == ErrorKind::kBadPe) {
+                ++bad_pe;
+            } else if (r.error().kind != ErrorKind::kOutOfBounds) {
+                problem = "an unexpected error kind, " + r.error().detail;
+            }
+            // The first few problems name their prefix, and the rest are only counted
+            if (!problem.empty() && ++problem_count <= 8U) {
+                problems.append(std::to_string(n)).append(" bytes: ").append(problem).append("\n");
+            }
+        }
+        CHECK(problems == "");
+        CHECK(problem_count == 0U);
+        // The short cuts lose the DOS or NT headers, and the long ones keep every directory
+        CHECK(not_pe > 0U);
+        CHECK(bad_pe > 0U);
+        CHECK(parsed > 0U);
     }
 }
 

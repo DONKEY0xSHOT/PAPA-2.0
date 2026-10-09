@@ -24,16 +24,6 @@ constexpr const char* kCharCallsFrom     = "calls from";
 constexpr const char* kCharCallsTo       = "calls to";
 constexpr const char* kCharRecursiveCall = "recursive call";
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
-}
-
 // True when the block graph has a cycle, which is capa's loop test once self-loops are dropped
 // Kahn's peel is iterative, so a crafted chain of blocks cannot exhaust the native stack
 [[nodiscard]] bool has_cycle(const std::vector<std::vector<std::size_t>>& succ) {
@@ -127,7 +117,7 @@ extract_function_name(const Function& fn, std::string_view symbol) {
     if (symbol.empty()) { return std::nullopt; }
     return FeatureWithAddress{
         std::make_shared<const features::FunctionName>(std::string(symbol)),
-        va_addr(fn.va)
+        va_address(fn.va)
     };
 }
 
@@ -154,6 +144,25 @@ extract_function_features(const Function& fn, std::string_view symbol) {
         out.push_back(std::move(*name));
     }
     return out;
+}
+
+bool is_thunk(const Function& fn) noexcept {
+    // A thunk is a single basic block that contains exactly one instruction
+    // and that instruction is an unconditional jmp or call through memory
+    if (fn.basic_blocks.size() != 1) { return false; }
+    const auto& bb = fn.basic_blocks.front();
+    if (bb.instructions.size() != 1) { return false; }
+
+    const auto& ins = bb.instructions.front();
+    const bool is_uncond_branch =
+        (ins.is_jump || ins.is_call) && !ins.is_conditional;
+    if (!is_uncond_branch) { return false; }
+    if (ins.operand_count == 0) { return false; }
+
+    const auto& op0 = ins.operands.front();
+    // kImmMem is x86 absolute "[disp32]" and kRipRel is x64 RIP-relative "[rip+disp]",
+    // both memory operands whose target is an IAT slot in normal thunks
+    return op0.kind == OperandKind::kImmMem || op0.kind == OperandKind::kRipRel;
 }
 
 }  // namespace papa::features::extractors::papa_native::function_

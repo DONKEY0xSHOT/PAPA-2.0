@@ -19,13 +19,8 @@ namespace papa::features::extractors::pefile {
 
 namespace {
 
-constexpr const char* kFormatPeValue            = "pe";
 constexpr const char* kEmbeddedPeCharacteristic = "embedded pe";
 constexpr const char* kForwardedExportChar      = "forwarded export";
-
-[[nodiscard]] features::Address va_addr(std::uint64_t v) {
-    return features::Address{features::AbsoluteVirtualAddress{v}};
-}
 
 [[nodiscard]] features::Address fo_addr(std::uint64_t v) {
     return features::Address{features::FileOffsetAddress{v}};
@@ -40,8 +35,9 @@ constexpr const char* kForwardedExportChar      = "forwarded export";
 std::vector<FeatureWithAddress>
 extract_file_format(const ::papa::pe::PeImage& /*image*/) {
     std::vector<FeatureWithAddress> out;
-    out.emplace_back(std::make_shared<const features::Format>(std::string(kFormatPeValue)),
-                     no_addr());
+    out.emplace_back(
+        std::make_shared<const features::Format>(std::string(constants::format_value::kPe)),
+        no_addr());
     return out;
 }
 
@@ -52,7 +48,7 @@ extract_file_section_names(const ::papa::pe::PeImage& image) {
     for (const auto& sec : image.sections()) {
         if (sec.name.empty()) { continue; }
         const std::uint64_t va = image.image_base() + sec.virtual_address;
-        out.emplace_back(std::make_shared<const features::Section>(sec.name), va_addr(va));
+        out.emplace_back(std::make_shared<const features::Section>(sec.name), va_address(va));
     }
     return out;
 }
@@ -61,23 +57,14 @@ std::vector<FeatureWithAddress>
 extract_file_import_names(const ::papa::pe::PeImage& image) {
     std::vector<FeatureWithAddress> out;
     for (const auto& imp : image.imports()) {
-        // Build the symbol token
-        // Ordinals get the canonical "#<n>" form
-        std::string symbol;
-        if (imp.by_ordinal) {
-            symbol.reserve(2 + 10);
-            symbol.push_back('#');
-            symbol.append(std::to_string(imp.ordinal));
-        } else {
-            symbol = imp.name;
-        }
+        const std::string symbol = ::papa::features::extractors::helpers::import_symbol(imp);
         if (symbol.empty()) { continue; }
 
         for (auto& variant :
              ::papa::features::extractors::helpers::generate_symbols(imp.dll, symbol, true)) {
             out.emplace_back(
                 std::make_shared<const features::Import>(std::move(variant)),
-                va_addr(imp.iat_va));
+                va_address(imp.iat_va));
         }
     }
     return out;
@@ -89,19 +76,17 @@ extract_file_export_names(const ::papa::pe::PeImage& image) {
     for (const auto& exp : image.exports()) {
         if (!exp.name.empty()) {
             out.emplace_back(std::make_shared<const features::Export>(exp.name),
-                             va_addr(exp.va));
+                             va_address(exp.va));
         }
         if (exp.forwarder.has_value()) {
             // Forwarded exports surface twice, once as Characteristic so file rules can detect
             // the pattern and once as a synthetic Import so symbol lookups still match
-            out.emplace_back(std::make_shared<const features::Characteristic>(
-                                 std::string(kForwardedExportChar)),
-                             va_addr(exp.va));
+            out.push_back(features::make_characteristic(kForwardedExportChar, exp.va));
             const std::string normalized =
                 ::papa::features::extractors::helpers::reformat_forwarded_export_name(
                     *exp.forwarder);
             out.emplace_back(std::make_shared<const features::Import>(normalized),
-                             va_addr(exp.va));
+                             va_address(exp.va));
         }
     }
     return out;

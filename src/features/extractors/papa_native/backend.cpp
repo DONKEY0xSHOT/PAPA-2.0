@@ -3,7 +3,8 @@
 #include "papa/exceptions.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/insn.h"
+#include "papa/features/extractors/papa_native/imports.h"
+#include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_image.h"
 
 #include <utility>
@@ -32,23 +33,21 @@ PapaNativeBackend::build(const ::papa::pe::PeImage& image,
     // depends on its bitness and decoded operand semantics
     Disassembler disasm(image.is_64bit());
 
+    // Discovery and the instruction extractors share this one table
     ImportTable imports = build_import_table(image);
 
-    auto cfg_result = cfg::recover(image, disasm, sigs);
-    if (!cfg_result) {
-        return ::papa::Unexpected{cfg_result.error()};
-    }
+    RecoveredImage recovered = viv::discover_functions(image, disasm, imports, sigs);
 
     return PapaNativeBackend(image,
                              std::move(disasm),
-                             std::move(cfg_result->functions),
+                             std::move(recovered.functions),
                              std::move(imports),
-                             std::move(cfg_result->library_names));
+                             std::move(recovered.library_names));
 }
 
 const ::papa::pe::PeImage& PapaNativeBackend::image() const noexcept {
-    // The pointer is non-null after construction build() either returns by value or
-    // fails outright so dereferencing here is always safe
+    // The pointer is non-null after construction. build() either returns by value or
+    // fails outright, so dereferencing here is always safe
     return *image_;
 }
 

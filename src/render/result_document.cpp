@@ -44,12 +44,6 @@ void collect_matched_rules(const engine::Result&  result,
     }
 }
 
-// True when a rule is a user-facing capability rather than a building block
-[[nodiscard]] bool is_capability_rule(const rules::RuleMeta& m) {
-    if (m.lib || m.is_subscope_rule) { return false; }
-    return !(m.namespace_.has_value() && m.namespace_->starts_with("internal/"));
-}
-
 // Sort match locations so PAPA's report is deterministic across runs
 void sort_addresses(std::vector<features::Address>& addrs) {
     std::sort(addrs.begin(), addrs.end(),
@@ -60,23 +54,32 @@ void sort_addresses(std::vector<features::Address>& addrs) {
 
 // Translate a logic statement into capa's node type plus its extra fields
 void fill_statement(MatchNode& node, const engine::Statement& st) {
-    const std::string_view name = st.name();
-    if (name == "some") {
-        node.statement_type = "some";
-        node.count = static_cast<std::int64_t>(static_cast<const engine::Some&>(st).count());
-    } else if (name == "count") {
-        // capa names the range statement "range", not "count"
-        node.statement_type = "range";
-        const auto& range = static_cast<const engine::Range&>(st);
-        node.range_min   = static_cast<std::int64_t>(range.min());
-        node.range_max   = static_cast<std::int64_t>(range.max());
-        node.range_child = range.feature().get();
-    } else if (name == "subscope") {
-        node.statement_type = "subscope";
-        node.subscope = static_cast<const engine::Subscope&>(st).scope();
-    } else {
+    switch (st.kind()) {
+        case engine::StatementKind::kSome:
+            node.statement_type = "some";
+            node.count = static_cast<std::int64_t>(static_cast<const engine::Some&>(st).count());
+            return;
+        case engine::StatementKind::kRange: {
+            // capa names the range statement "range", not "count"
+            node.statement_type = "range";
+            const auto& range = static_cast<const engine::Range&>(st);
+            node.range_min   = static_cast<std::int64_t>(range.min());
+            node.range_max   = static_cast<std::int64_t>(range.max());
+            node.range_child = range.feature().get();
+            return;
+        }
+        case engine::StatementKind::kSubscope:
+            node.statement_type = "subscope";
+            node.subscope = static_cast<const engine::Subscope&>(st).scope();
+            return;
         // and / or / not / optional carry only their type
-        node.statement_type = std::string(name);
+        case engine::StatementKind::kAnd:
+        case engine::StatementKind::kOr:
+        case engine::StatementKind::kNot:
+        case engine::StatementKind::kOptional:
+        case engine::StatementKind::kFeature:
+            node.statement_type = std::string(st.name());
+            return;
     }
 }
 
@@ -162,6 +165,11 @@ constexpr int kMaxMatchDepth = 256;
 }
 
 }  // namespace
+
+bool is_capability_rule(const rules::RuleMeta& m) {
+    if (m.lib || m.is_subscope_rule) { return false; }
+    return !(m.namespace_.has_value() && m.namespace_->starts_with("internal/"));
+}
 
 ResultDocument
 build_document(Metadata                                   metadata,

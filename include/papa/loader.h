@@ -53,11 +53,11 @@ struct StaticAnalysisMeta {
     std::vector<LibraryFunction>                        library_functions;
 };
 
-// Top-level report header argv preserves the command-line arguments so users can
+// Top-level report header. argv preserves the command-line arguments so users can
 // reproduce a run from the report alone (CAPA does the same)
 struct Metadata {
     std::string               timestamp;     // ISO-8601 UTC
-    std::string               version;       // papa::version::kVersionString
+    std::string               version;       // papa::version::kCapaVersion
     std::vector<std::string>  argv;
     std::filesystem::path     sample_path;
     std::uint64_t             sample_size_bytes{0};
@@ -72,13 +72,11 @@ struct Metadata {
 // Build a Metadata from the analysis output and a few caller-supplied values
 // argv and rules_paths are moved in to avoid copying the caller's lists
 [[nodiscard]] Metadata
-collect_metadata(std::span<const std::byte>                                 sample_buf,
-                 std::filesystem::path                                      sample_path,
+collect_metadata(std::filesystem::path                                      sample_path,
                  std::vector<std::string>                                   argv,
                  std::vector<std::string>                                   rules_paths,
                  const pe::PeImage&                                         image,
-                 const capabilities::static_::StaticCapabilities&           caps,
-                 const features::extractors::StaticFeatureExtractor&        extractor);
+                 const capabilities::static_::StaticCapabilities&           caps);
 
 // Link each matched basic block to its function, mirroring capa's
 // compute_static_layout

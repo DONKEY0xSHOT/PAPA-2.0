@@ -5,10 +5,13 @@
 #include "papa/features/extractors/papa_native/disassembler.h"
 #include "papa/features/extractors/papa_native/jump_tables.h"
 
+#include "test_support.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace pn = papa::features::extractors::papa_native;
@@ -34,13 +37,6 @@ std::vector<pn::DecodedInsn> decode_window(std::span<const std::byte> buf,
     return out;
 }
 
-std::vector<std::byte> to_bytes(std::initializer_list<std::uint8_t> bytes) {
-    std::vector<std::byte> out;
-    out.reserve(bytes.size());
-    for (const std::uint8_t b : bytes) { out.push_back(std::byte{b}); }
-    return out;
-}
-
 // The real MSVC x64 switch dispatch from capa.exe at 0x14000ac85, a cmp and ja
 // guard followed by an offset-table load and an indirect jump
 const std::initializer_list<std::uint8_t> kIdiomBytes = {
@@ -62,7 +58,7 @@ constexpr std::uint64_t kFuncHi     = 0x14000c424ULL;
 
 TEST_CASE("jump_tables: resolves the MSVC x64 indexed-jump idiom") {
     const pn::Disassembler dis(true);
-    const auto buf = to_bytes(kIdiomBytes);
+    const auto buf = papa_tests::byte_vec(kIdiomBytes);
     const auto window = decode_window(buf, kDispatchVa, dis);
     REQUIRE(window.size() == 8);
     REQUIRE(window.back().is_jump);
@@ -90,7 +86,7 @@ TEST_CASE("jump_tables: resolves the MSVC x64 indexed-jump idiom") {
 
 TEST_CASE("jump_tables: stops at the first entry outside the function range") {
     const pn::Disassembler dis(true);
-    const auto buf = to_bytes(kIdiomBytes);
+    const auto buf = papa_tests::byte_vec(kIdiomBytes);
     const auto window = decode_window(buf, kDispatchVa, dis);
     REQUIRE(window.size() == 8);
 
@@ -110,7 +106,7 @@ TEST_CASE("jump_tables: resolves the x86 memory-indirect indexed jump") {
     const pn::Disassembler dis(/*is_64bit=*/false);
     // The real 32-bit MSVC switch dispatch from Everything.exe at 0x44f50e:
     //   jmp dword ptr [eax*4 + 0x00452400]
-    const auto buf = to_bytes({0xFF, 0x24, 0x85, 0x00, 0x24, 0x45, 0x00});
+    const auto buf = papa_tests::byte_vec({0xFF, 0x24, 0x85, 0x00, 0x24, 0x45, 0x00});
     const auto window = decode_window(buf, 0x0044f50eULL, dis);
     REQUIRE(window.size() == 1);
     REQUIRE(window.back().is_jump);
@@ -136,50 +132,46 @@ TEST_CASE("jump_tables: resolves the x86 memory-indirect indexed jump") {
     CHECK(res->table_size == 4U * 4U);
 }
 
-TEST_CASE("jump_tables: memory-indirect resolver ignores a register jump") {
-    const pn::Disassembler dis(/*is_64bit=*/false);
-    const auto buf = to_bytes({0xFF, 0xE0});  // jmp eax
-    const auto window = decode_window(buf, 0x00401000ULL, dis);
-    REQUIRE(window.size() == 1);
+TEST_CASE("jump_tables: the resolvers return nothing for a jump that indexes no table") {
+    struct Row {
+        std::string_view       label;
+        bool                   x64;
+        std::vector<std::byte> bytes;
+        std::uint64_t          va;
+        std::size_t            window;
+        bool                   indexed;
+    };
+    const std::vector<Row> rows{
+        {"a register jump to the memory-indirect resolver", false,
+         papa_tests::byte_vec({0xFF, 0xE0}), 0x00401000ULL, 1, false},
+        {"a base-register table to the memory-indirect resolver", false,
+         papa_tests::byte_vec({0xFF, 0x24, 0x83}), 0x00401000ULL, 1, false},
+        // mov eax, 1 / ret, with no indirect jump at all
+        {"a window without a jump to the indexed resolver", true,
+         papa_tests::byte_vec({0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3}), 0x140001000ULL, 2, true},
+    };
     const auto reader = [](std::uint64_t) -> std::optional<std::uint32_t> {
         return std::nullopt;
     };
-    const auto res = pn::resolve_memory_indirect_jump_table(
-        window.back(), 0ULL, ~0ULL, reader);
-    CHECK_FALSE(res.has_value());
-}
-
-TEST_CASE("jump_tables: memory-indirect resolver ignores a base-register table") {
-    const pn::Disassembler dis(/*is_64bit=*/false);
-    const auto buf = to_bytes({0xFF, 0x24, 0x83});  // jmp [ebx + eax*4]
-    const auto window = decode_window(buf, 0x00401000ULL, dis);
-    REQUIRE(window.size() == 1);
-    const auto reader = [](std::uint64_t) -> std::optional<std::uint32_t> {
-        return std::nullopt;
-    };
-    const auto res = pn::resolve_memory_indirect_jump_table(
-        window.back(), 0ULL, ~0ULL, reader);
-    CHECK_FALSE(res.has_value());
-}
-
-TEST_CASE("jump_tables: returns nullopt when the window is not a jump table") {
-    const pn::Disassembler dis(true);
-    // mov eax, 1 / ret -- no indirect jump at all
-    const auto buf = to_bytes({0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3});
-    const auto window = decode_window(buf, 0x140001000ULL, dis);
-    const auto reader = [](std::uint64_t) -> std::optional<std::uint32_t> {
-        return std::nullopt;
-    };
-    const auto res = pn::resolve_indexed_jump_table(
-        window, /*is_64bit=*/true, 0ULL, ~0ULL, reader);
-    CHECK_FALSE(res.has_value());
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const pn::Disassembler dis(row.x64);
+        const auto window = decode_window(row.bytes, row.va, dis);
+        REQUIRE(window.size() == row.window);
+        const auto res = row.indexed
+                             ? pn::resolve_indexed_jump_table(window, /*is_64bit=*/row.x64, 0ULL,
+                                                              ~0ULL, reader)
+                             : pn::resolve_memory_indirect_jump_table(window.back(), 0ULL, ~0ULL,
+                                                                      reader);
+        CHECK_FALSE(res.has_value());
+    }
 }
 
 TEST_CASE("jump_tables: emulator-driven resolver uses the path-sensitive base") {
     // The real cmd.exe dispatch at 0x14000f154. r12 holds the image base, set by a lea
     // far above past an intervening pop, so only emulation recovers it
     const pn::Disassembler dis(true);
-    const auto disp_buf = to_bytes({
+    const auto disp_buf = papa_tests::byte_vec({
         0x83, 0xf8, 0x7c,
         0x77, 0x44,
         0x41, 0x0f, 0xb6, 0x84, 0x04, 0x38, 0xf7, 0x00, 0x00,
@@ -229,7 +221,7 @@ TEST_CASE("jump_tables: emulator-driven resolver uses the path-sensitive base") 
 
 TEST_CASE("jump_tables: emulator-driven resolver bails when the base is not the image base") {
     const pn::Disassembler dis(true);
-    const auto disp_buf = to_bytes({
+    const auto disp_buf = papa_tests::byte_vec({
         0x41, 0x8b, 0x8c, 0x84, 0x20, 0xf7, 0x00, 0x00,
         0x49, 0x03, 0xcc,
         0xff, 0xe1});
@@ -251,10 +243,10 @@ TEST_CASE("jump_tables: emulator-driven resolver bails when the base is not the 
 TEST_CASE("jump_tables: resolves the MSVC x64 two-level indexed switch") {
     const pn::Disassembler dis(true);
     // lea r12, [rip+152460]  at 0x14000ef9d, so r12 = 0x140034370
-    const auto lea_buf = to_bytes({0x4c, 0x8d, 0x25, 0x8c, 0x53, 0x02, 0x00});
+    const auto lea_buf = papa_tests::byte_vec({0x4c, 0x8d, 0x25, 0x8c, 0x53, 0x02, 0x00});
     // The same cmd_x64 dispatch at 0x14000f154, a byte index map followed by the
     // offset-table load and the indirect jump
-    const auto disp_buf = to_bytes({
+    const auto disp_buf = papa_tests::byte_vec({
         0x83, 0xf8, 0x7c,
         0x77, 0x44,
         0x41, 0x0f, 0xb6, 0x84, 0x04, 0x38, 0xf7, 0x00, 0x00,

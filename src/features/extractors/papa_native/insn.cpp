@@ -8,6 +8,7 @@
 #include "papa/features/basic_block.h"
 #include "papa/features/extractors/helpers.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/indirect_calls.h"
 #include "papa/pe/pe_image.h"
 #include "papa/util/string_utils.h"
@@ -47,18 +48,6 @@ constexpr std::array<ZydisMnemonic, 4> kXorMnemonics{
     ZYDIS_MNEMONIC_PXOR,
 };
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
-// Lift a Characteristic into an addressed feature pair
-// Used by every characteristic-emitting extractor below
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
-}
-
 // True when the operand carries a memory access whose displacement matches
 // the requested offset. Register and immediate operands are skipped
 [[nodiscard]] bool
@@ -89,19 +78,6 @@ operand_target_va(const DecodedInsn& ins, const DecodedOperand& op) noexcept {
     }
 }
 
-// True when reg is a stack-pointer or frame-pointer for the given bitness
-// Uses ZydisRegisterGetLargestEnclosing so partial-width aliases (sp/bp/esp/...) all resolve correctly
-[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
-    if (reg == ZYDIS_REGISTER_NONE) { return false; }
-    const ZydisMachineMode mode =
-        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
-    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
-    if (is_64bit) {
-        return enclosing == ZYDIS_REGISTER_RSP || enclosing == ZYDIS_REGISTER_RBP;
-    }
-    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
-}
-
 // True for the base registers CAPA excludes from offset features, the frame pointer
 // and the 32-bit stack pointer. It keeps rsp, so rsp offsets are still emitted
 [[nodiscard]] bool is_offset_excluded_reg(ZydisRegister reg, bool is_64bit) noexcept {
@@ -115,7 +91,7 @@ operand_target_va(const DecodedInsn& ins, const DecodedOperand& op) noexcept {
     return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
 }
 
-// True when the instruction is "add esp, k" -- the single stack-management form. CAPA
+// True when the instruction is "add esp, k", the single stack-management form CAPA
 // suppresses as a Number-feature source
 [[nodiscard]] bool
 is_add_esp(const DecodedInsn& ins) noexcept {
@@ -229,7 +205,7 @@ extract_mnemonic(const DecodedInsn& ins) {
     if (ins.mnemonic_str.empty()) { return std::nullopt; }
     return FeatureWithAddress{
         interned_mnemonic(ins.zyd_mnem, ins.mnemonic_str),
-        va_addr(ins.va)
+        va_address(ins.va)
     };
 }
 
@@ -304,7 +280,7 @@ extract_bytes(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
 
         out.emplace_back(
             std::make_shared<const features::Bytes>(std::move(buf)),
-            va_addr(ins.va));
+            va_address(ins.va));
     }
     return out;
 }
@@ -356,10 +332,10 @@ extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
         const features::Number::Value val{v};
         out.emplace_back(
             std::make_shared<const features::Number>(val),
-            va_addr(ins.va));
+            va_address(ins.va));
         out.emplace_back(
             std::make_shared<const features::OperandNumber>(i, val),
-            va_addr(ins.va));
+            va_address(ins.va));
 
         // "add reg, small_imm" doubles as a struct-offset hint in MSVC code
         if (ins.zyd_mnem == ZYDIS_MNEMONIC_ADD &&
@@ -370,10 +346,10 @@ extract_number(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
             const std::int64_t signed_v = static_cast<std::int64_t>(v);
             out.emplace_back(
                 std::make_shared<const features::Offset>(signed_v),
-                va_addr(ins.va));
+                va_address(ins.va));
             out.emplace_back(
                 std::make_shared<const features::OperandOffset>(i, signed_v),
-                va_addr(ins.va));
+                va_address(ins.va));
         }
     }
     return out;
@@ -401,10 +377,10 @@ extract_offset(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
         // A zero displacement is still an offset
         out.emplace_back(
             std::make_shared<const features::Offset>(off),
-            va_addr(ins.va));
+            va_address(ins.va));
         out.emplace_back(
             std::make_shared<const features::OperandOffset>(i, off),
-            va_addr(ins.va));
+            va_address(ins.va));
 
         // For lea reg, [reg + off] where off is not readable memory, CAPA also surfaces the
         // displacement as a Number. A stack or frame base and any SIB operand are excluded
@@ -417,10 +393,10 @@ extract_offset(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
                 const features::Number::Value num_v{v};
                 out.emplace_back(
                     std::make_shared<const features::Number>(num_v),
-                    va_addr(ins.va));
+                    va_address(ins.va));
                 out.emplace_back(
                     std::make_shared<const features::OperandNumber>(i, num_v),
-                    va_addr(ins.va));
+                    va_address(ins.va));
             }
         }
     }
@@ -499,7 +475,7 @@ extract_string(const DecodedInsn& ins, const ::papa::pe::PeImage& image) {
 
         out.emplace_back(
             std::make_shared<const features::String>(std::move(*s)),
-            va_addr(ins.va));
+            va_address(ins.va));
     }
     return out;
 }
@@ -563,41 +539,13 @@ extract_peb_access(const DecodedInsn& ins, bool is_64bit) {
     return std::nullopt;
 }
 
-}  // namespace papa::features::extractors::papa_native::insn
-
-namespace papa::features::extractors::papa_native {
-
-ImportTable build_import_table(const ::papa::pe::PeImage& image) {
-    ImportTable table;
-    const auto rows = image.imports();
-    table.by_iat_va.reserve(rows.size());
-    for (const auto& row : rows) {
-        if (row.iat_va == 0U) { continue; }
-        table.by_iat_va.emplace(row.iat_va, &row);
-    }
-    return table;
-}
-
-}  // namespace papa::features::extractors::papa_native
-
-namespace papa::features::extractors::papa_native::insn {
-
 namespace {
 
 // Emit one Api feature per generate_symbols variant and append to out
 void emit_api_variants(const ::papa::pe::ParsedImport& imp,
                        std::uint64_t                   addr_va,
                        std::vector<FeatureWithAddress>& out) {
-    // For ordinal-only imports the symbol is "#<ordinal>"
-    // Otherwise the symbol is the named import as recorded by the PE parser
-    std::string symbol;
-    if (imp.by_ordinal) {
-        symbol.reserve(2 + 10);
-        symbol.push_back('#');
-        symbol.append(std::to_string(imp.ordinal));
-    } else {
-        symbol = imp.name;
-    }
+    const std::string symbol = ::papa::features::extractors::helpers::import_symbol(imp);
     if (symbol.empty()) { return; }
 
     auto variants = ::papa::features::extractors::helpers::generate_symbols(
@@ -605,53 +553,8 @@ void emit_api_variants(const ::papa::pe::ParsedImport& imp,
     for (auto& v : variants) {
         out.emplace_back(
             std::make_shared<const features::Api>(std::move(v)),
-            va_addr(addr_va));
+            va_address(addr_va));
     }
-}
-
-// True when the four bytes at the given VA are the CET ENDBRANCH thunk prefix
-[[nodiscard]] bool
-has_endbranch_prefix(const ::papa::pe::PeImage& image, std::uint64_t va) noexcept {
-    if (va < image.image_base()) { return false; }
-    auto r = image.read_at_rva(va - image.image_base(),
-                               ::papa::constants::kEndbranchSkipLen);
-    if (!r) { return false; }
-    const auto bytes = *r;
-    if (bytes.size() < ::papa::constants::kEndbranchBytes.size()) { return false; }
-    for (std::size_t i = 0; i < ::papa::constants::kEndbranchBytes.size(); ++i) {
-        if (static_cast<std::uint8_t>(bytes[i]) !=
-            ::papa::constants::kEndbranchBytes[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Decode the single instruction located at va, reading through the image. Used to walk
-// a thunk chain one hop at a time
-[[nodiscard]] std::optional<DecodedInsn>
-decode_insn_at(const ::papa::pe::PeImage& image,
-               const Disassembler&        disasm,
-               std::uint64_t              va) {
-    if (va < image.image_base()) { return std::nullopt; }
-    constexpr std::size_t kMaxFetch = ::papa::constants::kMaxInsnBytes;
-    auto r = image.read_at_rva(va - image.image_base(), kMaxFetch);
-    if (!r) {
-        std::size_t hi = kMaxFetch;
-        std::size_t lo = 0;
-        while (hi - lo > 1U) {
-            const std::size_t mid = lo + (hi - lo) / 2U;
-            auto attempt = image.read_at_rva(va - image.image_base(), mid);
-            if (attempt) { lo = mid; }
-            else         { hi = mid; }
-        }
-        if (lo == 0U) { return std::nullopt; }
-        r = image.read_at_rva(va - image.image_base(), lo);
-        if (!r) { return std::nullopt; }
-    }
-    auto decoded = disasm.decode(*r, va);
-    if (!decoded) { return std::nullopt; }
-    return *decoded;
 }
 
 }  // namespace
@@ -673,83 +576,20 @@ std::vector<FeatureWithAddress> extract_flirt_call_api(
 
     // capa yields the library name and, for a leading-underscore name, the form with one
     // underscore removed, so a rule can match either spelling
-    out.emplace_back(std::make_shared<const features::Api>(*name), va_addr(ins.va));
+    out.emplace_back(std::make_shared<const features::Api>(*name), va_address(ins.va));
     if (name->front() == '_' && name->size() > 1U) {
         out.emplace_back(std::make_shared<const features::Api>(name->substr(1)),
-                         va_addr(ins.va));
+                         va_address(ins.va));
     }
     return out;
 }
 
-const ::papa::pe::ParsedImport*
-resolve_direct_call_import(const DecodedInsn&         ins,
-                           const ::papa::pe::PeImage& image,
-                           const ImportTable&         imports,
-                           const Disassembler&        disasm) {
-    if (ins.operand_count == 0) { return nullptr; }
-    const auto& op0 = ins.operands[0];
-
-    const auto lookup = [&](std::uint64_t iat_va) -> const ::papa::pe::ParsedImport* {
-        const auto it = imports.by_iat_va.find(iat_va);
-        return it == imports.by_iat_va.end() ? nullptr : it->second;
-    };
-
-    switch (op0.kind) {
-        case OperandKind::kImmMem:
-            return lookup(static_cast<std::uint64_t>(op0.disp));
-
-        case OperandKind::kRipRel:
-            return lookup(ins.va + ins.length + static_cast<std::uint64_t>(op0.disp));
-
-        case OperandKind::kPcRel: {
-            std::optional<std::uint64_t> target = ins.branch_target;
-            if (!target.has_value()) { return nullptr; }
-
-            for (std::size_t hop = 0;
-                 hop < ::papa::constants::kThunkChainDepthDelta; ++hop) {
-                if (const auto* row = lookup(*target)) { return row; }
-                if (has_endbranch_prefix(image, *target)) {
-                    *target += ::papa::constants::kEndbranchSkipLen;
-                }
-                const auto step = decode_insn_at(image, disasm, *target);
-                if (!step.has_value()) { return nullptr; }
-                const auto& d = *step;
-                if ((!d.is_jump && !d.is_call) || d.is_conditional ||
-                    d.operand_count == 0) {
-                    return nullptr;
-                }
-                const auto& thunk_op = d.operands[0];
-                if (thunk_op.kind == OperandKind::kRipRel) {
-                    return lookup(d.va + d.length +
-                                  static_cast<std::uint64_t>(thunk_op.disp));
-                }
-                if (thunk_op.kind == OperandKind::kImmMem) {
-                    return lookup(static_cast<std::uint64_t>(thunk_op.disp));
-                }
-                if (thunk_op.kind == OperandKind::kPcRel) {
-                    if (!d.branch_target.has_value()) { return nullptr; }
-                    target = d.branch_target;
-                    continue;
-                }
-                return nullptr;
-            }
-            return nullptr;
-        }
-
-        default:
-            return nullptr;
-    }
-}
-
 std::vector<FeatureWithAddress>
 extract_api_features(const Function&            fn,
-                     const BasicBlock&          bb,
                      const DecodedInsn&         ins,
                      const ::papa::pe::PeImage& image,
                      const ImportTable&         imports,
                      const Disassembler&        disasm) {
-    (void)fn;
-    (void)bb;
     std::vector<FeatureWithAddress> out;
 
     // CAPA extracts API features from call and unconditional jmp instructions. A tail-

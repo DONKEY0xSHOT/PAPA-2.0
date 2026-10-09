@@ -27,29 +27,6 @@ namespace {
 constexpr const char* kCharTightLoop   = "tight loop";
 constexpr const char* kCharStackString = "stack string";
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
-}
-
-[[nodiscard]] FeatureWithAddress
-make_characteristic(const char* name, std::uint64_t va) {
-    return { std::make_shared<const features::Characteristic>(std::string(name)),
-             va_addr(va) };
-}
-
-// Mirror of the same helper in insn.cpp. Keeping it private here avoids a public
-// dependency between the two extractor modules just to share a three-line predicate
-[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept {
-    if (reg == ZYDIS_REGISTER_NONE) { return false; }
-    const ZydisMachineMode mode =
-        is_64bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
-    const ZydisRegister enclosing = ZydisRegisterGetLargestEnclosing(mode, reg);
-    if (is_64bit) {
-        return enclosing == ZYDIS_REGISTER_RSP || enclosing == ZYDIS_REGISTER_RBP;
-    }
-    return enclosing == ZYDIS_REGISTER_ESP || enclosing == ZYDIS_REGISTER_EBP;
-}
-
 // Count printable bytes in the low width_bytes octets of imm. Returns the number of
 // leading printable bytes
 [[nodiscard]] std::size_t
@@ -134,8 +111,7 @@ extract_basic_block_features(const BasicBlock& bb, bool is_64bit) {
     // Emit a BasicBlock tag feature for every BB
     out.emplace_back(
         std::make_shared<const ::papa::features::BasicBlock>(),
-        ::papa::features::Address{
-            ::papa::features::AbsoluteVirtualAddress{bb.va}});
+        va_address(bb.va));
     if (auto tl = extract_tight_loop(bb); tl.has_value()) {
         out.push_back(std::move(*tl));
     }

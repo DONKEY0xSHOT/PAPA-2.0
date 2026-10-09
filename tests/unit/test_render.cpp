@@ -14,59 +14,43 @@
 #include "papa/render/json.h"
 #include "papa/render/result_document.h"
 #include "papa/render/text.h"
-#include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
+#include "papa/util/hash.h"
+#include "papa/version.h"
 
-#include <cstddef>
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <ios>
-#include <memory>
-#include <span>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
-#include "fixture_paths.h"
-
-namespace {
-
-const auto kNotepad = papa_tests::fixture_path("notepad.exe");
-
-[[nodiscard]] std::unique_ptr<papa::rules::Rule> parse_rule(std::string_view yaml) {
-    auto r = papa::rules::RuleParser::parse(yaml, "test.yml");
-    REQUIRE(r);
-    return std::move(*r);
-}
-
-}  // namespace
+#include "pe_builder.h"
+#include "test_support.h"
 
 TEST_CASE("render: build_document filters synthetic subscope rules") {
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    const auto rs = papa_tests::ruleset({
         "rule:\n"
         "  meta:\n"
         "    name: parent-rule\n"
         "    scope: function\n"
         "  features:\n"
         "    - basic block:\n"
-        "      - characteristic: tight loop\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
+        "      - characteristic: tight loop\n"
+    });
 
     // Forge a MatchResults that contains both the parent and the synthetic
     papa::engine::MatchResults matches;
-    for (const auto& r : rs->all_rules()) {
+    for (const auto& r : rs.all_rules()) {
         matches[r->name()].emplace_back(
             papa::features::Address{papa::features::AbsoluteVirtualAddress{0x1000}},
             papa::engine::Result{});
     }
 
     papa::Metadata meta;
-    auto doc = papa::render::build_document(std::move(meta), *rs, matches);
+    auto doc = papa::render::build_document(std::move(meta), rs, matches);
     CHECK(doc.rules.count("parent-rule") == 1);
     // Every synthetic rule has the parent's name as a "/N" prefix
     for (const auto& [name, _rep] : doc.rules) {
@@ -76,7 +60,7 @@ TEST_CASE("render: build_document filters synthetic subscope rules") {
 
 TEST_CASE("render: JSON output is well-formed for an empty match result") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.argv    = {"papa.exe", "sample.exe"};
     meta.timestamp = "2026-05-02T00:00:00Z";
     meta.sample_path = "sample.exe";
@@ -96,13 +80,13 @@ TEST_CASE("render: JSON output is well-formed for an empty match result") {
     // Spot check: starts with object brace, contains the version, ends in brace
     CHECK(out.front() == '{');
     CHECK(out.back()  == '}');
-    CHECK(out.find("\"version\":\"0.1.0\"") != std::string::npos);
+    CHECK(out.find("\"version\":\"9.4.0\"") != std::string::npos);
     CHECK(out.find("\"rules\":{}")          != std::string::npos);
 }
 
 TEST_CASE("render: text default lists capabilities in capa's table format") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.sample_path = "x.exe";
     meta.sample_size_bytes = 0U;
     meta.hashes.md5 = meta.hashes.sha1 = meta.hashes.sha256 = "0";
@@ -136,7 +120,7 @@ TEST_CASE("render: text default lists capabilities in capa's table format") {
 
 TEST_CASE("render: text hides library rules but JSON keeps them, matching capa") {
     papa::Metadata meta;
-    meta.version = "0.1.0";
+    meta.version = "9.4.0";
     meta.sample_path = "x.exe";
     meta.sample_size_bytes = 0U;
     meta.hashes.md5 = meta.hashes.sha1 = meta.hashes.sha256 = "0";
@@ -178,7 +162,7 @@ TEST_CASE("render: text hides library rules but JSON keeps them, matching capa")
 
 TEST_CASE("render: json emits capa's meta and match-tree schema") {
     papa::Metadata meta;
-    meta.version           = "0.1.0";
+    meta.version           = "9.4.0";
     meta.sample_path       = "x.exe";
     meta.argv              = {"papa.exe", "x.exe"};
     meta.hashes.md5        = "aa";
@@ -233,58 +217,142 @@ TEST_CASE("render: json emits capa's meta and match-tree schema") {
     CHECK(js.find("\"captures\":{}") != std::string::npos);
 }
 
-TEST_CASE("render: end-to-end JSON over notepad produces parseable output") {
-    if (!std::filesystem::exists(kNotepad)) {
-        MESSAGE("notepad.exe fixture missing, skipping");
-        return;
-    }
-    auto img = papa::pe::PeParser::parse_file(kNotepad);
+TEST_CASE("render: end-to-end JSON over a builder PE carries its hashes, matches and library thunk") {
+    papa_tests::PeBuilder b;
+    b.imports = {{"kernel32.dll", {"ExitProcess"}}};
+    b.data.assign(0x40, 0);
+    for (std::uint8_t i = 0; i < 16U; ++i) { b.data[i] = static_cast<std::uint8_t>(0xF0U + i); }
+    const std::string_view text = "hello world";
+    std::copy(text.begin(), text.end(), b.data.begin() + 0x20);
+    // jmp [rip+ExitProcess], a thunk the library check skips
+    const std::uint32_t thunk = b.add_function({0xFF, 0x25, 0, 0, 0, 0});
+    // lea rcx and r8, [rip+blob] / lea rdx, [rip+text] / mov eax, 3 / L: dec eax / xor ecx, esp
+    // / jnz L / M: dec edx / jz N / jmp M / N: call self / xor rcx, rsp / ret
+    const std::uint32_t fn = b.add_function(
+        {0x48, 0x8D, 0x0D, 0, 0, 0, 0, 0x4C, 0x8D, 0x05, 0, 0, 0, 0, 0x48, 0x8D, 0x15, 0, 0, 0, 0,
+         0xB8, 0x03, 0x00, 0x00, 0x00, 0xFF, 0xC8, 0x33, 0xCC, 0x75, 0xFA,
+         0xFF, 0xCA, 0x74, 0x02, 0xEB, 0xFA,
+         0xE8, 0, 0, 0, 0, 0x48, 0x33, 0xCC, 0xC3});
+    const auto rel = [&b](std::uint32_t disp_at, std::uint32_t end, std::uint64_t target) {
+        papa_tests::detail::poke(b.code, disp_at,
+                                 static_cast<std::int32_t>(target - b.code_va(end)));
+    };
+    rel(thunk + 2U, thunk + 6U, b.iat_va("kernel32.dll", "ExitProcess"));
+    rel(fn + 3U, fn + 7U, b.data_va(0));
+    rel(fn + 10U, fn + 14U, b.data_va(0));
+    rel(fn + 17U, fn + 21U, b.data_va(0x20));
+    rel(fn + 39U, fn + 43U, b.code_va(fn));
+
+    const auto bytes = b.build();
+    const auto img   = papa::pe::PeParser::parse(bytes);
     REQUIRE(img.has_value());
-    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(
-        *img, papa::features::extractors::papa_native::flirt::FlirtSignatureSet::embedded());
+    const papa::features::extractors::papa_native::flirt::FlirtSignatureSet no_sigs;
+    auto backend = papa::features::extractors::papa_native::PapaNativeBackend::build(*img, no_sigs);
     REQUIRE(backend);
-    papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
+    const papa::features::extractors::papa_native::PapaNativeStaticExtractor extractor(
         std::move(*backend));
 
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(parse_rule(
+    // One rule per scope. The function rule needs the two-block loop, the recursion and
+    // both data references, and the cookie xor before ret is no nzxor
+    const auto rs = papa_tests::ruleset({
+        papa_tests::rule_yaml("has-text", "file", {"section: .text"}),
+        papa_tests::rule_yaml("tight-loop", "basic block", {"characteristic: tight loop"}),
+        papa_tests::rule_yaml("nzxor", "instruction", {"characteristic: nzxor"}),
         "rule:\n"
         "  meta:\n"
-        "    name: has-text\n"
-        "    scope: file\n"
+        "    name: data-loop-recursion\n"
+        "    scopes:\n"
+        "      static: function\n"
+        "      dynamic: unsupported\n"
         "  features:\n"
-        "    - section: .text\n"));
-    auto rs = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(rs);
-
-    auto caps = papa::capabilities::static_::find_static_capabilities(*rs, extractor);
+        "    - and:\n"
+        "      - characteristic: loop\n"
+        "      - characteristic: recursive call\n"
+        "      - string: hello world\n"
+        "      - bytes: F0 F1 F2 F3 F4 F5 F6 F7\n",
+    });
+    const auto caps = papa::capabilities::static_::find_static_capabilities(rs, extractor);
     REQUIRE(caps);
+    const papa::features::Address thunk_at = papa_tests::va(b.code_va(thunk));
+    CHECK(caps->library_functions == std::vector<papa::features::Address>{thunk_at});
+    const auto where = [&caps](const std::string& name) {
+        std::vector<papa::features::Address> out;
+        for (const auto& [at, result] : caps->all_matches.at(name)) { out.push_back(at); }
+        return out;
+    };
+    using Addresses = std::vector<papa::features::Address>;
+    CHECK(caps->all_matches.size() == 4);
+    CHECK(where("has-text") == Addresses{papa_tests::va(img->image_base())});
+    CHECK(where("data-loop-recursion") == Addresses{papa_tests::va(b.code_va(fn))});
+    CHECK(where("tight-loop") == Addresses{papa_tests::va(b.code_va(fn + 26U))});
+    CHECK(where("nzxor") == Addresses{papa_tests::va(b.code_va(fn + 28U))});
 
-    // Slurp the sample bytes manually because PeParser only exposes parse_file
-    std::vector<std::byte> raw_bytes;
-    {
-        std::error_code ec;
-        const auto sz = std::filesystem::file_size(kNotepad, ec);
-        REQUIRE_FALSE(ec);
-        raw_bytes.resize(static_cast<std::size_t>(sz));
-        std::ifstream ifs(std::filesystem::path(kNotepad), std::ios::binary);
-        REQUIRE(ifs);
-        ifs.read(reinterpret_cast<char*>(raw_bytes.data()),
-                 static_cast<std::streamsize>(raw_bytes.size()));
-        REQUIRE(ifs.gcount() == static_cast<std::streamsize>(raw_bytes.size()));
+    auto meta = papa::collect_metadata("sample.exe", {"papa", "sample.exe"}, {}, *img, *caps);
+    const std::string sha256 = papa::util::hex_digest(papa::util::sha256(bytes));
+    CHECK(meta.hashes.md5 == papa::util::hex_digest(papa::util::md5(bytes)));
+    CHECK(meta.hashes.sha1 == papa::util::hex_digest(papa::util::sha1(bytes)));
+    CHECK(meta.hashes.sha256 == sha256);
+    CHECK(meta.sample_size_bytes == bytes.size());
+    CHECK(meta.analysis.base_address == img->image_base());
+    REQUIRE(meta.analysis.library_functions.size() == 1);
+    CHECK(meta.analysis.library_functions[0].address == thunk_at);
+    CHECK(meta.analysis.library_functions[0].name == "?");
+
+    const auto doc  = papa::render::build_document(std::move(meta), rs, caps->all_matches);
+    const auto json = papa::render::json::render_to_string(doc, /*pretty=*/false);
+    CHECK(json.find("\"sha256\":\"" + sha256 + "\"") != std::string::npos);
+    CHECK(json.find("\"library_functions\":[{\"address\":{\"type\":\"absolute\",\"value\":" +
+                    std::to_string(b.code_va(thunk)) + "},\"name\":\"?\"}]") != std::string::npos);
+    for (const std::string_view name : {"has-text", "tight-loop", "nzxor", "data-loop-recursion"}) {
+        CAPTURE(name);
+        CHECK(json.find("\"" + std::string(name) + "\":{") != std::string::npos);
     }
+}
 
-    auto meta = papa::collect_metadata(
-        std::span<const std::byte>(raw_bytes),
-        kNotepad,
-        std::vector<std::string>{"papa.exe", "notepad.exe"},
-        std::vector<std::string>{},
-        *img,
-        *caps,
-        extractor);
+TEST_CASE("collect_metadata: the report version is capa's release so the JSON can match capa") {
+    papa_tests::PeBuilder b;
+    b.code = {0xC3};
+    auto img = papa::pe::PeParser::parse(b.build());
+    REQUIRE(img.has_value());
 
-    auto doc = papa::render::build_document(std::move(meta), *rs, caps->all_matches);
-    const auto json_out = papa::render::json::render_to_string(doc, /*pretty=*/false);
-    CHECK(json_out.find("\"sha256\":\"") != std::string::npos);
-    CHECK(json_out.find("has-text")     != std::string::npos);
+    const auto meta = papa::collect_metadata(
+        "x.exe", {}, {}, *img, papa::capabilities::static_::StaticCapabilities{});
+    CHECK(meta.version == "9.4.0");
+}
+
+TEST_CASE("collect_metadata: the arch names i386 and amd64 and falls back to aarch64 or unknown") {
+    struct Row {
+        std::uint16_t    machine;
+        std::string_view arch;
+    };
+    constexpr std::array<Row, 4> kRows = {{
+        {0x014C, "i386"}, {0x8664, "amd64"}, {0xAA64, "aarch64"}, {0x01C4, "unknown"},
+    }};
+    for (const Row& row : kRows) {
+        CAPTURE(row.arch);
+        papa_tests::PeBuilder b;
+        b.code = {0xC3};
+        auto bytes = b.build();
+        // The COFF Machine field follows the four byte PE signature that e_lfanew points at
+        std::uint32_t lfanew = 0;
+        std::memcpy(&lfanew, bytes.data() + 0x3C, sizeof lfanew);
+        std::memcpy(bytes.data() + lfanew + 4U, &row.machine, sizeof row.machine);
+        auto img = papa::pe::PeParser::parse(bytes);
+        REQUIRE(img.has_value());
+
+        const auto meta = papa::collect_metadata(
+            "x.exe", {}, {}, *img, papa::capabilities::static_::StaticCapabilities{});
+        CHECK(meta.analysis.arch == row.arch);
+    }
+}
+
+TEST_CASE("render: the verbose header names PAPA's own version rather than the report's") {
+    papa::render::ResultDocument doc;
+    doc.meta.version = "9.4.0";
+    const auto out = papa::render::text::render_to_string(
+        doc, papa::render::text::Verbosity::kVerbose);
+    const std::string first_line =
+        "PAPA " + std::string(papa::version::version()) + "\n";
+    CHECK(out.rfind(first_line, 0) == 0);
+    CHECK(out.find("9.4.0") == std::string::npos);
 }

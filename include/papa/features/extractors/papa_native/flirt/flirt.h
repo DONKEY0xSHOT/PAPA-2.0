@@ -12,12 +12,12 @@ namespace papa::features::extractors::papa_native::flirt {
 
 namespace embedded {
 
-/// One compile-time-embedded signature blob. Defined by the generated
-/// embedded_sigs.cpp (added in the sig-embedding task)
+/// One signature blob embedded in the binary. registry() in embedded_sigs.cpp reads
+/// them from the executable's resources on MSVC builds
 struct EmbeddedSig {
     std::string_view    name;
-    const std::uint8_t* data;
-    std::size_t         size;
+    const std::uint8_t* data{nullptr};
+    std::size_t         size{0};
 };
 
 /// The compile-time set of embedded signature blobs
@@ -25,8 +25,8 @@ struct EmbeddedSig {
 
 }  // namespace embedded
 
-/// A collection of parsed FLIRT trees. make_embedded() returns a fresh set the caller owns,
-/// embedded() returns a process-wide shared set and add_from_buffer exists for tests
+/// A collection of parsed FLIRT trees. make_embedded() returns a fresh set the caller owns
+/// and add_from_buffer exists for tests
 class FlirtSignatureSet {
 public:
     FlirtSignatureSet()                                        = default;
@@ -38,21 +38,12 @@ public:
     /// Build a set from the compile-time embedded signature registry
     [[nodiscard]] static FlirtSignatureSet make_embedded();
 
-    /// The embedded packs decoded once and resident until the process exits, shared by code
-    /// that analyzes many images in one process such as the unit tests
-    [[nodiscard]] static const FlirtSignatureSet& embedded();
-
     /// Parse one raw .sig buffer and append its tree. Returns false and logs
     /// once to stderr on any parse failure. Never throws
     [[nodiscard]] bool add_from_buffer(std::span<const std::uint8_t> sig_bytes) noexcept;
 
     /// True when function_bytes match any loaded tree
     [[nodiscard]] bool classify(std::span<const std::uint8_t> function_bytes) const noexcept;
-
-    /// Every leaf module across all loaded trees that matches function_bytes by pattern
-    /// and tail CRC
-    [[nodiscard]] std::vector<const FlirtModule*>
-    match(std::span<const std::uint8_t> function_bytes) const;
 
     /// The number of parsed trees currently held
     [[nodiscard]] std::size_t tree_count() const noexcept { return trees_.size(); }

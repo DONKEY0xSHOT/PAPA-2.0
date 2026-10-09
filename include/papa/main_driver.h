@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,14 +18,15 @@ enum class OutputMode : std::uint8_t {
 };
 
 struct Args {
-    std::filesystem::path     sample_path;
-    std::filesystem::path     rules_dir{"data/rules"};
-    std::filesystem::path     output_path;     // empty means stdout
-    std::vector<std::string>  argv;            // the raw arguments, for the report
-    OutputMode                output{OutputMode::kDefault};
-    bool                      quiet{false};
-    bool                      show_help{false};
-    bool                      show_version{false};
+    std::filesystem::path                 sample_path;
+    std::optional<std::filesystem::path>  rules_dir{};       // empty means the embedded rules
+    std::filesystem::path                 output_path;       // empty means stdout
+    std::vector<std::string>              argv;              // the raw arguments, for the report
+    std::string                           argv0;             // the program path, empty means papa
+    OutputMode                            output{OutputMode::kDefault};
+    bool                                  quiet{false};
+    bool                                  show_help{false};
+    bool                                  show_version{false};
 };
 
 // Exit codes
@@ -44,8 +46,8 @@ struct ParseResult {
     int          exit_code{kExitOk};
 };
 
-// Parse argv and produce a ParseResult argv0 is excluded. Callers should pass (argv+1,
-// argc-1) from main
+// Parse argv and produce a ParseResult. argv0 is excluded, so main passes
+// (argc-1, argv+1)
 [[nodiscard]] ParseResult
 parse_args(int argc, const char* const* argv);
 

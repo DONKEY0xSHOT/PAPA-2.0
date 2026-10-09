@@ -87,8 +87,8 @@ private:
                                             std::uint64_t va, std::size_t depth) const;
 
     ModuleMatchFn          matcher_;
-    const FunctionContext* context_;
-    Cache*                 cache_;
+    const FunctionContext* context_{nullptr};
+    Cache*                 cache_{nullptr};
     OnMatch                on_match_;
     LibraryLookup          library_lookup_;
 };

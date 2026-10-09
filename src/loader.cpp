@@ -5,6 +5,7 @@
 #include "papa/engine.h"
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
+#include "papa/features/extractors/global_.h"
 #include "papa/pe/pe_image.h"
 #include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
@@ -55,10 +56,9 @@ namespace {
 
 [[nodiscard]] std::string arch_for_machine(std::uint16_t machine) noexcept {
     using namespace ::papa::constants;
-    if (machine == kImageFileMachineI386)  { return std::string(arch_value::kI386);  }
-    if (machine == kImageFileMachineAmd64) { return std::string(arch_value::kAmd64); }
-    if (machine == kImageFileMachineArm64) { return std::string(arch_value::kAarch64); }
-    return std::string("unknown");
+    const std::string_view fallback =
+        machine == kImageFileMachineArm64 ? arch_value::kAarch64 : std::string_view{"unknown"};
+    return std::string(features::extractors::pe_arch(machine).value_or(fallback));
 }
 
 }  // namespace
@@ -75,16 +75,16 @@ SampleHashes compute_sample_hashes(std::span<const std::byte> data) {
 }
 
 Metadata
-collect_metadata(std::span<const std::byte>                                 sample_buf,
-                 std::filesystem::path                                      sample_path,
+collect_metadata(std::filesystem::path                                      sample_path,
                  std::vector<std::string>                                   argv,
                  std::vector<std::string>                                   rules_paths,
                  const pe::PeImage&                                         image,
-                 const capabilities::static_::StaticCapabilities&           caps,
-                 const features::extractors::StaticFeatureExtractor&        extractor) {
+                 const capabilities::static_::StaticCapabilities&           caps) {
+    const std::span<const std::byte> sample_buf = image.raw_buffer();
+
     Metadata m;
     m.timestamp         = utc_iso8601_now();
-    m.version           = std::string(version::kVersionString);
+    m.version           = std::string(version::kCapaVersion);
     m.argv              = std::move(argv);
     m.sample_path       = std::move(sample_path);
     m.sample_size_bytes = static_cast<std::uint64_t>(sample_buf.size());
@@ -106,7 +106,6 @@ collect_metadata(std::span<const std::byte>                                 samp
 
     m.analysis.feature_count_file        = caps.feature_count;
     m.analysis.feature_counts_functions  = caps.per_function_feature_counts;
-    (void)extractor;
     return m;
 }
 

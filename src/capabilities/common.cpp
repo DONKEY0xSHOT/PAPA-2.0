@@ -3,7 +3,6 @@
 #include "papa/engine.h"
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
-#include "papa/features/common.h"
 #include "papa/features/feature.h"
 #include "papa/features/extractors/base_extractor.h"
 #include "papa/rules/rule.h"
@@ -34,33 +33,6 @@ namespace_starts_with(std::string_view ns, std::string_view prefix) noexcept {
     return ns.size() == prefix.size() || ns[prefix.size()] == '/';
 }
 
-// Every rule name or namespace a statement tree references through match:. Unlike the
-// feature index this walks every branch, since a negated reference matters too
-void collect_match_refs(const ::papa::engine::Statement* s,
-                        std::vector<std::string>&        out) {
-    if (s == nullptr) { return; }
-
-    const auto note = [&out](const features::FeaturePtr& f) {
-        if (f && f->tag() == features::FeatureTag::kMatchedRule) {
-            out.emplace_back(
-                static_cast<const features::MatchedRule*>(f.get())->rule_name());
-        }
-    };
-
-    const std::string_view name = s->name();
-    if (name == "feature") {
-        note(static_cast<const ::papa::engine::FeatureStatement*>(s)->feature());
-        return;
-    }
-    if (name == "count") {
-        note(static_cast<const ::papa::engine::Range*>(s)->feature());
-        return;
-    }
-    for (const auto& child : s->children()) {
-        collect_match_refs(child.get(), out);
-    }
-}
-
 }  // namespace
 
 std::vector<const ::papa::rules::Rule*>
@@ -85,7 +57,7 @@ limitation_gate_rules(const ::papa::rules::RuleSet& rules) {
         if (!closure.insert(r).second) { continue; }
 
         refs.clear();
-        collect_match_refs(&r->statement(), refs);
+        ::papa::engine::collect_match_refs(r->statement(), refs);
         for (const auto& ref : refs) {
             if (const auto* by_name = rules.find(ref); by_name != nullptr) {
                 work.push_back(by_name);
@@ -106,33 +78,30 @@ limitation_gate_rules(const ::papa::rules::RuleSet& rules) {
     return out;
 }
 
+features::FeatureSet file_scope_feature_set(
+    const ::papa::features::extractors::StaticFeatureExtractor&          extractor,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>* cached_file_features,
+    const std::vector<::papa::features::extractors::FeatureWithAddress>& globals) {
+    features::FeatureSet fs;
+    if (cached_file_features != nullptr) {
+        // Copying shares the immutable feature objects through their
+        // refcounts, which is far cheaper than carving the file again
+        fs.add_all(*cached_file_features);
+    } else {
+        fs.add_all(extractor.extract_file_features());
+    }
+    fs.add_all(globals);
+    return fs;
+}
+
 ::papa::Expected<FileCapabilities>
 find_file_capabilities(
     const ::papa::rules::RuleSet&                                     rules,
     const ::papa::features::extractors::StaticFeatureExtractor&       extractor,
     const std::vector<::papa::features::extractors::FeatureWithAddress>*
         cached_file_features) {
-    // Collect file and global features up front so we can reuse the FeatureSet
-    // across the file match plus any caller that wants the same vocabulary
-    features::FeatureSet fs;
-    {
-        auto globals = extractor.extract_global_features();
-        for (auto& [feat, addr] : globals) {
-            fs.add(std::move(feat), addr);
-        }
-        if (cached_file_features != nullptr) {
-            // Copying shares the immutable feature objects through their
-            // refcounts, which is far cheaper than carving the file again
-            for (const auto& [feat, addr] : *cached_file_features) {
-                fs.add(feat, addr);
-            }
-        } else {
-            auto file_feats = extractor.extract_file_features();
-            for (auto& [feat, addr] : file_feats) {
-                fs.add(std::move(feat), addr);
-            }
-        }
-    }
+    features::FeatureSet fs = file_scope_feature_set(
+        extractor, cached_file_features, extractor.extract_global_features());
 
     const features::Address base = extractor.get_base_address();
     auto [merged_fs, matches] =
@@ -152,23 +121,8 @@ find_limitation_capabilities(
     const ::papa::features::extractors::StaticFeatureExtractor&       extractor,
     const std::vector<::papa::features::extractors::FeatureWithAddress>*
         cached_file_features) {
-    features::FeatureSet fs;
-    {
-        auto globals = extractor.extract_global_features();
-        for (auto& [feat, addr] : globals) {
-            fs.add(std::move(feat), addr);
-        }
-        if (cached_file_features != nullptr) {
-            for (const auto& [feat, addr] : *cached_file_features) {
-                fs.add(feat, addr);
-            }
-        } else {
-            auto file_feats = extractor.extract_file_features();
-            for (auto& [feat, addr] : file_feats) {
-                fs.add(std::move(feat), addr);
-            }
-        }
-    }
+    features::FeatureSet fs = file_scope_feature_set(
+        extractor, cached_file_features, extractor.extract_global_features());
 
     const auto              gate = limitation_gate_rules(rules);
     const features::Address base = extractor.get_base_address();

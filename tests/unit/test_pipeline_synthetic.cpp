@@ -5,6 +5,7 @@
 #include "doctest.h"
 
 #include "pe_builder.h"
+#include "test_support.h"
 
 #include "papa/capabilities/static_.h"
 #include "papa/engine.h"
@@ -12,15 +13,13 @@
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/extractor.h"
-#include "papa/features/extractors/papa_native/flirt/flirt.h"
+#include "papa/features/feature.h"
+#include "papa/features/insn.h"
 #include "papa/pe/pe_parser.h"
-#include "papa/rules/parser.h"
-#include "papa/rules/rule.h"
 #include "papa/rules/ruleset.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -54,25 +53,11 @@ SyntheticImage build_calling_writefile() {
     };
     b.pdata_functions = {{0x00, 0x0F}, {0x10, 0x13}};
 
-    // First pass: find where WriteFile's IAT slot landed
-    auto probe = papa::pe::PeParser::parse(b.build());
-    REQUIRE(probe.has_value());
-    std::uint64_t iat = 0;
-    for (const papa::pe::ParsedImport& imp : probe->imports()) {
-        if (imp.name == "WriteFile") {
-            iat = imp.iat_va;
-        }
-    }
+    const std::uint64_t iat = b.iat_va("kernel32.dll", "WriteFile");
     REQUIRE(iat != 0);
 
     // rip-relative displacement from the end of the 6-byte call at 0x04
-    const std::uint64_t next_insn =
-        probe->image_base() + papa_tests::PeBuilder::kTextRva + 0x0A;
-    const auto disp = static_cast<std::int32_t>(iat - next_insn);
-    b.code[6] = static_cast<std::uint8_t>(disp & 0xFF);
-    b.code[7] = static_cast<std::uint8_t>((disp >> 8) & 0xFF);
-    b.code[8] = static_cast<std::uint8_t>((disp >> 16) & 0xFF);
-    b.code[9] = static_cast<std::uint8_t>((disp >> 24) & 0xFF);
+    papa_tests::detail::poke(b.code, 6, static_cast<std::int32_t>(iat - b.code_va(0x0A)));
 
     return {b.build(), iat};
 }
@@ -84,8 +69,12 @@ TEST_CASE("pipeline: a synthetic PE is parsed, recovered, and its functions foun
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
 
-    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
+
+    // The backend keeps the image it was given and decodes at its bitness
+    CHECK(&backend->image() == &*img);
+    CHECK(backend->disassembler().is_64bit());
 
     // Both .pdata begins are recovered as functions
     const std::uint64_t base  = img->image_base() + papa_tests::PeBuilder::kTextRva;
@@ -99,8 +88,12 @@ TEST_CASE("pipeline: a synthetic PE is parsed, recovered, and its functions foun
     CHECK(has_fn(base + 0x00));
     CHECK(has_fn(base + 0x10));
 
-    // The import table is indexed by IAT slot, which is what names a call
-    CHECK_FALSE(backend->imports().by_iat_va.empty());
+    // The import table indexes every row by its own IAT slot, which is what names a call
+    REQUIRE(backend->imports().by_iat_va.size() == img->imports().size());
+    for (const papa::pe::ParsedImport& row : img->imports()) {
+        CAPTURE(row.name);
+        CHECK(backend->imports().by_iat_va.at(row.iat_va) == &row);
+    }
     CHECK(backend->imports().by_iat_va.count(synth.write_file_iat) == 1);
 }
 
@@ -108,7 +101,7 @@ TEST_CASE("pipeline: the extractor emits an api feature for the imported call") 
     const SyntheticImage synth = build_calling_writefile();
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
 
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
@@ -119,8 +112,10 @@ TEST_CASE("pipeline: the extractor emits an api feature for the imported call") 
         for (const auto& bb : extractor.get_basic_blocks(fh)) {
             for (const auto& ih : extractor.get_instructions(fh, bb)) {
                 for (const auto& fa : extractor.extract_insn_features(fh, bb, ih)) {
-                    if (fa.first && fa.first->to_string().find("WriteFile") !=
-                                        std::string::npos) {
+                    if (fa.first && fa.first->tag() == papa::features::FeatureTag::kApi &&
+                        static_cast<const papa::features::Api&>(*fa.first)
+                                .value()
+                                .find("WriteFile") != std::string::npos) {
                         found = true;
                     }
                 }
@@ -134,33 +129,24 @@ TEST_CASE("pipeline: a rule matches end to end against a synthetic PE") {
     const SyntheticImage synth = build_calling_writefile();
     auto                 img   = papa::pe::PeParser::parse(synth.bytes);
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
     pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 
-    // A minimal function-scope rule over the api feature the call produces
-    const std::string yaml = R"(rule:
-  meta:
-    name: write file synthetic
-    scopes:
-      static: function
-      dynamic: unsupported
-  features:
-    - api: WriteFile
-)";
-    auto parsed = papa::rules::RuleParser::parse(yaml, "synthetic.yml");
-    REQUIRE(parsed.has_value());
-    std::vector<std::unique_ptr<papa::rules::Rule>> rules;
-    rules.push_back(std::move(*parsed));
-    auto ruleset = papa::rules::RuleSet::from_rules(std::move(rules));
-    REQUIRE(ruleset.has_value());
+    // A function-scope rule over the api feature the call produces, and a file-scope
+    // rule over a section name
+    const auto ruleset = papa_tests::ruleset(
+        {papa_tests::rule_yaml("write file synthetic", "function", {"api: WriteFile"}),
+         papa_tests::rule_yaml("has text section", "file", {"section: .text"})});
 
     const auto caps = papa::capabilities::static_::find_static_capabilities(
-        *ruleset, extractor);
+        ruleset, extractor);
     REQUIRE(caps.has_value());
 
-    const bool matched = caps->all_matches.count("write file synthetic") == 1;
-    CHECK(matched);
+    CHECK(caps->all_matches.count("write file synthetic") == 1);
+    REQUIRE(caps->all_matches.count("has text section") == 1);
+    REQUIRE(caps->all_matches.at("has text section").size() == 1);
+    CHECK(caps->all_matches.at("has text section")[0].first == papa_tests::va(img->image_base()));
 }
 
 TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {
@@ -169,25 +155,19 @@ TEST_CASE("pipeline: the library check finds an import thunk by its entry VA") {
     // 0x00 xor eax,eax | 0x02 ret | 0x03 int3 | 0x04 jmp [rip+X]
     b.code            = {0x33, 0xC0, 0xC3, 0xCC, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
     b.pdata_functions = {{0x00, 0x03}, {0x04, 0x0A}};
-    const std::uint64_t text  = b.base() + papa_tests::PeBuilder::kTextRva;
-    auto                probe = papa::pe::PeParser::parse(b.build());
-    REQUIRE(probe.has_value());
-    REQUIRE(probe->imports().size() == 1);
-    papa_tests::detail::poke(
-        b.code, 6, static_cast<std::int32_t>(probe->imports().front().iat_va - (text + 0x0A)));
+    const std::uint64_t text = b.code_va(0);
+    const std::uint64_t iat  = b.iat_va("kernel32.dll", "ExitProcess");
+    papa_tests::detail::poke(b.code, 6, static_cast<std::int32_t>(iat - (text + 0x0A)));
 
     auto img = papa::pe::PeParser::parse(b.build());
     REQUIRE(img.has_value());
-    auto backend = pn::PapaNativeBackend::build(*img, pn::flirt::FlirtSignatureSet::embedded());
+    auto backend = pn::PapaNativeBackend::build(*img, papa_tests::shared_flirt_sigs());
     REQUIRE(backend.has_value());
     const pn::PapaNativeStaticExtractor extractor(std::move(*backend));
 
-    namespace pf  = papa::features;
-    const auto at = [text](std::uint64_t off) {
-        return pf::Address{pf::AbsoluteVirtualAddress{text + off}};
-    };
-    CHECK(extractor.is_library_function(at(0x04)));
-    CHECK_FALSE(extractor.is_library_function(at(0x00)));
-    CHECK_FALSE(extractor.is_library_function(at(0x02)));
+    namespace pf = papa::features;
+    CHECK(extractor.is_library_function(papa_tests::va(text + 0x04)));
+    CHECK_FALSE(extractor.is_library_function(papa_tests::va(text + 0x00)));
+    CHECK_FALSE(extractor.is_library_function(papa_tests::va(text + 0x02)));
     CHECK_FALSE(extractor.is_library_function(pf::Address{pf::NoAddress{}}));
 }

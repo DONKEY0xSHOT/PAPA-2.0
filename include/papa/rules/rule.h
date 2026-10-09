@@ -39,7 +39,6 @@ struct RuleMeta {
     std::optional<std::string>  description;
     bool                        lib{false};
     bool                        is_subscope_rule{false};
-    bool                        is_nursery{false};
     std::optional<std::string>  parent;           // present on synthetic subscope rules
     std::string                 source_path;
 };
@@ -52,14 +51,6 @@ public:
     Rule(RuleMeta                            meta,
          std::unique_ptr<engine::Statement>  stmt,
          std::string                         definition);
-
-    /// Convenience constructor used by tests and synthetic rules.
-    /// Builds a RuleMeta with only name, namespace, static_scope, and lib set
-    Rule(std::string                         name,
-         std::optional<std::string>          ns,
-         Scope                               scope,
-         std::unique_ptr<engine::Statement>  stmt,
-         bool                                is_lib = false);
 
     // Out-of-line so the incomplete Statement type in this header is fine
     ~Rule();

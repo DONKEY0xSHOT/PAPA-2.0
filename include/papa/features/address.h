@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <string>
 #include <variant>
 
 namespace papa::features {
@@ -53,8 +52,12 @@ using Address = std::variant<
     DnTokenAddress,
     DnTokenOffsetAddress>;
 
-[[nodiscard]] std::string    to_string(const Address& a);
-[[nodiscard]] std::uint64_t  linearize(const Address& a) noexcept;
+// An absolute virtual address, the address kind almost every extractor emits
+[[nodiscard]] constexpr Address va_address(std::uint64_t va) noexcept {
+    return Address{AbsoluteVirtualAddress{va}};
+}
+
+[[nodiscard]] std::uint64_t linearize(const Address& a) noexcept;
 
 }  // namespace papa::features
 

@@ -3,6 +3,7 @@
 #include "doctest.h"
 
 #include "papa/features/extractors/helpers.h"
+#include "papa/pe/pe_image.h"
 
 #include <algorithm>
 #include <array>
@@ -15,7 +16,7 @@
 
 using papa::features::extractors::helpers::carve_pe_files;
 using papa::features::extractors::helpers::generate_symbols;
-using papa::features::extractors::helpers::normalize_dll_name;
+using papa::features::extractors::helpers::import_symbol;
 using papa::features::extractors::helpers::reformat_forwarded_export_name;
 using papa::features::extractors::helpers::strip_aw_suffix;
 
@@ -28,16 +29,17 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("helpers: normalize_dll_name lowercases and strips known extensions") {
-    CHECK(normalize_dll_name("KERNEL32.DLL") == "kernel32");
-    CHECK(normalize_dll_name("kernel32.dll") == "kernel32");
-    CHECK(normalize_dll_name("WS2_32.DLL")   == "ws2_32");
-    CHECK(normalize_dll_name("driver.drv")   == "driver");
-    CHECK(normalize_dll_name("libc.so")      == "libc");
-    // Unknown extension is preserved
-    CHECK(normalize_dll_name("Mod.exe")      == "mod.exe");
-    // No extension
-    CHECK(normalize_dll_name("KERNEL32")     == "kernel32");
+TEST_CASE("helpers: import_symbol is the import name or its ordinal after a hash") {
+    papa::pe::ParsedImport named;
+    named.dll  = "kernel32";
+    named.name = "CreateFileW";
+    CHECK(import_symbol(named) == "CreateFileW");
+
+    papa::pe::ParsedImport by_ordinal;
+    by_ordinal.dll        = "ws2_32";
+    by_ordinal.ordinal    = 115;
+    by_ordinal.by_ordinal = true;
+    CHECK(import_symbol(by_ordinal) == "#115");
 }
 
 TEST_CASE("helpers: strip_aw_suffix returns the base only when suffix matches") {
@@ -56,36 +58,38 @@ TEST_CASE("helpers: strip_aw_suffix returns the base only when suffix matches") 
     CHECK_FALSE(strip_aw_suffix("").has_value());
 }
 
-TEST_CASE("helpers: generate_symbols emits dotted, bare, and AW-stripped variants") {
-    auto v = generate_symbols("kernel32", "CreateFileA", true);
-    CHECK(contains(v, "kernel32.CreateFileA"));
-    CHECK(contains(v, "CreateFileA"));
-    CHECK(contains(v, "kernel32.CreateFile"));
-    CHECK(contains(v, "CreateFile"));
-    CHECK(v.size() == 4);
-}
-
-TEST_CASE("helpers: generate_symbols without dll prefix omits the dotted forms") {
-    auto v = generate_symbols("kernel32", "CreateFileA", false);
-    CHECK_FALSE(contains(v, "kernel32.CreateFileA"));
-    CHECK(contains(v, "CreateFileA"));
-    CHECK(contains(v, "CreateFile"));
-    CHECK(v.size() == 2);
-}
-
-TEST_CASE("helpers: generate_symbols treats ordinal symbols specially") {
-    auto v = generate_symbols("ws2_32", "#9", true);
-    CHECK(contains(v, "ws2_32.#9"));
-    CHECK(contains(v, "#9"));
-    // Ordinals never get an A/W variant
-    CHECK(v.size() == 2);
-}
-
-TEST_CASE("helpers: generate_symbols handles plain non-AW symbols") {
-    auto v = generate_symbols("kernel32", "ExitProcess", true);
-    CHECK(contains(v, "kernel32.ExitProcess"));
-    CHECK(contains(v, "ExitProcess"));
-    CHECK(v.size() == 2);
+TEST_CASE("helpers: generate_symbols emits the dotted and bare names and their AW-stripped forms") {
+    struct Row {
+        std::string_view              label;
+        std::string_view              dll;
+        std::string_view              symbol;
+        bool                          include_dll;
+        std::vector<std::string_view> symbols;
+        std::vector<std::string_view> excluded;
+    };
+    const std::vector<Row> rows{
+        {"an AW symbol with the dll prefix", "kernel32", "CreateFileA", true,
+         {"kernel32.CreateFileA", "CreateFileA", "kernel32.CreateFile", "CreateFile"}, {}},
+        {"an AW symbol without the dll prefix omits the dotted forms", "kernel32", "CreateFileA",
+         false, {"CreateFileA", "CreateFile"}, {"kernel32.CreateFileA"}},
+        // Ordinals never get an A/W variant
+        {"an ordinal symbol", "ws2_32", "#9", true, {"ws2_32.#9", "#9"}, {}},
+        {"a plain non-AW symbol", "kernel32", "ExitProcess", true,
+         {"kernel32.ExitProcess", "ExitProcess"}, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto v = generate_symbols(row.dll, row.symbol, row.include_dll);
+        for (const std::string_view sym : row.symbols) {
+            CAPTURE(sym);
+            CHECK(contains(v, sym));
+        }
+        for (const std::string_view sym : row.excluded) {
+            CAPTURE(sym);
+            CHECK_FALSE(contains(v, sym));
+        }
+        CHECK(v.size() == row.symbols.size());
+    }
 }
 
 TEST_CASE("helpers: reformat_forwarded_export_name lowercases the module part") {
@@ -95,63 +99,6 @@ TEST_CASE("helpers: reformat_forwarded_export_name lowercases the module part") 
           "api-ms-win-core.SomeFn");
     // Without a dot the input passes through untouched
     CHECK(reformat_forwarded_export_name("NoDotHere") == "NoDotHere");
-}
-
-TEST_CASE("helpers: carve_pe_files finds an unobfuscated PE at offset 0") {
-    // Synthesize a minimal MZ + lfanew + PE\0\0 buffer
-    std::array<std::byte, 0x60> buf{};
-    buf[0] = std::byte{'M'};
-    buf[1] = std::byte{'Z'};
-    // Set lfanew at offset 0x3C to point to 0x40
-    buf[0x3C] = std::byte{0x40};
-    buf[0x3D] = std::byte{0x00};
-    buf[0x3E] = std::byte{0x00};
-    buf[0x3F] = std::byte{0x00};
-    // Place "PE\0\0" at offset 0x40
-    buf[0x40] = std::byte{'P'};
-    buf[0x41] = std::byte{'E'};
-    buf[0x42] = std::byte{0x00};
-    buf[0x43] = std::byte{0x00};
-
-    auto found = carve_pe_files(buf);
-    REQUIRE(found.size() == 1);
-    CHECK(found[0] == 0);
-}
-
-TEST_CASE("helpers: carve_pe_files finds an XOR-obfuscated PE") {
-    // Same minimal layout but every byte XORed with 0x77
-    std::array<std::byte, 0x60> buf{};
-    constexpr std::uint8_t kKey = 0x77;
-
-    auto x = [](std::uint8_t b, std::uint8_t k) -> std::byte {
-        return std::byte{static_cast<std::uint8_t>(b ^ k)};
-    };
-
-    buf[0]    = x('M', kKey);
-    buf[1]    = x('Z', kKey);
-    buf[0x3C] = x(0x40, kKey);
-    buf[0x3D] = x(0x00, kKey);
-    buf[0x3E] = x(0x00, kKey);
-    buf[0x3F] = x(0x00, kKey);
-    buf[0x40] = x('P', kKey);
-    buf[0x41] = x('E', kKey);
-    buf[0x42] = x(0x00, kKey);
-    buf[0x43] = x(0x00, kKey);
-
-    auto found = carve_pe_files(buf);
-    REQUIRE(found.size() == 1);
-    CHECK(found[0] == 0);
-}
-
-TEST_CASE("helpers: carve_pe_files reports nothing on noise") {
-    std::array<std::byte, 0x80> buf{};
-    for (std::size_t i = 0; i < buf.size(); ++i) {
-        buf[i] = std::byte{static_cast<std::uint8_t>(i)};
-    }
-    auto found = carve_pe_files(buf);
-    // The deterministic ramp can occasionally collide but the check that matters is
-    // that no obvious carving false positive at offset 0
-    CHECK(std::find(found.begin(), found.end(), 0U) == found.end());
 }
 
 namespace {
@@ -180,45 +127,64 @@ std::vector<std::byte> plant_pe(std::size_t size, std::size_t pos,
 
 }  // namespace
 
-TEST_CASE("helpers: carve_pe_files finds a plain and an XOR-encoded PE") {
-    // key 0 is the unencoded case, and every other key exercises the derived-key
-    // path that replaced the old sweep over all 256 keys
-    for (const std::uint8_t key : {std::uint8_t{0x00}, std::uint8_t{0x01},
-                                   std::uint8_t{0x4D}, std::uint8_t{0xFF}}) {
-        CAPTURE(key);
-        const auto buf = plant_pe(0x400, 0x100, key, 0x80);
-        const auto hits = carve_pe_files(buf);
-        REQUIRE(hits.size() == 1);
-        CHECK(hits[0] == 0x100);
+TEST_CASE("helpers: carve_pe_files finds every plain or XOR-encoded PE in ascending order") {
+    // Three PEs, at 0x000 plain, at 0x400 under key 0xAB and at 0x800 under key 0x7F
+    auto three = plant_pe(0x1000, 0x000, 0x00, 0x80);
+    const auto second = plant_pe(0x1000, 0x400, 0xAB, 0x80);
+    for (std::size_t i = 0x400; i < 0x600; ++i) { three[i] = second[i]; }
+    const auto third = plant_pe(0x1000, 0x800, 0x7F, 0x100);
+    for (std::size_t i = 0x800; i < 0xA00; ++i) { three[i] = third[i]; }
+
+    struct Row {
+        std::string_view           label;
+        std::vector<std::byte>     buf;
+        std::vector<std::uint64_t> hits;
+    };
+    // key 0 is the unencoded case, and every other key exercises the path that derives
+    // the key from the first byte instead of trying all 256
+    const std::vector<Row> rows{
+        {"a minimal unobfuscated PE at offset 0", plant_pe(0x60, 0, 0x00, 0x40), {0}},
+        {"a minimal PE XORed with 0x77 at offset 0", plant_pe(0x60, 0, 0x77, 0x40), {0}},
+        {"a plain PE at 0x100", plant_pe(0x400, 0x100, 0x00, 0x80), {0x100}},
+        {"a PE XORed with 0x01 at 0x100", plant_pe(0x400, 0x100, 0x01, 0x80), {0x100}},
+        {"a PE XORed with 0x4D at 0x100", plant_pe(0x400, 0x100, 0x4D, 0x80), {0x100}},
+        {"a PE XORed with 0xFF at 0x100", plant_pe(0x400, 0x100, 0xFF, 0x80), {0x100}},
+        {"three embedded PEs", three, {0x000, 0x400, 0x800}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto hits = carve_pe_files(row.buf);
+        CHECK(hits.size() == row.hits.size());
+        for (std::size_t i = 0; i < hits.size() && i < row.hits.size(); ++i) {
+            CAPTURE(i);
+            CHECK(hits[i] == row.hits[i]);
+        }
+        CHECK(std::is_sorted(hits.begin(), hits.end()));
     }
 }
 
-TEST_CASE("helpers: carve_pe_files reports every embedded PE in ascending order") {
-    auto buf = plant_pe(0x1000, 0x000, 0x00, 0x80);
-    const auto second = plant_pe(0x1000, 0x400, 0xAB, 0x80);
-    for (std::size_t i = 0x400; i < 0x600; ++i) { buf[i] = second[i]; }
-    const auto third = plant_pe(0x1000, 0x800, 0x7F, 0x100);
-    for (std::size_t i = 0x800; i < 0xA00; ++i) { buf[i] = third[i]; }
-
-    const auto hits = carve_pe_files(buf);
-    REQUIRE(hits.size() == 3);
-    CHECK(hits[0] == 0x000);
-    CHECK(hits[1] == 0x400);
-    CHECK(hits[2] == 0x800);
-    CHECK(std::is_sorted(hits.begin(), hits.end()));
-}
-
-TEST_CASE("helpers: carve_pe_files rejects near-misses") {
+TEST_CASE("helpers: carve_pe_files reports nothing on noise and near-misses") {
+    std::vector<std::byte> ramp(0x80);
+    for (std::size_t i = 0; i < ramp.size(); ++i) {
+        ramp[i] = std::byte{static_cast<std::uint8_t>(i)};
+    }
     // MZ present but the PE signature does not match under the same key
-    auto buf = plant_pe(0x400, 0x100, 0x33, 0x80);
-    buf[0x100 + 0x80] = std::byte{0x00};
-    CHECK(carve_pe_files(buf).empty());
+    auto bad_signature = plant_pe(0x400, 0x100, 0x33, 0x80);
+    bad_signature[0x100 + 0x80] = std::byte{0x00};
 
-    // e_lfanew points past the end of the buffer
-    const auto past_end = plant_pe(0x200, 0x000, 0x00, 0x10000);
-    CHECK(carve_pe_files(past_end).empty());
-
-    // A buffer too short to hold a DOS header carries nothing
-    const std::vector<std::byte> tiny(8, std::byte{0x4D});
-    CHECK(carve_pe_files(tiny).empty());
+    struct Row {
+        std::string_view       label;
+        std::vector<std::byte> buf;
+    };
+    const std::vector<Row> rows{
+        {"a deterministic ramp of noise", ramp},
+        {"an MZ whose PE signature does not match under the same key", bad_signature},
+        {"an e_lfanew that points past the end of the buffer",
+         plant_pe(0x200, 0x000, 0x00, 0x10000)},
+        {"a buffer too short to hold a DOS header", std::vector<std::byte>(8, std::byte{0x4D})},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(carve_pe_files(row.buf).empty());
+    }
 }

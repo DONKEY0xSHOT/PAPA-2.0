@@ -7,32 +7,20 @@
 #include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_tree.h"
 
+#include "test_support.h"
+
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace flirt = papa::features::extractors::papa_native::flirt;
 
 namespace {
-
-// Builds a FlirtPattern from a byte list. A negative entry marks a wildcard
-// position. Bytes start at offset 0, matching the reader's accumulated prefix
-flirt::FlirtPattern make_pattern(std::initializer_list<int> bytes) {
-    flirt::FlirtPattern pat;
-    pat.length = 0;
-    for (int b : bytes) {
-        if (b < 0) {
-            pat.wildcard.set(pat.length);
-        } else {
-            pat.bytes[pat.length] = static_cast<std::uint8_t>(b);
-        }
-        pat.length = static_cast<std::uint8_t>(pat.length + 1U);
-    }
-    return pat;
-}
 
 // Builds a function-bytes buffer: a 32-byte pattern region followed by a tail. The
 // pattern region is filled with `fill`, then `prefix` is laid over its start
@@ -57,52 +45,58 @@ flirt::FlirtTree make_tree(std::unique_ptr<flirt::FlirtNode> root) {
 
 }  // namespace
 
-TEST_CASE("flirt_matcher: null tree never matches") {
-    flirt::FlirtTree empty;
-    constexpr std::array<std::uint8_t, 4> data{0x01, 0x02, 0x03, 0x04};
-    CHECK_FALSE(flirt::match_flirt(empty, data));
-    CHECK_FALSE(flirt::match_flirt(empty, {}));
-}
+TEST_CASE("flirt_matcher: match_flirt needs a tree, the whole pattern region and tail, and the tail's CRC") {
+    constexpr std::array<std::uint8_t, 3> kPrefix{0x55, 0x8B, 0xEC};
+    constexpr std::array<std::uint8_t, 5> kTail{0xDE, 0xAD, 0xBE, 0xEF, 0x42};
+    constexpr std::array<std::uint8_t, 8> kLongTail{0x01, 0x02, 0x03, 0x04,
+                                                    0x05, 0x06, 0x07, 0x08};
+    // A one-node tree on kPrefix whose module records tail_crc over tail_length bytes
+    const auto leaf_tree = [](std::uint16_t tail_crc, std::size_t tail_length) {
+        auto root = std::make_unique<flirt::FlirtNode>();
+        root->pattern = papa_tests::pattern({0x55, 0x8B, 0xEC});
+        root->leaf_modules.push_back({tail_crc, static_cast<std::uint16_t>(tail_length)});
+        return make_tree(std::move(root));
+    };
+    const flirt::FlirtTree empty;
+    auto one_byte_root = std::make_unique<flirt::FlirtNode>();
+    one_byte_root->pattern = papa_tests::pattern({0x55});
+    one_byte_root->leaf_modules.push_back({0x0000U, 0U});
+    const flirt::FlirtTree one_byte  = make_tree(std::move(one_byte_root));
+    const flirt::FlirtTree right_crc = leaf_tree(flirt::flirt_crc16(kTail), kTail.size());
+    const flirt::FlirtTree wrong_crc =
+        leaf_tree(static_cast<std::uint16_t>(flirt::flirt_crc16(kTail) ^ 0x1U), kTail.size());
+    const flirt::FlirtTree long_tail = leaf_tree(flirt::flirt_crc16(kLongTail), kLongTail.size());
 
-TEST_CASE("flirt_matcher: empty buffer against a real tree does not match") {
-    auto root = std::make_unique<flirt::FlirtNode>();
-    root->pattern = make_pattern({0x55});
-    root->leaf_modules.push_back({0x0000U, 0U});
-    const auto tree = make_tree(std::move(root));
-    CHECK_FALSE(flirt::match_flirt(tree, {}));
-}
+    const auto full = make_function_bytes(kPrefix, kLongTail);
+    // Exactly kMaxPatternLength bytes, with no tail bytes at all
+    std::vector<std::uint8_t> just_pattern(flirt::kMaxPatternLength, 0x90U);
+    std::copy(kPrefix.begin(), kPrefix.end(), just_pattern.begin());
 
-TEST_CASE("flirt_matcher: single leaf with matching pattern and correct CRC matches") {
-    const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
-
-    constexpr std::array<std::uint8_t, 5> tail{0xDE, 0xAD, 0xBE, 0xEF, 0x42};
-    const std::uint16_t crc = flirt::flirt_crc16(tail);
-
-    auto root = std::make_unique<flirt::FlirtNode>();
-    root->pattern = prefix;
-    root->leaf_modules.push_back({crc, static_cast<std::uint16_t>(tail.size())});
-    const auto tree = make_tree(std::move(root));
-
-    constexpr std::array<std::uint8_t, 3> prefix_bytes{0x55, 0x8B, 0xEC};
-    const auto buf = make_function_bytes(prefix_bytes, tail);
-    CHECK(flirt::match_flirt(tree, buf));
-}
-
-TEST_CASE("flirt_matcher: pattern matches but tail CRC is wrong does not match") {
-    const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
-
-    constexpr std::array<std::uint8_t, 5> tail{0xDE, 0xAD, 0xBE, 0xEF, 0x42};
-    const std::uint16_t correct_crc = flirt::flirt_crc16(tail);
-    const auto wrong_crc = static_cast<std::uint16_t>(correct_crc ^ 0x1U);
-
-    auto root = std::make_unique<flirt::FlirtNode>();
-    root->pattern = prefix;
-    root->leaf_modules.push_back({wrong_crc, static_cast<std::uint16_t>(tail.size())});
-    const auto tree = make_tree(std::move(root));
-
-    constexpr std::array<std::uint8_t, 3> prefix_bytes{0x55, 0x8B, 0xEC};
-    const auto buf = make_function_bytes(prefix_bytes, tail);
-    CHECK_FALSE(flirt::match_flirt(tree, buf));
+    struct Row {
+        std::string_view          label;
+        const flirt::FlirtTree*   tree;
+        std::vector<std::uint8_t> buf;
+        bool                      matches;
+    };
+    const std::vector<Row> rows{
+        {"a null tree against some bytes", &empty, {0x01, 0x02, 0x03, 0x04}, false},
+        {"a null tree against no bytes", &empty, {}, false},
+        {"an empty buffer against a real tree", &one_byte, {}, false},
+        {"a single leaf with a matching pattern and the right tail CRC", &right_crc,
+         make_function_bytes(kPrefix, kTail), true},
+        {"a matching pattern with a wrong tail CRC", &wrong_crc,
+         make_function_bytes(kPrefix, kTail), false},
+        // The full buffer establishes that the CRC and pattern are correct
+        {"the full pattern region and tail", &long_tail, full, true},
+        {"one byte short of the pattern region plus tail", &long_tail,
+         {full.begin(), full.end() - 1}, false},
+        {"the pattern region alone cannot cover an 8-byte tail CRC window", &long_tail,
+         just_pattern, false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK(flirt::match_flirt(*row.tree, row.buf) == row.matches);
+    }
 }
 
 TEST_CASE("flirt_matcher: non-matching pattern prunes subtree but sibling still matches") {
@@ -115,12 +109,12 @@ TEST_CASE("flirt_matcher: non-matching pattern prunes subtree but sibling still 
     auto root = std::make_unique<flirt::FlirtNode>();
 
     auto wrong_child = std::make_unique<flirt::FlirtNode>();
-    wrong_child->pattern = make_pattern({0xCC, 0xCC, 0xCC});
+    wrong_child->pattern = papa_tests::pattern({0xCC, 0xCC, 0xCC});
     wrong_child->leaf_modules.push_back({crc, len});  // right CRC, wrong pattern
     root->children.push_back(std::move(wrong_child));
 
     auto right_child = std::make_unique<flirt::FlirtNode>();
-    right_child->pattern = make_pattern({0x48, 0x89, 0x5C});
+    right_child->pattern = papa_tests::pattern({0x48, 0x89, 0x5C});
     right_child->leaf_modules.push_back({crc, len});
     root->children.push_back(std::move(right_child));
 
@@ -138,7 +132,7 @@ TEST_CASE("flirt_matcher: non-matching pattern prunes subtree but sibling still 
 
 TEST_CASE("flirt_matcher: wildcard position accepts an arbitrary byte") {
     // Position 1 is a wildcard, so any byte there is accepted
-    const auto prefix = make_pattern({0xE8, -1, -1, -1, -1, 0x90});
+    const auto prefix = papa_tests::pattern({0xE8, -1, -1, -1, -1, 0x90});
 
     constexpr std::array<std::uint8_t, 3> tail{0xAB, 0xCD, 0xEF};
     const std::uint16_t crc = flirt::flirt_crc16(tail);
@@ -164,36 +158,8 @@ TEST_CASE("flirt_matcher: wildcard position accepts an arbitrary byte") {
     CHECK_FALSE(flirt::match_flirt(tree, buf3));
 }
 
-TEST_CASE("flirt_matcher: buffer shorter than pattern region plus tail does not match") {
-    const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
-    constexpr std::array<std::uint8_t, 8> tail{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-    const std::uint16_t crc = flirt::flirt_crc16(tail);
-
-    auto root = std::make_unique<flirt::FlirtNode>();
-    root->pattern = prefix;
-    root->leaf_modules.push_back({crc, static_cast<std::uint16_t>(tail.size())});
-    const auto tree = make_tree(std::move(root));
-
-    // A full buffer matches, establishing the CRC and pattern are correct
-    constexpr std::array<std::uint8_t, 3> prefix_bytes{0x55, 0x8B, 0xEC};
-    const auto full = make_function_bytes(prefix_bytes, tail);
-    REQUIRE(flirt::match_flirt(tree, full));
-
-    // One byte short of pattern-region plus tail: no out-of-bounds, no match
-    const std::span<const std::uint8_t> truncated{full.data(), full.size() - 1U};
-    CHECK_FALSE(flirt::match_flirt(tree, truncated));
-
-    // Buffer exactly kMaxPatternLength long (zero tail bytes present) cannot
-    // cover an eight-byte tail CRC window
-    std::vector<std::uint8_t> just_pattern(flirt::kMaxPatternLength, 0x90U);
-    just_pattern[0] = 0x55U;
-    just_pattern[1] = 0x8BU;
-    just_pattern[2] = 0xECU;
-    CHECK_FALSE(flirt::match_flirt(tree, just_pattern));
-}
-
 TEST_CASE("flirt_matcher: tail_length zero verifies on empty subspan when pattern matches") {
-    const auto prefix = make_pattern({0x90, 0x90});
+    const auto prefix = papa_tests::pattern({0x90, 0x90});
     const std::uint16_t crc_of_nothing = flirt::flirt_crc16({});
 
     auto root = std::make_unique<flirt::FlirtNode>();
@@ -214,7 +180,7 @@ TEST_CASE("flirt_matcher: tail_length zero verifies on empty subspan when patter
 }
 
 TEST_CASE("flirt_matcher: match_flirt_modules returns a pattern+CRC+tail-byte match with its references") {
-    const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
+    const auto prefix = papa_tests::pattern({0x55, 0x8B, 0xEC});
     constexpr std::array<std::uint8_t, 4> tail{0x11, 0x22, 0x33, 0x44};
     const std::uint16_t crc = flirt::flirt_crc16(tail);
     const auto len = static_cast<std::uint16_t>(tail.size());
@@ -249,7 +215,7 @@ TEST_CASE("flirt_matcher: match_flirt_modules returns a pattern+CRC+tail-byte ma
 TEST_CASE("flirt_matcher: a module whose tail byte mismatches is rejected") {
     // python-flirt applies tail bytes as a hard filter, so a module matching the pattern
     // and CRC is still eliminated when a recorded tail byte differs
-    const auto prefix = make_pattern({0x55, 0x8B, 0xEC});
+    const auto prefix = papa_tests::pattern({0x55, 0x8B, 0xEC});
     constexpr std::array<std::uint8_t, 4> tail{0x11, 0x22, 0x33, 0x44};
     const std::uint16_t crc = flirt::flirt_crc16(tail);
     const auto len = static_cast<std::uint16_t>(tail.size());
@@ -279,7 +245,7 @@ TEST_CASE("flirt_matcher: a module whose tail byte mismatches is rejected") {
 }
 
 TEST_CASE("flirt_matcher: two modules under one node, only the second CRC matches") {
-    const auto prefix = make_pattern({0x40, 0x53});
+    const auto prefix = papa_tests::pattern({0x40, 0x53});
 
     constexpr std::array<std::uint8_t, 6> tail{0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
     const std::uint16_t real_crc = flirt::flirt_crc16(tail);

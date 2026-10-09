@@ -43,6 +43,18 @@ using MatchResults = std::unordered_map<
     std::string,
     std::vector<std::pair<features::Address, Result>>>;
 
+/// The concrete kind of a Statement, where a Some with count 0 is kOptional
+enum class StatementKind : std::uint8_t {
+    kAnd,
+    kOr,
+    kNot,
+    kSome,
+    kOptional,
+    kRange,
+    kSubscope,
+    kFeature,
+};
+
 /// Base class for nodes in a rule's logical tree
 class Statement {
 public:
@@ -59,18 +71,26 @@ public:
 
     [[nodiscard]] virtual std::string_view name() const noexcept = 0;
 
+    /// The kind fixed at construction, for dispatch without comparing names
+    [[nodiscard]] StatementKind kind() const noexcept { return kind_; }
+
     [[nodiscard]] std::span<const std::unique_ptr<Statement>> children() const noexcept {
         return children_;
     }
 
-    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into.
+    // Mutable accessor used by RuleSet to rewrite Subscope placeholders into
     // MatchedRule leaves at corpus build time
     [[nodiscard]] std::span<std::unique_ptr<Statement>> children_for_rewrite() noexcept {
         return children_;
     }
 
 protected:
+    explicit Statement(StatementKind kind) noexcept : kind_(kind) {}
+
     std::vector<std::unique_ptr<Statement>> children_;
+
+private:
+    StatementKind kind_{StatementKind::kAnd};
 };
 
 // Logical AND
@@ -150,7 +170,7 @@ public:
     [[nodiscard]] std::unique_ptr<Statement> take_inner() noexcept { return std::move(inner_); }
 
 private:
-    rules::Scope               scope_;
+    rules::Scope               scope_{rules::Scope::kFile};
     std::unique_ptr<Statement> inner_;
 };
 
@@ -178,5 +198,9 @@ match(std::span<const rules::Rule* const> rules_topo,
 void index_rule_matches(features::FeatureSet& fs,
                         const rules::Rule& rule,
                         std::span<const features::Address> addresses);
+
+/// Append every rule name or namespace the tree references through match:, in pre-order
+/// Unlike the feature index it walks every branch, since a negated reference matters too
+void collect_match_refs(const Statement& s, std::vector<std::string>& out);
 
 }  // namespace papa::engine

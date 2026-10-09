@@ -28,6 +28,8 @@ Ported project (MIT License, text below)
     table layout of the text report
 
 Vendored (license texts below and in each directory)
+  third_party/capa-rules  capa-rules 9.4.0 rule corpus, Apache License 2.0
+    https://github.com/mandiant/capa-rules, authors named in each rule
   third_party/flirt_sigs  FLIRT signature packs from capa, Apache License 2.0
   third_party/zydis       Zydis and its Zycore dependency, MIT
     Zydis

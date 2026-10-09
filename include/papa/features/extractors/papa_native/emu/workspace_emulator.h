@@ -41,8 +41,8 @@ public:
     // way vivisect routes such failures to logAnomaly
     virtual void log_anomaly(WorkspaceEmulator& /*emu*/, std::uint64_t /*eip*/) {}
 
-    // Called when a call is intercepted, with the resolved call target pc (impemu.
-    // AnalysisMonitor.apicall)
+    // Called when a call is intercepted, with the resolved call target pc
+    // (impemu.AnalysisMonitor.apicall)
     virtual void apicall(WorkspaceEmulator& /*emu*/, const DecodedInsn& /*op*/,
                          std::uint64_t /*pc*/) {}
 };

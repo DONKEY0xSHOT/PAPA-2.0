@@ -1,0 +1,32 @@
+┌──────────┬──────────────────────────────────────────────────────────────────┐
+│ md5      │ 2e5b0a22e6d126e511475f94c3a9d417                                 │
+│ sha1     │ ce2acc3bafd8962d8a23975d0e6702962e261d44                         │
+│ sha256   │ 8db58c38020a358419b8009aadbc4ec52ffad22b425695ebe8cf870256ae1309 │
+│ analysis │ static                                                           │
+│ os       │ windows                                                          │
+│ format   │ pe                                                               │
+│ arch     │ amd64                                                            │
+│ path     │ <sample path>
+└──────────┴──────────────────────────────────────────────────────────────────┘
+┌───────────────────────────┬─────────────────────────────────────────────────┐
+│ ATT&CK Tactic             │ ATT&CK Technique                                │
+├───────────────────────────┼─────────────────────────────────────────────────┤
+│ COLLECTION                │ Data Staged [T1074]                             │
+│ DEFENSE EVASION           │ Obfuscated Files or Information [T1027]         │
+└───────────────────────────┴─────────────────────────────────────────────────┘
+┌──────────────────────┬──────────────────────────────────────────────────────┐
+│ MBC Objective        │ MBC Behavior                                         │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ DEFENSE EVASION      │ Obfuscated Files or Information::Encoding-Standard   │
+│                      │ Algorithm [E1027.m02]                                │
+│ FILE SYSTEM          │ Writes File [C0052]                                  │
+└──────────────────────┴──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────┬─────────────────────────────────────┐
+│ Capability                            │ Namespace                           │
+├───────────────────────────────────────┼─────────────────────────────────────┤
+│ write and encode data                 │ collection                          │
+│ reference a constant twice            │ data-manipulation/constant          │
+│ encode data using xor in a loop       │ data-manipulation/encoding/xor      │
+│ contain a text section                │ executable/pe/section               │
+└───────────────────────────────────────┴─────────────────────────────────────┘
+

@@ -13,8 +13,8 @@ namespace papa::features::extractors {
 // Pair returned by every per-scope extraction routine
 using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
-// One opaque handle per scope addr is the public anchor used for match locations and
-// rule indexing inner is backend-specific and always nullable
+// One opaque handle per scope. addr is the public anchor used for match locations and
+// rule indexing, and inner is backend-specific and always nullable
 struct FunctionHandle {
     features::Address  addr;
     const void*        inner{nullptr};

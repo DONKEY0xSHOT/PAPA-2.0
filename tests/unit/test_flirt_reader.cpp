@@ -7,10 +7,14 @@
 #include "papa/features/extractors/papa_native/flirt/flirt_format.h"
 #include "papa/features/extractors/papa_native/flirt/flirt_reader.h"
 
+#include "test_support.h"
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -18,341 +22,175 @@ namespace flirt = papa::features::extractors::papa_native::flirt;
 
 namespace {
 
-void append_u8(std::vector<std::uint8_t>& buf, std::uint8_t v) {
-    buf.push_back(v);
-}
-
-void append_u16_le(std::vector<std::uint8_t>& buf, std::uint16_t v) {
-    buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
-    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
-}
-
-void append_u32_le(std::vector<std::uint8_t>& buf, std::uint32_t v) {
-    for (int i = 0; i < 4; ++i) {
-        buf.push_back(static_cast<std::uint8_t>((v >> (8 * i)) & 0xFFU));
+// One module with three names, a tail byte and a referenced function. Its last name ends
+// with last_flags, which mark the tail bytes and references and may chain more modules
+void rich_module(papa_tests::SigWriter& body, std::uint8_t last_flags) {
+    body.vle16(0x40);  // function_size
+    // Three names: public foo @rel 0, local bar @rel +5, public baz @rel +3.
+    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta)
+    constexpr std::uint8_t kMorePublicNames = 0x01;
+    constexpr std::uint8_t kLocalFlag       = 0x02;
+    body.name_record(0, 0,          "foo", kMorePublicNames);
+    body.name_record(5, kLocalFlag, "bar", kMorePublicNames);
+    body.name_record(3, 0,          "baz", last_flags);
+    // Tail bytes: count 1, absolute offset 0x20, value 0xAB
+    body.vle16(1);
+    body.vle16(0x20);
+    body.u8(0xAB);
+    // Referenced functions: count 1, absolute offset 0x10, name "malloc"
+    body.vle16(1);
+    body.vle16(0x10);
+    body.u8(6);
+    for (const char c : std::string_view{"malloc"}) {
+        body.u8(static_cast<std::uint8_t>(c));
     }
 }
 
-void append_zeroes(std::vector<std::uint8_t>& buf, std::size_t n) {
-    buf.insert(buf.end(), n, std::uint8_t{0});
-}
+// The trailing flags that announce tail bytes and referenced functions
+constexpr std::uint8_t kTailAndRefs = 0x02 | 0x04;
 
-// Big-endian u16, used for the on-disk module CRC16 which the format stores
-// most-significant byte first
-void append_u16_be(std::vector<std::uint8_t>& buf, std::uint16_t v) {
-    buf.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
-    buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
-}
-
-// Offset of the little-endian features word inside every header
-constexpr std::size_t kFeaturesOffset = 16;
-
-// Clears the compression bit so the body that follows is read as plain
-// uncompressed tree bytes
-void clear_compression_bit(std::vector<std::uint8_t>& header) {
-    header[kFeaturesOffset] = static_cast<std::uint8_t>(
-        header[kFeaturesOffset] & ~0x10U);
-}
-
-// FLAIR vint16 encoder (the read_max_2_bytes inverse). Values up to 0x7F fit in one
-// byte
-void append_vle16(std::vector<std::uint8_t>& buf, std::uint16_t v) {
-    if (v < 0x80U) {
-        buf.push_back(static_cast<std::uint8_t>(v));
-        return;
-    }
-    buf.push_back(static_cast<std::uint8_t>(0x80U | ((v >> 8) & 0x7FU)));
-    buf.push_back(static_cast<std::uint8_t>(v & 0xFFU));
-}
-
-// One node child header: a pattern length, an all-clear variant mask, then the literal
-// bytes in file order
-void append_child_pattern(std::vector<std::uint8_t>& buf,
-                          std::span<const std::uint8_t> pattern_bytes) {
-    append_vle16(buf, static_cast<std::uint16_t>(pattern_bytes.size()));
-    append_vle16(buf, 0);  // variant mask, no wildcard positions
-    buf.insert(buf.end(), pattern_bytes.begin(), pattern_bytes.end());
-}
-
-// One node child header with explicit wildcards. Mask bit (length-1-i) marks segment
-// position i as a wildcard
-void append_child_pattern_masked(std::vector<std::uint8_t>& buf,
-                                 std::uint16_t length, std::uint16_t mask,
-                                 std::span<const std::uint8_t> literals) {
-    append_vle16(buf, length);
-    append_vle16(buf, mask);
-    buf.insert(buf.end(), literals.begin(), literals.end());
-}
-
-// One module body inside a leaf, excluding the crc_len/crc16 pair which the caller
-// emits so it can group several modules under one CRC
-void append_module_body(std::vector<std::uint8_t>& buf,
-                        std::uint32_t function_size,
-                        std::string_view name,
-                        std::uint8_t trailing_flags) {
-    append_vle16(buf, static_cast<std::uint16_t>(function_size));  // v9+ vint32, small value fits
-    append_vle16(buf, 0);  // relative offset of the name
-    for (const char c : name) {
-        buf.push_back(static_cast<std::uint8_t>(c));
-    }
-    append_u8(buf, trailing_flags);
-}
-
-// Emit one name record inside a module: the relative offset, an optional name-flag
-// byte, the name text, then the trailing parsing-flags byte that terminates it
-void append_name_record(std::vector<std::uint8_t>& buf, std::uint16_t relative_offset,
-                        std::uint8_t name_flags, std::string_view name,
-                        std::uint8_t trailing_flags) {
-    append_vle16(buf, relative_offset);
-    if (name_flags != 0U) {
-        append_u8(buf, name_flags);
-    }
-    for (const char c : name) {
-        buf.push_back(static_cast<std::uint8_t>(c));
-    }
-    append_u8(buf, trailing_flags);
-}
-
-// Returns a minimal but well-formed FLIRT header for a given version.
-// library_name is an empty string when ln_len == 0. ctype is left blank
-std::vector<std::uint8_t> build_header(std::uint8_t version, std::uint8_t ln_len = 0) {
-    std::vector<std::uint8_t> buf;
-    buf.reserve(64);
-    static constexpr std::array<std::uint8_t, 6> kMagic = {'I', 'D', 'A', 'S', 'G', 'N'};
-    buf.insert(buf.end(), kMagic.begin(), kMagic.end());  // 0..5
-    append_u8     (buf, version);     // 6
-    append_u8     (buf, 0x01);        // 7   arch (x86)
-    append_u32_le (buf, 0x00000002U); // 8   file_types
-    append_u16_le (buf, 0x0003U);     // 12  os_types
-    append_u16_le (buf, 0x0004U);     // 14  app_types
-    append_u16_le (buf, 0x0010U);     // 16  features (compressed=0x10)
-    append_u16_le (buf, 0x0007U);     // 18  old_n_functions
-    append_u16_le (buf, 0xABCDU);     // 20  pattern_crc16
-    append_zeroes (buf, 12);          // 22..33  ctype
-    append_u8     (buf, ln_len);      // 34
-    append_u16_le (buf, 0x1234U);     // 35  ctypes_crc16
-    if (version >= 9) {
-        append_u32_le(buf, 0x0000002AU);  // 37 n_functions
-    }
-    if (version >= 10) {
-        append_u16_le(buf, 0x0020U);      // 41 pattern_size = 32
-        append_u16_le(buf, 0x0000U);      // 43 unknown
-    }
-    for (std::uint8_t i = 0; i < ln_len; ++i) {
-        buf.push_back(static_cast<std::uint8_t>('a' + (i % 26)));
-    }
-    return buf;
-}
-
-// Wraps a header (compression cleared) plus a raw body into a full buffer
-std::vector<std::uint8_t> sig_with_body(std::span<const std::uint8_t> body) {
-    auto buf = build_header(10);
-    clear_compression_bit(buf);
-    buf.insert(buf.end(), body.begin(), body.end());
-    return buf;
+// A sig of the given version with compression cleared, followed by body
+[[nodiscard]] std::vector<std::uint8_t> plain_sig(std::uint8_t version,
+                                                  std::span<const std::uint8_t> body) {
+    auto sig = papa_tests::sig_header(version);
+    papa_tests::clear_compression_bit(sig);
+    sig.insert(sig.end(), body.begin(), body.end());
+    return sig;
 }
 
 }  // namespace
 
-TEST_CASE("flirt_reader: empty buffer is truncated") {
-    auto r = flirt::parse_header({});
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
-
-TEST_CASE("flirt_reader: wrong magic is rejected") {
-    std::vector<std::uint8_t> buf(64, 0);
-    buf[0] = 'X';
-    auto r = flirt::parse_header(buf);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtBadMagic);
-}
-
-TEST_CASE("flirt_reader: unsupported versions are rejected") {
-    for (std::uint8_t v : {std::uint8_t{0}, std::uint8_t{5}, std::uint8_t{7},
-                            std::uint8_t{11}, std::uint8_t{255}}) {
+TEST_CASE("flirt_reader: parse_header rejects a short buffer, a wrong magic, an unsupported version and a cut library name") {
+    const auto with_version = [](std::uint8_t v) {
         std::vector<std::uint8_t> buf(64, 0);
         std::memcpy(buf.data(), "IDASGN", 6);
         buf[6] = v;
-        auto r = flirt::parse_header(buf);
-        REQUIRE_FALSE(r.has_value());
-        CHECK(r.error().kind == papa::ErrorKind::kFlirtUnsupportedVersion);
+        return buf;
+    };
+    std::vector<std::uint8_t> wrong_magic(64, 0);
+    wrong_magic[0] = 'X';
+    // Drop 3 of the 5 name bytes
+    auto cut_name = papa_tests::sig_header(10, /*ln_len=*/5);
+    cut_name.resize(cut_name.size() - 3);
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> buf;
+        papa::ErrorKind           kind;
+    };
+    const std::vector<Row> rows{
+        {"an empty buffer", {}, papa::ErrorKind::kFlirtTruncated},
+        {"a wrong magic", wrong_magic, papa::ErrorKind::kFlirtBadMagic},
+        {"version 0", with_version(0), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 5", with_version(5), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 7", with_version(7), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 11", with_version(11), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"version 255", with_version(255), papa::ErrorKind::kFlirtUnsupportedVersion},
+        {"a truncated library name", cut_name, papa::ErrorKind::kFlirtTruncated},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = flirt::parse_header(row.buf);
+        CHECK_FALSE(r.has_value());
+        if (!r.has_value()) { CHECK(r.error().kind == row.kind); }
     }
 }
 
-TEST_CASE("flirt_reader: v10 minimal header parses every field") {
-    const auto buf = build_header(10);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version          == 10U);
-    CHECK(r->arch             == flirt::FlirtArch::kX86);
-    CHECK(r->file_types       == 0x00000002U);
-    CHECK(r->os_types         == 0x0003U);
-    CHECK(r->app_types        == 0x0004U);
-    CHECK(r->features         == 0x0010U);
-    CHECK(r->is_compressed());
-    CHECK(r->old_n_functions  == 0x0007U);
-    CHECK(r->pattern_crc16    == 0xABCDU);
-    CHECK(r->library_name_len == 0U);
-    CHECK(r->ctypes_crc16     == 0x1234U);
-    CHECK(r->n_functions      == 0x0000002AU);
-    CHECK(r->pattern_size     == 0x0020U);
-    CHECK(r->library_name.empty());
+TEST_CASE("flirt_reader: parse_header reads every field its version carries and leaves the later ones at their defaults") {
+    struct Row {
+        std::string_view label;
+        std::uint8_t     version;
+        std::uint8_t     ln_len;
+        std::uint32_t    n_functions;
+        std::uint16_t    pattern_size;
+        std::string_view library_name;
+        std::size_t      header_size;
+    };
+    const std::vector<Row> rows{
+        {"a minimal v10 header", 10, 0, 0x0000002AU, 0x0020U, "", 45},
+        {"a v9 header leaves the v10 pattern size at its default", 9, 0, 0x0000002AU, 0, "", 41},
+        {"a v8 header leaves the v9 and v10 fields at their defaults", 8, 0, 0, 0, "", 37},
+        {"a v10 header with a library name of 5 letters", 10, 5, 0x0000002AU, 0x0020U, "abcde",
+         45},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = flirt::parse_header(papa_tests::sig_header(row.version, row.ln_len));
+        REQUIRE(r.has_value());
+        CHECK(r->version          == row.version);
+        CHECK(r->arch             == flirt::FlirtArch::kX86);
+        CHECK(r->file_types       == 0x00000002U);
+        CHECK(r->os_types         == 0x0003U);
+        CHECK(r->app_types        == 0x0004U);
+        CHECK(r->features         == 0x0010U);
+        CHECK(r->is_compressed());
+        CHECK(r->old_n_functions  == 0x0007U);
+        CHECK(r->pattern_crc16    == 0xABCDU);
+        CHECK(r->library_name_len == row.ln_len);
+        CHECK(r->ctypes_crc16     == 0x1234U);
+        CHECK(r->n_functions      == row.n_functions);
+        CHECK(r->pattern_size     == row.pattern_size);
+        CHECK(r->library_name     == row.library_name);
+        CHECK(flirt::header_size_for_version(row.version) == row.header_size);
+    }
 }
 
-TEST_CASE("flirt_reader: v8 header does not populate v9+ fields") {
-    const auto buf = build_header(8);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version      == 8U);
-    CHECK(r->n_functions  == 0U);  // v9+ field, stays at default
-    CHECK(r->pattern_size == 0U);  // v10+ field, stays at default
-}
-
-TEST_CASE("flirt_reader: v9 header does not populate v10+ fields") {
-    const auto buf = build_header(9);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->version      == 9U);
-    CHECK(r->n_functions  == 0x0000002AU);
-    CHECK(r->pattern_size == 0U);
-}
-
-TEST_CASE("flirt_reader: library name is read when length is non-zero") {
-    const auto buf = build_header(10, /*ln_len=*/5);
-    auto r = flirt::parse_header(buf);
-    REQUIRE(r.has_value());
-    CHECK(r->library_name_len == 5U);
-    CHECK(r->library_name == "abcde");
-}
-
-TEST_CASE("flirt_reader: truncated library name is rejected") {
-    auto buf = build_header(10, /*ln_len=*/5);
-    buf.resize(buf.size() - 3);  // drop 3 of the 5 name bytes
-    auto r = flirt::parse_header(buf);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
-
-TEST_CASE("flirt_reader: header consumed length matches version") {
-    const auto v10 = build_header(10);
-    auto r = flirt::parse_header(v10);
-    REQUIRE(r.has_value());
-    CHECK(flirt::header_size_for_version(10) == 45U);
-    CHECK(flirt::header_size_for_version(9)  == 41U);
-    CHECK(flirt::header_size_for_version(8)  == 37U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 one-byte form") {
-    std::array<std::uint8_t, 1> data{0x7F};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0xFFFF;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x7FU);
-    CHECK(cur.offset() == 1U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 two-byte form") {
-    std::array<std::uint8_t, 2> data{0x92, 0x34};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x1234U);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 two-byte form reaches max value") {
-    std::array<std::uint8_t, 2> data{0xFF, 0xFF};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0;
-    REQUIRE(cur.read_vle16(out));
-    CHECK(out == 0x7FFFU);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle16 truncated two-byte form fails cleanly") {
-    std::array<std::uint8_t, 1> data{0x92};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0xABCD;
-    REQUIRE_FALSE(cur.read_vle16(out));
-    CHECK(out == 0xABCDU);     // out param untouched on failure
-    CHECK(cur.offset() == 0U);  // cursor not advanced
-}
-
-TEST_CASE("flirt_reader: read_vle16 empty buffer fails") {
-    std::array<std::uint8_t, 0> data{};
-    flirt::detail::ByteCursor cur{data};
-    std::uint16_t out = 0x1111;
-    REQUIRE_FALSE(cur.read_vle16(out));
-    CHECK(out == 0x1111U);
-    CHECK(cur.offset() == 0U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 one-byte form") {
-    std::array<std::uint8_t, 1> data{0x7F};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0xFFFFFFFF;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x7FU);
-    CHECK(cur.offset() == 1U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 two-byte form") {
-    std::array<std::uint8_t, 2> data{0x81, 0x00};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x0100U);
-    CHECK(cur.offset() == 2U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 four-byte masked form") {
-    std::array<std::uint8_t, 4> data{0xC0, 0x00, 0x80, 0x00};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0x8000U);
-    CHECK(cur.offset() == 4U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 full five-byte form") {
-    std::array<std::uint8_t, 5> data{0xFF, 0xDE, 0xAD, 0xBE, 0xEF};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0;
-    REQUIRE(cur.read_vle32(out));
-    CHECK(out == 0xDEADBEEFU);
-    CHECK(cur.offset() == 5U);
-}
-
-TEST_CASE("flirt_reader: read_vle32 truncated four-byte form fails cleanly") {
-    std::array<std::uint8_t, 3> data{0xC0, 0x00, 0x80};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0x12345678;
-    REQUIRE_FALSE(cur.read_vle32(out));
-    CHECK(out == 0x12345678U);  // out param untouched on failure
-    CHECK(cur.offset() == 0U);   // cursor not advanced
-}
-
-TEST_CASE("flirt_reader: read_vle32 truncated five-byte form fails cleanly") {
-    std::array<std::uint8_t, 4> data{0xFF, 0xDE, 0xAD, 0xBE};
-    flirt::detail::ByteCursor cur{data};
-    std::uint32_t out = 0x99999999;
-    REQUIRE_FALSE(cur.read_vle32(out));
-    CHECK(out == 0x99999999U);
-    CHECK(cur.offset() == 0U);
+TEST_CASE("flirt_reader: read_vle16 and read_vle32 decode each length form and leave the cursor and value on a short read") {
+    // The value a failed read must leave untouched
+    constexpr std::uint32_t kUntouched = 0x5A5A5A5AU;
+    struct Row {
+        std::string_view          label;
+        int                       width;
+        std::vector<std::uint8_t> data;
+        bool                      ok;
+        std::uint32_t             value;
+        std::size_t               consumed;
+    };
+    const std::vector<Row> rows{
+        {"vle16 one-byte form", 16, {0x7F}, true, 0x7FU, 1},
+        {"vle16 two-byte form", 16, {0x92, 0x34}, true, 0x1234U, 2},
+        {"vle16 two-byte form reaches max value", 16, {0xFF, 0xFF}, true, 0x7FFFU, 2},
+        {"vle16 truncated two-byte form fails cleanly", 16, {0x92}, false, kUntouched & 0xFFFFU, 0},
+        {"vle16 empty buffer fails", 16, {}, false, kUntouched & 0xFFFFU, 0},
+        {"vle32 one-byte form", 32, {0x7F}, true, 0x7FU, 1},
+        {"vle32 two-byte form", 32, {0x81, 0x00}, true, 0x0100U, 2},
+        {"vle32 four-byte masked form", 32, {0xC0, 0x00, 0x80, 0x00}, true, 0x8000U, 4},
+        {"vle32 full five-byte form", 32, {0xFF, 0xDE, 0xAD, 0xBE, 0xEF}, true, 0xDEADBEEFU, 5},
+        {"vle32 truncated four-byte form fails cleanly", 32, {0xC0, 0x00, 0x80}, false, kUntouched,
+         0},
+        {"vle32 truncated five-byte form fails cleanly", 32, {0xFF, 0xDE, 0xAD, 0xBE}, false,
+         kUntouched, 0},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        flirt::detail::ByteCursor cur{row.data};
+        bool          ok    = false;
+        std::uint32_t value = 0;
+        if (row.width == 16) {
+            auto out = static_cast<std::uint16_t>(kUntouched);
+            ok = cur.read_vle16(out);
+            value = out;
+        } else {
+            std::uint32_t out = kUntouched;
+            ok = cur.read_vle32(out);
+            value = out;
+        }
+        CHECK(ok == row.ok);
+        CHECK(value == row.value);
+        CHECK(cur.offset() == row.consumed);
+    }
 }
 
 TEST_CASE("flirt_reader: minimal uncompressed sig parses one module") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);                           // root child count
+    papa_tests::SigWriter body;
+    body.vle16(1);                                   // root child count
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    append_child_pattern(body, pat);                 // child 0 pattern
-    append_vle16(body, 0);                            // child 0 is a leaf
-    append_u8(body, 0x08);                            // crc_len -> tail_length
-    append_u16_be(body, 0x1234);                   // crc16 -> tail_crc16 (BE on disk)
-    append_module_body(body, 0x10, "foo", 0x00);      // one module, no continuation
+    body.child_pattern(pat);                         // child 0 pattern
+    body.vle16(0);                                    // child 0 is a leaf
+    body.u8(0x08);                                    // crc_len -> tail_length
+    body.u16_be(0x1234);                           // crc16 -> tail_crc16 (BE on disk)
+    body.module_body(0x10, "foo", 0x00);              // one module, no continuation
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     CHECK(r->module_count() == 1U);
@@ -373,24 +211,24 @@ TEST_CASE("flirt_reader: minimal uncompressed sig parses one module") {
 }
 
 TEST_CASE("flirt_reader: two-children root sums module counts") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 2);                            // root child count
+    papa_tests::SigWriter body;
+    body.vle16(2);                                    // root child count
 
     const std::array<std::uint8_t, 2> pat_a{0x55, 0x8B};
-    append_child_pattern(body, pat_a);
-    append_vle16(body, 0);                            // leaf
-    append_u8(body, 0x04);
-    append_u16_be(body, 0xAAAA);
-    append_module_body(body, 0x20, "aaa", 0x00);
+    body.child_pattern(pat_a);
+    body.vle16(0);                                    // leaf
+    body.u8(0x04);
+    body.u16_be(0xAAAA);
+    body.module_body(0x20, "aaa", 0x00);
 
     const std::array<std::uint8_t, 4> pat_b{0x90, 0x90, 0x90, 0x90};
-    append_child_pattern(body, pat_b);
-    append_vle16(body, 0);                            // leaf
-    append_u8(body, 0x06);
-    append_u16_be(body, 0xBBBB);
-    append_module_body(body, 0x30, "bbb", 0x00);
+    body.child_pattern(pat_b);
+    body.vle16(0);                                    // leaf
+    body.u8(0x06);
+    body.u16_be(0xBBBB);
+    body.module_body(0x30, "bbb", 0x00);
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     CHECK(r->module_count() == 2U);
@@ -405,19 +243,19 @@ TEST_CASE("flirt_reader: two-children root sums module counts") {
 }
 
 TEST_CASE("flirt_reader: leaf with two colliding modules") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);
+    papa_tests::SigWriter body;
+    body.vle16(1);
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    append_child_pattern(body, pat);
-    append_vle16(body, 0);                            // leaf
-    append_u8(body, 0x08);
-    append_u16_be(body, 0x1234);
+    body.child_pattern(pat);
+    body.vle16(0);                                    // leaf
+    body.u8(0x08);
+    body.u16_be(0x1234);
     // First module sets MORE_MODULES_WITH_SAME_CRC (0x08) so a second
     // module follows under the same crc without a fresh crc header
-    append_module_body(body, 0x10, "foo", 0x08);
-    append_module_body(body, 0x18, "bar", 0x00);
+    body.module_body(0x10, "foo", 0x08);
+    body.module_body(0x18, "bar", 0x00);
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     CHECK(r->module_count() == 2U);
@@ -430,51 +268,83 @@ TEST_CASE("flirt_reader: leaf with two colliding modules") {
     CHECK(child->leaf_modules[1].tail_crc16 == 0x1234U);
 }
 
-TEST_CASE("flirt_reader: truncated body returns truncated error") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);
+TEST_CASE("flirt_reader: parse_sig_buffer rejects a cut body, an over-long pattern, a tree past the depth cap and a bad compressed body") {
+    papa_tests::SigWriter one_module;
+    one_module.vle16(1);
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    append_child_pattern(body, pat);
-    append_vle16(body, 0);                            // leaf
-    append_u8(body, 0x08);
-    append_u16_be(body, 0x1234);
-    append_module_body(body, 0x10, "foo", 0x00);
+    one_module.child_pattern(pat);
+    one_module.vle16(0);  // leaf
+    one_module.u8(0x08);
+    one_module.u16_be(0x1234);
+    one_module.module_body(0x10, "foo", 0x00);
 
-    auto sig = sig_with_body(body);
-    sig.resize(sig.size() - 2);  // drop the trailing flags and last name byte
+    // kMaxPatternLength is 32, so a pattern length of 33 is one too many
+    papa_tests::SigWriter long_pattern;
+    long_pattern.vle16(1);
+    long_pattern.vle16(33);
+    long_pattern.vle16(0);  // empty variant mask
+    long_pattern.buf.insert(long_pattern.buf.end(), 33, std::uint8_t{0x90});
 
-    auto r = flirt::parse_sig_buffer(sig);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtTruncated);
-}
+    // A chain of nodes with one child each and an empty pattern, so a level is the two
+    // bytes 0x01 0x00 and carries no mask or pattern bytes
+    const auto chain = [](std::size_t levels) {
+        std::vector<std::uint8_t> body;
+        for (std::size_t i = 0; i < levels; ++i) {
+            body.push_back(0x01);
+            body.push_back(0x00);
+        }
+        return papa_tests::sig_with_body(body);
+    };
+    const auto cut = [](std::vector<std::uint8_t> sig, std::size_t drop) {
+        sig.resize(sig.size() - drop);
+        return sig;
+    };
+    // The header keeps its compressed bit, and the body is no zlib stream
+    auto not_zlib = papa_tests::sig_header(10);
+    not_zlib.insert(not_zlib.end(), {0x01, 0x02, 0x03});
 
-TEST_CASE("flirt_reader: pattern longer than cap is a bad node") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);
-    // kMaxPatternLength is 32. Encode a 33-byte pattern length
-    append_vle16(body, 33);
-    append_vle16(body, 0);  // empty variant mask
-    body.insert(body.end(), 33, std::uint8_t{0x90});
-
-    const auto sig = sig_with_body(body);
-    auto r = flirt::parse_sig_buffer(sig);
-    REQUIRE_FALSE(r.has_value());
-    CHECK(r.error().kind == papa::ErrorKind::kFlirtBadNode);
+    struct Row {
+        std::string_view          label;
+        std::vector<std::uint8_t> sig;
+        papa::ErrorKind           kind;
+    };
+    const std::vector<Row> rows{
+        // Dropping 2 bytes cuts the trailing flags and the last name byte
+        {"a body cut short", cut(papa_tests::sig_with_body(one_module.buf), 2),
+         papa::ErrorKind::kFlirtTruncated},
+        {"a pattern longer than the cap is a bad node", papa_tests::sig_with_body(long_pattern.buf),
+         papa::ErrorKind::kFlirtBadNode},
+        {"a chain two levels past the depth cap", chain(flirt::kMaxTreeDepth + 2U),
+         papa::ErrorKind::kFlirtTooDeep},
+        {"a chain one level past the depth cap", chain(flirt::kMaxTreeDepth + 1U),
+         papa::ErrorKind::kFlirtTooDeep},
+        // Its last node sits at the cap and finds no child count to read
+        {"a chain that reaches the depth cap is only cut short", chain(flirt::kMaxTreeDepth),
+         papa::ErrorKind::kFlirtTruncated},
+        {"a compressed body that is no zlib stream", not_zlib,
+         papa::ErrorKind::kFlirtBadCompressedStream},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = flirt::parse_sig_buffer(row.sig);
+        CHECK_FALSE(r.has_value());
+        if (!r.has_value()) { CHECK(r.error().kind == row.kind); }
+    }
 }
 
 TEST_CASE("flirt_reader: variant mask marks wildcard positions") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);  // root child count
+    papa_tests::SigWriter body;
+    body.vle16(1);  // root child count
     // A 3-byte segment with the middle position wildcarded. A wildcard at local
     // position 1 sets mask bit (length - 1 - 1) = bit 1
     const std::array<std::uint8_t, 2> literals{0x55, 0xEC};
-    append_child_pattern_masked(body, 3, 0x02, literals);
-    append_vle16(body, 0);  // leaf
-    append_u8(body, 0x04);
-    append_u16_be(body, 0x1234);
-    append_module_body(body, 0x10, "foo", 0x00);
+    body.child_pattern_masked(3, 0x02, literals);
+    body.vle16(0);  // leaf
+    body.u8(0x04);
+    body.u16_be(0x1234);
+    body.module_body(0x10, "foo", 0x00);
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     const flirt::FlirtNode* child = r->root()->children.front().get();
@@ -488,19 +358,19 @@ TEST_CASE("flirt_reader: variant mask marks wildcard positions") {
 }
 
 TEST_CASE("flirt_reader: nested nodes accumulate the pattern prefix") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);  // root has one child A
+    papa_tests::SigWriter body;
+    body.vle16(1);  // root has one child A
     const std::array<std::uint8_t, 1> pat_a{0x55};
-    append_child_pattern(body, pat_a);  // A pattern, length 1
-    append_vle16(body, 1);  // A is internal with one child B
+    body.child_pattern(pat_a);  // A pattern, length 1
+    body.vle16(1);  // A is internal with one child B
     const std::array<std::uint8_t, 2> pat_b{0x8B, 0xEC};
-    append_child_pattern(body, pat_b);  // B pattern, length 2
-    append_vle16(body, 0);  // B is a leaf
-    append_u8(body, 0x05);
-    append_u16_be(body, 0xCAFE);
-    append_module_body(body, 0x10, "foo", 0x00);
+    body.child_pattern(pat_b);  // B pattern, length 2
+    body.vle16(0);  // B is a leaf
+    body.u8(0x05);
+    body.u16_be(0xCAFE);
+    body.module_body(0x10, "foo", 0x00);
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     CHECK(r->module_count() == 1U);
@@ -522,36 +392,16 @@ TEST_CASE("flirt_reader: nested nodes accumulate the pattern prefix") {
 
 TEST_CASE("flirt_reader: a module retains names, tail bytes, and references") {
     using flirt::FlirtNameType;
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);                       // root child count
+    papa_tests::SigWriter body;
+    body.vle16(1);                               // root child count
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    append_child_pattern(body, pat);
-    append_vle16(body, 0);                        // leaf
-    append_u8(body, 0x08);                        // crc_len
-    append_u16_be(body, 0x1234);                  // crc16
+    body.child_pattern(pat);
+    body.vle16(0);                                // leaf
+    body.u8(0x08);                                // crc_len
+    body.u16_be(0x1234);                          // crc16
+    rich_module(body, kTailAndRefs);
 
-    append_vle16(body, 0x40);                     // function_size
-    // Three names: public foo @rel 0, local bar @rel +5, public baz @rel +3.
-    // Delta accumulation yields absolute offsets 0, 5, 8 (8 != 3 proves delta)
-    constexpr std::uint8_t kMorePublicNames = 0x01;
-    constexpr std::uint8_t kLocalFlag       = 0x02;
-    constexpr std::uint8_t kTailAndRefs     = 0x02 | 0x04;
-    append_name_record(body, 0, 0,          "foo", kMorePublicNames);
-    append_name_record(body, 5, kLocalFlag, "bar", kMorePublicNames);
-    append_name_record(body, 3, 0,          "baz", kTailAndRefs);
-    // Tail bytes: count 1, absolute offset 0x20, value 0xAB
-    append_vle16(body, 1);
-    append_vle16(body, 0x20);
-    append_u8(body, 0xAB);
-    // Referenced functions: count 1, absolute offset 0x10, name "malloc"
-    append_vle16(body, 1);
-    append_vle16(body, 0x10);
-    append_u8(body, 6);
-    for (const char c : std::string_view{"malloc"}) {
-        body.push_back(static_cast<std::uint8_t>(c));
-    }
-
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     const flirt::FlirtNode* child = r->root()->children.front().get();
@@ -579,21 +429,21 @@ TEST_CASE("flirt_reader: a module retains names, tail bytes, and references") {
 }
 
 TEST_CASE("flirt_reader: leaf with two distinct-crc module groups") {
-    std::vector<std::uint8_t> body;
-    append_vle16(body, 1);
+    papa_tests::SigWriter body;
+    body.vle16(1);
     const std::array<std::uint8_t, 3> pat{0x55, 0x8B, 0xEC};
-    append_child_pattern(body, pat);
-    append_vle16(body, 0);  // leaf
+    body.child_pattern(pat);
+    body.vle16(0);  // leaf
     // First group sets MORE_MODULES (0x10) so a second group with its own
     // crc header follows
-    append_u8(body, 0x08);
-    append_u16_be(body, 0xAAAA);
-    append_module_body(body, 0x10, "foo", 0x10);
-    append_u8(body, 0x0C);
-    append_u16_be(body, 0xBBBB);
-    append_module_body(body, 0x20, "bar", 0x00);
+    body.u8(0x08);
+    body.u16_be(0xAAAA);
+    body.module_body(0x10, "foo", 0x10);
+    body.u8(0x0C);
+    body.u16_be(0xBBBB);
+    body.module_body(0x20, "bar", 0x00);
 
-    const auto sig = sig_with_body(body);
+    const auto sig = papa_tests::sig_with_body(body.buf);
     auto r = flirt::parse_sig_buffer(sig);
     REQUIRE(r.has_value());
     CHECK(r->module_count() == 2U);
@@ -603,4 +453,70 @@ TEST_CASE("flirt_reader: leaf with two distinct-crc module groups") {
     CHECK(child->leaf_modules[0].tail_length == 0x08U);
     CHECK(child->leaf_modules[1].tail_crc16 == 0xBBBBU);
     CHECK(child->leaf_modules[1].tail_length == 0x0CU);
+}
+
+TEST_CASE("flirt_reader: every cut of a rich sig is truncated at versions 8, 9 and 10") {
+    // Two root children. The first has a masked pattern over an internal node whose leaf
+    // holds the rich module, one sharing its crc and a second crc group
+    papa_tests::SigWriter body;
+    body.vle16(2);
+    const std::array<std::uint8_t, 2> masked{0x55, 0xEC};
+    body.child_pattern_masked(3, 0x02, masked);
+    body.vle16(1);  // internal, one child
+    const std::array<std::uint8_t, 2> inner{0x8B, 0xEC};
+    body.child_pattern(inner);
+    body.vle16(0);  // leaf
+    body.u8(0x08);
+    body.u16_be(0x1234);
+    rich_module(body, kTailAndRefs | 0x08);  // a module with the same crc follows
+    body.module_body(0x18, "same", 0x10);    // then a second crc group
+    body.u8(0x0C);
+    body.u16_be(0xBBBB);
+    body.module_body(0x20, "group", 0x00);
+    // The second child is a plain leaf whose reference spells its name length as a vint
+    const std::array<std::uint8_t, 1> plain{0x90};
+    body.child_pattern(plain);
+    body.vle16(0);  // leaf
+    body.u8(0x04);
+    body.u16_be(0xCCCC);
+    body.vle16(0x10);  // function_size
+    body.name_record(0, 0, "last", 0x04);
+    body.vle16(1);     // one reference
+    body.vle16(0x08);
+    body.u8(0);        // the length follows as a vint
+    body.vle16(3);
+    for (const char c : std::string_view{"abc"}) {
+        body.u8(static_cast<std::uint8_t>(c));
+    }
+
+    // Every value is below 0x80, so the same bytes read alike under each version's widths
+    for (const std::uint8_t version : {std::uint8_t{8}, std::uint8_t{9}, std::uint8_t{10}}) {
+        CAPTURE(static_cast<int>(version));
+        const auto sig   = plain_sig(version, body.buf);
+        const auto whole = flirt::parse_sig_buffer(sig);
+        REQUIRE(whole.has_value());
+        CHECK(whole->module_count() == 4U);
+        REQUIRE(whole->root() != nullptr);
+        CHECK(whole->root()->children.size() == 2U);
+
+        const std::size_t header        = flirt::header_size_for_version(version);
+        std::size_t       problem_count = 0;
+        std::string       problems;
+        for (std::size_t n = 0; n < sig.size(); ++n) {
+            const auto r = flirt::parse_sig_buffer(std::span<const std::uint8_t>(sig.data(), n));
+            std::string problem;
+            if (r.has_value()) {
+                problem = "parsed";
+            } else if (r.error().kind != papa::ErrorKind::kFlirtTruncated &&
+                       (n >= header || r.error().kind != papa::ErrorKind::kFlirtBadMagic)) {
+                problem = "an unexpected error kind, " + r.error().detail;
+            }
+            // The first few problems name their prefix, and the rest are only counted
+            if (!problem.empty() && ++problem_count <= 8U) {
+                problems.append(std::to_string(n)).append(" bytes: ").append(problem).append("\n");
+            }
+        }
+        CHECK(problems == "");
+        CHECK(problem_count == 0U);
+    }
 }

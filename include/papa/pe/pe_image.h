@@ -4,20 +4,33 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace papa::pe {
 
+/// Copy a little-endian T out of buf at off, or return false when it does not fit
+template <typename T>
+[[nodiscard]] bool read_le(std::span<const std::byte> buf, std::size_t off, T& out) noexcept {
+    static_assert(std::is_trivially_copyable_v<T>);
+    if (off > buf.size() || sizeof(T) > buf.size() - off) {
+        return false;
+    }
+    std::memcpy(&out, buf.data() + off, sizeof(T));
+    return true;
+}
+
 struct ParsedSection {
     std::string   name;
-    std::uint32_t virtual_address;
-    std::uint32_t virtual_size;
-    std::uint32_t raw_offset;
-    std::uint32_t raw_size;
-    std::uint32_t characteristics;
+    std::uint32_t virtual_address{0};
+    std::uint32_t virtual_size{0};
+    std::uint32_t raw_offset{0};
+    std::uint32_t raw_size{0};
+    std::uint32_t characteristics{0};
 };
 
 struct ParsedImport {
@@ -31,14 +44,14 @@ struct ParsedImport {
 
 struct ParsedExport {
     std::string                name;
-    std::uint32_t              ordinal;
-    std::uint64_t              va;
+    std::uint32_t              ordinal{0};
+    std::uint64_t              va{0};
     std::optional<std::string> forwarder;
 };
 
 struct ParsedRelocation {
-    std::uint32_t rva;   // RVA of the relocation site (page RVA + entry offset)
-    std::uint16_t type;  // IMAGE_REL_BASED_* type, e.g. 3 HIGHLOW, 10 DIR64, 0 ABSOLUTE
+    std::uint32_t rva{0};   // RVA of the relocation site (page RVA + entry offset)
+    std::uint16_t type{0};  // IMAGE_REL_BASED_* type, e.g. 3 HIGHLOW, 10 DIR64, 0 ABSOLUTE
 };
 
 class PeParser;  // friend
@@ -71,7 +84,6 @@ public:
     [[nodiscard]] const ParsedSection* section_containing_rva(std::uint64_t rva) const noexcept;
 
     [[nodiscard]] std::optional<std::uint64_t> rva_to_file_offset(std::uint64_t rva) const noexcept;
-    [[nodiscard]] std::optional<std::uint64_t> file_offset_to_rva(std::uint64_t off) const noexcept;
 
     [[nodiscard]] bool probe_readable(std::uint64_t rva, std::size_t n) const noexcept;
 

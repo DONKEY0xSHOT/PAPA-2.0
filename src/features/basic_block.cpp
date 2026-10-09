@@ -9,7 +9,7 @@
 namespace papa::features {
 
 BasicBlock::BasicBlock(std::string desc)
-    : Feature(FeatureTag::kBasicBlock, "basic block", std::move(desc)) {}
+    : Feature(FeatureTag::kBasicBlock, std::move(desc)) {}
 
 std::size_t BasicBlock::hash() const noexcept {
     // Tag-only payload. Multiply the tag by the golden-ratio constant so the resulting
@@ -20,10 +20,6 @@ std::size_t BasicBlock::hash() const noexcept {
 
 bool BasicBlock::equals(const Feature& o) const noexcept {
     return o.tag() == FeatureTag::kBasicBlock;
-}
-
-std::string BasicBlock::to_string() const {
-    return "basic block";
 }
 
 }  // namespace papa::features

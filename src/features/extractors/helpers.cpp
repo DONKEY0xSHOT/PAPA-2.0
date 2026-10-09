@@ -1,6 +1,7 @@
 #include "papa/features/extractors/helpers.h"
 
 #include "papa/constants.h"
+#include "papa/pe/pe_image.h"
 #include "papa/util/string_utils.h"
 
 #include <algorithm>
@@ -46,17 +47,6 @@ constexpr std::uint8_t kAsciiM       = 'M';
 constexpr std::uint8_t kAsciiZ       = 'Z';
 
 }  // namespace
-
-std::string normalize_dll_name(std::string_view dll) {
-    std::string lower = ::papa::util::to_lower_ascii(dll);
-    for (const auto ext : ::papa::constants::kDllExtensions) {
-        if (::papa::util::ends_with(lower, ext)) {
-            lower.resize(lower.size() - ext.size());
-            return lower;
-        }
-    }
-    return lower;
-}
 
 std::optional<std::string_view> strip_aw_suffix(std::string_view symbol) {
     if (symbol.size() < 2) { return std::nullopt; }
@@ -107,6 +97,11 @@ generate_symbols(std::string_view dll, std::string_view symbol, bool include_dll
     return out;
 }
 
+std::string import_symbol(const ::papa::pe::ParsedImport& imp) {
+    if (imp.by_ordinal) { return "#" + std::to_string(imp.ordinal); }
+    return imp.name;
+}
+
 std::string reformat_forwarded_export_name(std::string_view forwarder) {
     const auto dot = forwarder.rfind('.');
     if (dot == std::string_view::npos) {
@@ -153,8 +148,8 @@ carve_pe_files(std::span<const std::byte> buf) {
         }
     }
 
-    // Positions are produced in ascending order and at most once each, so the
-    // sort and de-duplicate the per-key sweep needed are no longer required
+    // Positions are produced in ascending order and at most once each, so no sort or
+    // de-duplication is needed
     return out;
 }
 

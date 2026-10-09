@@ -34,11 +34,6 @@ namespace papa::rules {
 
 namespace {
 
-// Reusable pull of the Expected alias that the helper functions return
-// papa::util::Expected is a 2-arg template so the bare alias would shadow papa::Expected
-template <typename T>
-using Expected = ::papa::Expected<T>;
-
 using ::papa::ErrorKind;
 using ::papa::PapaError;
 using ::papa::Unexpected;
@@ -97,16 +92,6 @@ constexpr std::string_view kInlineDescSep = " = ";
 
 [[nodiscard]] std::string_view trim(std::string_view s) noexcept {
     return rtrim(ltrim(s));
-}
-
-[[nodiscard]] bool starts_with(std::string_view s, std::string_view prefix) noexcept {
-    return s.size() >= prefix.size() &&
-           s.substr(0, prefix.size()) == prefix;
-}
-
-[[nodiscard]] bool ends_with(std::string_view s, std::string_view suffix) noexcept {
-    return s.size() >= suffix.size() &&
-           s.substr(s.size() - suffix.size()) == suffix;
 }
 
 [[nodiscard]] PapaError rule_error(ErrorKind kind, std::string detail,
@@ -295,7 +280,7 @@ constexpr std::string_view kInlineDescSep = " = ";
     }
 
     int base = 10;
-    if (starts_with(body, "0x") || starts_with(body, "0X")) {
+    if (body.starts_with("0x") || body.starts_with("0X")) {
         base = 16;
         body.remove_prefix(2);
     }
@@ -330,7 +315,7 @@ constexpr std::string_view kInlineDescSep = " = ";
     s = trim(s);
     if (s.empty()) { return std::nullopt; }
     int base = 10;
-    if (starts_with(s, "0x") || starts_with(s, "0X")) {
+    if (s.starts_with("0x") || s.starts_with("0X")) {
         base = 16;
         s.remove_prefix(2);
         if (s.empty()) { return std::nullopt; }
@@ -474,7 +459,7 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return {};
 }
 
-// feature parsing. Parse a leaf "feature: value [= description]" into a FeaturePtr
+// Strip the "dll." prefix from an api value with exactly one dot, keeping ordinals whole
 [[nodiscard]] std::string trim_dll_part(std::string_view api) {
     if (api.find(".#") != std::string_view::npos) { return std::string(api); }
     std::size_t dots = 0;
@@ -487,82 +472,118 @@ collect_string_list(const yaml::Node& seq, std::vector<std::string>& out,
     return std::string(api);
 }
 
-// key has already been split off the YAML mapping value is the raw YAML scalar
-// description, when non-empty, comes from inline "= ..." or a sibling description key
-[[nodiscard]] Expected<FeaturePtr>
-build_feature_leaf(std::string_view key,
-                   std::string_view raw_value,
-                   std::string description,
-                   std::size_t line,
-                   std::size_t column) {
-    auto err = [&](std::string msg) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule, std::move(msg), line, column)};
-    };
+// An invalid-rule error reported at a leaf's position
+[[nodiscard]] Unexpected<PapaError> leaf_error(std::string detail,
+                                               std::size_t line,
+                                               std::size_t column) {
+    return Unexpected{rule_error(ErrorKind::kInvalidRule, std::move(detail), line, column)};
+}
 
-    auto split_for_desc = [&](std::string_view text) -> std::pair<std::string_view, std::string> {
-        std::string desc(description);
-        const auto pos = find_inline_desc_sep(text);
-        std::string_view value = text;
-        if (pos.has_value()) {
-            value = trim(text.substr(0, *pos));
-            std::string_view tail = text.substr(*pos + kInlineDescSep.size());
-            if (desc.empty()) { desc.assign(trim(tail)); }
-        } else {
-            value = trim(text);
-        }
-        return {value, std::move(desc)};
-    };
+// Split an inline " = description" off a leaf value. A sibling description key wins
+[[nodiscard]] std::pair<std::string_view, std::string>
+split_leaf_description(std::string_view text, std::string description) {
+    const auto [value, inline_desc] = ::papa::rules::RuleParser::split_inline_description(text);
+    if (description.empty() && inline_desc.has_value()) { description.assign(*inline_desc); }
+    return {value, std::move(description)};
+}
 
-    // operand[i].number / operand[i].offset
-    if (starts_with(key, "operand[")) {
-        const auto bracket_close = key.find(']');
-        if (bracket_close == std::string_view::npos) {
-            return err(std::string{"malformed operand key: "}.append(key));
-        }
-        const auto idx_str = key.substr(8, bracket_close - 8);
-        const auto idx = parse_size_t(idx_str);
-        if (!idx.has_value() || *idx > 4) {
-            return err(std::string{"operand index out of range: "}.append(key));
-        }
-        const auto kind = key.substr(bracket_close + 1);
-        if (kind == ".number") {
-            auto [v, desc] = split_for_desc(raw_value);
-            auto num = parse_number(v);
-            if (!num) { return Unexpected{num.error()}; }
-            return std::make_shared<const OperandNumber>(*idx, *num, std::move(desc));
-        }
-        if (kind == ".offset") {
-            auto [v, desc] = split_for_desc(raw_value);
-            auto num = parse_number(v);
-            if (!num) { return Unexpected{num.error()}; }
-            std::int64_t off = 0;
-            if (std::holds_alternative<std::int64_t>(*num)) {
-                off = std::get<std::int64_t>(*num);
-            } else if (std::holds_alternative<std::uint64_t>(*num)) {
-                off = static_cast<std::int64_t>(std::get<std::uint64_t>(*num));
-            } else {
-                return err("operand offset cannot be floating point");
-            }
-            return std::make_shared<const OperandOffset>(*idx, off, std::move(desc));
-        }
-        return err(std::string{"unknown operand suffix: "}.append(key));
+// A number as a signed offset, or nullopt when it is floating point
+[[nodiscard]] std::optional<std::int64_t> as_offset(const NumberValue& num) noexcept {
+    if (const auto* i = std::get_if<std::int64_t>(&num)) { return *i; }
+    if (const auto* u = std::get_if<std::uint64_t>(&num)) {
+        return static_cast<std::int64_t>(*u);
     }
+    return std::nullopt;
+}
 
-    // property/read and property/write
-    if (starts_with(key, "property/")) {
-        Property::Access acc = Property::Access::kNone;
-        const auto suffix = key.substr(std::string_view{"property/"}.size());
-        if      (suffix == "read")  { acc = Property::Access::kRead; }
-        else if (suffix == "write") { acc = Property::Access::kWrite; }
-        else {
-            return err(std::string{"unknown property access: "}.append(key));
-        }
-        auto [v, desc] = split_for_desc(raw_value);
-        return std::make_shared<const Property>(std::string(v), acc, std::move(desc));
+// operand[i].number and operand[i].offset, for an operand index up to 4
+[[nodiscard]] Expected<FeaturePtr> operand_leaf(std::string_view key,
+                                                std::string_view value,
+                                                std::string      desc,
+                                                std::size_t      line,
+                                                std::size_t      column) {
+    const auto bracket_close = key.find(']');
+    if (bracket_close == std::string_view::npos) {
+        return leaf_error(std::string{"malformed operand key: "}.append(key), line, column);
     }
+    const auto idx_str = key.substr(8, bracket_close - 8);
+    const auto idx = parse_size_t(idx_str);
+    if (!idx.has_value() || *idx > 4) {
+        return leaf_error(std::string{"operand index out of range: "}.append(key), line, column);
+    }
+    const auto kind = key.substr(bracket_close + 1);
+    if (kind != ".number" && kind != ".offset") {
+        return leaf_error(std::string{"unknown operand suffix: "}.append(key), line, column);
+    }
+    auto num = parse_number(value);
+    if (!num) { return Unexpected{num.error()}; }
+    if (kind == ".number") {
+        return std::make_shared<const OperandNumber>(*idx, *num, std::move(desc));
+    }
+    const auto off = as_offset(*num);
+    if (!off.has_value()) {
+        return leaf_error("operand offset cannot be floating point", line, column);
+    }
+    return std::make_shared<const OperandOffset>(*idx, *off, std::move(desc));
+}
 
-    auto [value, desc] = split_for_desc(raw_value);
+// property/read and property/write
+[[nodiscard]] Expected<FeaturePtr> property_leaf(std::string_view key,
+                                                 std::string_view value,
+                                                 std::string      desc,
+                                                 std::size_t      line,
+                                                 std::size_t      column) {
+    Property::Access acc = Property::Access::kNone;
+    const auto suffix = key.substr(std::string_view{"property/"}.size());
+    if      (suffix == "read")  { acc = Property::Access::kRead; }
+    else if (suffix == "write") { acc = Property::Access::kWrite; }
+    else {
+        return leaf_error(std::string{"unknown property access: "}.append(key), line, column);
+    }
+    return std::make_shared<const Property>(std::string(value), acc, std::move(desc));
+}
 
+// number and offset, where an offset must be integral
+[[nodiscard]] Expected<FeaturePtr> number_leaf(std::string_view key,
+                                               std::string_view value,
+                                               std::string      desc,
+                                               std::size_t      line,
+                                               std::size_t      column) {
+    auto num = parse_number(value);
+    if (!num) { return Unexpected{num.error()}; }
+    if (key == "number") {
+        return std::make_shared<const Number>(*num, std::move(desc));
+    }
+    const auto off = as_offset(*num);
+    if (!off.has_value()) {
+        return leaf_error("offset cannot be floating point", line, column);
+    }
+    return std::make_shared<const Offset>(*off, std::move(desc));
+}
+
+// bytes, a hex literal without wildcards
+[[nodiscard]] Expected<FeaturePtr> bytes_leaf(std::string_view value,
+                                              std::string      desc,
+                                              std::size_t      line,
+                                              std::size_t      column) {
+    auto bl = ::papa::rules::RuleParser::parse_bytes_literal(value);
+    if (!bl) { return Unexpected{bl.error()}; }
+    if (bl->has_wildcards) {
+        return leaf_error("bytes wildcards are not yet supported in v1", line, column);
+    }
+    std::vector<std::byte> bytes;
+    bytes.reserve(bl->pattern.size());
+    for (const auto& opt : bl->pattern) {
+        // pattern entries are non-null when has_wildcards is false
+        bytes.push_back(*opt);
+    }
+    return std::make_shared<const Bytes>(std::move(bytes), std::move(desc));
+}
+
+// The one-string feature a key names, or nullptr when the key names another kind
+[[nodiscard]] FeaturePtr value_leaf(std::string_view key,
+                                    std::string_view value,
+                                    std::string      desc) {
     if (key == "api") {
         return std::make_shared<const Api>(trim_dll_part(value), std::move(desc));
     }
@@ -602,28 +623,10 @@ build_feature_leaf(std::string_view key,
     if (key == "match") {
         return std::make_shared<const MatchedRule>(std::string(value), std::move(desc));
     }
-    if (key == "number") {
-        auto num = parse_number(value);
-        if (!num) { return Unexpected{num.error()}; }
-        return std::make_shared<const Number>(*num, std::move(desc));
-    }
-    if (key == "offset") {
-        auto num = parse_number(value);
-        if (!num) { return Unexpected{num.error()}; }
-        std::int64_t off = 0;
-        if (std::holds_alternative<std::int64_t>(*num)) {
-            off = std::get<std::int64_t>(*num);
-        } else if (std::holds_alternative<std::uint64_t>(*num)) {
-            off = static_cast<std::int64_t>(std::get<std::uint64_t>(*num));
-        } else {
-            return err("offset cannot be floating point");
-        }
-        return std::make_shared<const Offset>(off, std::move(desc));
-    }
     if (key == "string") {
         // /pattern/ or /pattern/i is a regex literal
         if (value.size() >= 2 && value.front() == '/' &&
-            (ends_with(value, "/") || ends_with(value, "/i"))) {
+            (value.ends_with("/") || value.ends_with("/i"))) {
             return std::make_shared<const Regex>(std::string(value), std::move(desc));
         }
         return std::make_shared<const String>(std::string(value), std::move(desc));
@@ -631,22 +634,33 @@ build_feature_leaf(std::string_view key,
     if (key == "substring") {
         return std::make_shared<const Substring>(std::string(value), std::move(desc));
     }
-    if (key == "bytes") {
-        auto bl = ::papa::rules::RuleParser::parse_bytes_literal(value);
-        if (!bl) { return Unexpected{bl.error()}; }
-        if (bl->has_wildcards) {
-            return err("bytes wildcards are not yet supported in v1");
-        }
-        std::vector<std::byte> bytes;
-        bytes.reserve(bl->pattern.size());
-        for (const auto& opt : bl->pattern) {
-            // pattern entries are non-null when has_wildcards is false
-            bytes.push_back(*opt);
-        }
-        return std::make_shared<const Bytes>(std::move(bytes), std::move(desc));
-    }
+    return nullptr;
+}
 
-    return err(std::string{"unknown feature key: "}.append(key));
+// Parse a leaf feature from its key, already split off the YAML mapping, and raw value.
+// description, when non-empty, comes from inline "= ..." or a sibling description key
+[[nodiscard]] Expected<FeaturePtr>
+build_feature_leaf(std::string_view key,
+                   std::string_view raw_value,
+                   std::string description,
+                   std::size_t line,
+                   std::size_t column) {
+    auto [value, desc] = split_leaf_description(raw_value, std::move(description));
+
+    if (key.starts_with("operand[")) {
+        return operand_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key.starts_with("property/")) {
+        return property_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key == "number" || key == "offset") {
+        return number_leaf(key, value, std::move(desc), line, column);
+    }
+    if (key == "bytes") {
+        return bytes_leaf(value, std::move(desc), line, column);
+    }
+    if (auto feat = value_leaf(key, value, std::move(desc))) { return feat; }
+    return leaf_error(std::string{"unknown feature key: "}.append(key), line, column);
 }
 
 // Parse a count(...) feature key
@@ -654,13 +668,13 @@ build_feature_leaf(std::string_view key,
 [[nodiscard]] std::optional<std::pair<std::string_view, std::string_view>>
 split_count_call(std::string_view key) noexcept {
     constexpr std::string_view kPrefix = "count(";
-    if (!starts_with(key, kPrefix)) { return std::nullopt; }
-    if (!ends_with(key, ")"))       { return std::nullopt; }
+    if (!key.starts_with(kPrefix)) { return std::nullopt; }
+    if (!key.ends_with(")"))       { return std::nullopt; }
     auto inner = key.substr(kPrefix.size(), key.size() - kPrefix.size() - 1);
     // inner should look like "api(name)" or "characteristic(loop)" etc
     const auto open = inner.find('(');
     if (open == std::string_view::npos) { return std::nullopt; }
-    if (!ends_with(inner, ")")) { return std::nullopt; }
+    if (!inner.ends_with(")")) { return std::nullopt; }
     auto inner_key   = inner.substr(0, open);
     auto inner_value = inner.substr(open + 1, inner.size() - open - 2);
     return std::make_pair(inner_key, inner_value);
@@ -698,26 +712,14 @@ parse_statement_children(const yaml::Node& seq_node, Scope scope) {
     return out;
 }
 
-// The mapping argument is one item of a top-level features sequence
-// Each item must be a one-key mapping whose key drives the dispatch
-[[nodiscard]] Expected<std::unique_ptr<Statement>>
-parse_statement_item(const yaml::Node& node, Scope scope) {
-    if (node.kind() != yaml::NodeKind::kMapping) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule,
-            "feature item must be a mapping", node.line(), node.column())};
-    }
-    if (node.mapping().empty()) {
-        return Unexpected{rule_error(ErrorKind::kInvalidRule,
-            "feature mapping is empty", node.line(), node.column())};
-    }
+// A parser for one family of statement keys, which returns nullopt for any other key
+using MaybeStatement = std::optional<Expected<std::unique_ptr<Statement>>>;
 
-    // First key drives the dispatch
-    // Sibling keys may carry an out-of-line "description"
-    const auto& first = node.mapping().front();
-    const std::string_view key = first.first;
-    const yaml::Node& value = first.second;
-
-    // operators
+// and, or, not, optional and "N or more", each over a sequence of child statements
+[[nodiscard]] MaybeStatement parse_operator(std::string_view  key,
+                                            const yaml::Node& node,
+                                            const yaml::Node& value,
+                                            Scope             scope) {
     if (key == "and") {
         auto kids = parse_statement_children(value, scope);
         if (!kids) { return Unexpected{kids.error()}; }
@@ -743,93 +745,108 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
         return std::make_unique<Some>(0, std::move(*kids));
     }
     // "N or more"
-    {
-        const auto pos = key.rfind(" or more");
-        if (pos != std::string_view::npos && pos + std::string_view{" or more"}.size() == key.size()) {
-            const auto n = parse_size_t(key.substr(0, pos));
-            if (!n.has_value()) {
-                return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                    std::string{"malformed N-or-more: "}.append(key),
-                    node.line(), node.column())};
-            }
-            auto kids = parse_statement_children(value, scope);
-            if (!kids) { return Unexpected{kids.error()}; }
-            return std::make_unique<Some>(*n, std::move(*kids));
-        }
-    }
-
-    // subscope nodes
-    auto subscope_kind = [&]() -> std::optional<Scope> {
-        if (key == "basic block")     return Scope::kBasicBlock;
-        if (key == "instruction")     return Scope::kInstruction;
-        if (key == "function")        return Scope::kFunction;
-        if (key == "call")            return Scope::kCall;
-        if (key == "process")         return Scope::kProcess;
-        if (key == "thread")          return Scope::kThread;
-        if (key == "span of calls")   return Scope::kSpanOfCalls;
+    const auto pos = key.rfind(" or more");
+    if (pos == std::string_view::npos || pos + std::string_view{" or more"}.size() != key.size()) {
         return std::nullopt;
-    }();
-    if (subscope_kind.has_value()) {
-        // Inner statements are evaluated at the subscope's scope, not the parent's
-        auto kids = parse_statement_children(value, *subscope_kind);
-        if (!kids) { return Unexpected{kids.error()}; }
-        std::unique_ptr<Statement> inner;
-        if (kids->size() == 1) {
-            inner = std::move(kids->front());
-        } else {
-            inner = std::make_unique<And>(std::move(*kids));
-        }
-        return std::make_unique<Subscope>(*subscope_kind, std::move(inner));
+    }
+    const auto n = parse_size_t(key.substr(0, pos));
+    if (!n.has_value()) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"malformed N-or-more: "}.append(key),
+            node.line(), node.column())};
+    }
+    auto kids = parse_statement_children(value, scope);
+    if (!kids) { return Unexpected{kids.error()}; }
+    return std::make_unique<Some>(*n, std::move(*kids));
+}
+
+// The scope a subscope key opens, or nullopt for any other key
+[[nodiscard]] std::optional<Scope> subscope_scope(std::string_view key) noexcept {
+    if (key == "basic block")     return Scope::kBasicBlock;
+    if (key == "instruction")     return Scope::kInstruction;
+    if (key == "function")        return Scope::kFunction;
+    if (key == "call")            return Scope::kCall;
+    if (key == "process")         return Scope::kProcess;
+    if (key == "thread")          return Scope::kThread;
+    if (key == "span of calls")   return Scope::kSpanOfCalls;
+    return std::nullopt;
+}
+
+// A subscope block, one child or an implicit and of several
+[[nodiscard]] MaybeStatement parse_subscope(std::string_view key, const yaml::Node& value) {
+    const auto subscope_kind = subscope_scope(key);
+    if (!subscope_kind.has_value()) { return std::nullopt; }
+
+    // Inner statements are evaluated at the subscope's scope, not the parent's
+    auto kids = parse_statement_children(value, *subscope_kind);
+    if (!kids) { return Unexpected{kids.error()}; }
+    std::unique_ptr<Statement> inner;
+    if (kids->size() == 1) {
+        inner = std::move(kids->front());
+    } else {
+        inner = std::make_unique<And>(std::move(*kids));
+    }
+    return std::make_unique<Subscope>(*subscope_kind, std::move(inner));
+}
+
+// com/class and com/interface expand into Or(Bytes(le_guid), String(canonical_guid))
+// The lookup tables live in com_classes.cpp and com_interfaces.cpp
+[[nodiscard]] MaybeStatement parse_com(std::string_view  key,
+                                       const yaml::Node& node,
+                                       const yaml::Node& value,
+                                       Scope             scope) {
+    if (key != "com/class" && key != "com/interface") { return std::nullopt; }
+
+    if (value.kind() != yaml::NodeKind::kScalar) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"'"}.append(key).append("' value must be scalar"),
+            value.line(), value.column())};
+    }
+    const auto split_pair = ::papa::rules::RuleParser::split_inline_description(
+        value.scalar());
+    const std::string_view name_part = split_pair.first;
+    const std::string desc_str(split_pair.second.has_value()
+        ? std::string(*split_pair.second)
+        : std::string{});
+
+    const ComKind com_kind = (key == "com/class") ? ComKind::kClass : ComKind::kInterface;
+    const ComEntry* entry  = ::papa::rules::lookup_com(com_kind, name_part);
+    if (entry == nullptr) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"unknown COM "}
+                .append(com_kind == ComKind::kClass ? "class" : "interface")
+                .append(" name: ").append(name_part),
+            value.line(), value.column())};
     }
 
-    // com/class and com/interface expand into Or(Bytes(le_guid), String(canonical_guid))
-    // The lookup tables live in com_classes.cpp and com_interfaces.cpp
-    if (key == "com/class" || key == "com/interface") {
-        if (value.kind() != yaml::NodeKind::kScalar) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"'"}.append(key).append("' value must be scalar"),
-                value.line(), value.column())};
-        }
-        const auto split_pair = ::papa::rules::RuleParser::split_inline_description(
-            value.scalar());
-        const std::string_view name_part = split_pair.first;
-        const std::string desc_str(split_pair.second.has_value()
-            ? std::string(*split_pair.second)
-            : std::string{});
-
-        const ComKind com_kind = (key == "com/class") ? ComKind::kClass : ComKind::kInterface;
-        const ComEntry* entry  = ::papa::rules::lookup_com(com_kind, name_part);
-        if (entry == nullptr) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"unknown COM "}
-                    .append(com_kind == ComKind::kClass ? "class" : "interface")
-                    .append(" name: ").append(name_part),
-                value.line(), value.column())};
-        }
-
-        // Both child features must be valid at the rule's scope
-        // String is universally allowed and Bytes bubbles up from instruction scope
-        if (!is_feature_allowed(FeatureTag::kBytes,  scope) ||
-            !is_feature_allowed(FeatureTag::kString, scope)) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"'"}.append(key).append("' not allowed at scope ")
-                    .append(::papa::rules::to_string(scope)),
-                node.line(), node.column())};
-        }
-
-        std::vector<std::byte> bytes_value(entry->guid_bytes.begin(),
-                                           entry->guid_bytes.end());
-        auto bytes_feat  = std::make_shared<const Bytes>(std::move(bytes_value), desc_str);
-        auto string_feat = std::make_shared<const String>(
-            std::string(entry->guid_string), desc_str);
-
-        std::vector<std::unique_ptr<Statement>> kids;
-        kids.reserve(2);
-        kids.push_back(std::make_unique<FeatureStatement>(std::move(bytes_feat)));
-        kids.push_back(std::make_unique<FeatureStatement>(std::move(string_feat)));
-        return std::make_unique<Or>(std::move(kids));
+    // Both child features must be valid at the rule's scope
+    // String is universally allowed and Bytes bubbles up from instruction scope
+    if (!is_feature_allowed(FeatureTag::kBytes,  scope) ||
+        !is_feature_allowed(FeatureTag::kString, scope)) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"'"}.append(key).append("' not allowed at scope ")
+                .append(::papa::rules::to_string(scope)),
+            node.line(), node.column())};
     }
 
+    std::vector<std::byte> bytes_value(entry->guid_bytes.begin(),
+                                       entry->guid_bytes.end());
+    auto bytes_feat  = std::make_shared<const Bytes>(std::move(bytes_value), desc_str);
+    auto string_feat = std::make_shared<const String>(
+        std::string(entry->guid_string), desc_str);
+
+    std::vector<std::unique_ptr<Statement>> kids;
+    kids.reserve(2);
+    kids.push_back(std::make_unique<FeatureStatement>(std::move(bytes_feat)));
+    kids.push_back(std::make_unique<FeatureStatement>(std::move(string_feat)));
+    return std::make_unique<Or>(std::move(kids));
+}
+
+// count(basic blocks) and count(feature(value)), each bounded by a scalar range
+[[nodiscard]] MaybeStatement parse_count(std::string_view  key,
+                                         const yaml::Node& node,
+                                         const yaml::Node& value,
+                                         Scope             scope) {
     // count(basic blocks) or count(basic block) is a tag form CAPA rules use to set a
     // numeric bound on the number of basic blocks in the function
     if (key == "count(basic blocks)" || key == "count(basic block)") {
@@ -845,29 +862,34 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
     }
 
     // count(feature(value))
-    if (auto split = split_count_call(key); split.has_value()) {
-        const auto& [inner_key, inner_value] = *split;
-        if (value.kind() != yaml::NodeKind::kScalar) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                "count(...) value must be a scalar range",
-                value.line(), value.column())};
-        }
-        auto rng = ::papa::rules::RuleParser::parse_count_range(value.scalar());
-        if (!rng) { return Unexpected{rng.error()}; }
-        auto feat = build_feature_leaf(inner_key, inner_value, std::string{},
-                                       node.line(), node.column());
-        if (!feat) { return Unexpected{feat.error()}; }
-        if (!is_feature_allowed((*feat)->tag(), scope)) {
-            return Unexpected{rule_error(ErrorKind::kInvalidRule,
-                std::string{"feature in count(): "}.append(inner_key)
-                    .append(" not allowed at scope ")
-                    .append(::papa::rules::to_string(scope)),
-                node.line(), node.column())};
-        }
-        return std::make_unique<Range>(std::move(*feat), rng->min, rng->max);
+    const auto split = split_count_call(key);
+    if (!split.has_value()) { return std::nullopt; }
+    const auto& [inner_key, inner_value] = *split;
+    if (value.kind() != yaml::NodeKind::kScalar) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "count(...) value must be a scalar range",
+            value.line(), value.column())};
     }
+    auto rng = ::papa::rules::RuleParser::parse_count_range(value.scalar());
+    if (!rng) { return Unexpected{rng.error()}; }
+    auto feat = build_feature_leaf(inner_key, inner_value, std::string{},
+                                   node.line(), node.column());
+    if (!feat) { return Unexpected{feat.error()}; }
+    if (!is_feature_allowed((*feat)->tag(), scope)) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            std::string{"feature in count(): "}.append(inner_key)
+                .append(" not allowed at scope ")
+                .append(::papa::rules::to_string(scope)),
+            node.line(), node.column())};
+    }
+    return std::make_unique<Range>(std::move(*feat), rng->min, rng->max);
+}
 
-    // leaf feature
+// A leaf feature with an optional sibling description, checked against the rule's scope
+[[nodiscard]] Expected<std::unique_ptr<Statement>> parse_leaf(std::string_view  key,
+                                                              const yaml::Node& node,
+                                                              const yaml::Node& value,
+                                                              Scope             scope) {
     if (value.kind() != yaml::NodeKind::kScalar) {
         return Unexpected{rule_error(ErrorKind::kInvalidRule,
             std::string{"feature '"}.append(key).append("' expects a scalar value"),
@@ -913,6 +935,32 @@ parse_statement_item(const yaml::Node& node, Scope scope) {
         }
     }
     return std::make_unique<FeatureStatement>(std::move(*feat));
+}
+
+// The mapping argument is one item of a top-level features sequence
+// Each item must be a one-key mapping whose key drives the dispatch
+[[nodiscard]] Expected<std::unique_ptr<Statement>>
+parse_statement_item(const yaml::Node& node, Scope scope) {
+    if (node.kind() != yaml::NodeKind::kMapping) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "feature item must be a mapping", node.line(), node.column())};
+    }
+    if (node.mapping().empty()) {
+        return Unexpected{rule_error(ErrorKind::kInvalidRule,
+            "feature mapping is empty", node.line(), node.column())};
+    }
+
+    // First key drives the dispatch
+    // Sibling keys may carry an out-of-line "description"
+    const auto& first = node.mapping().front();
+    const std::string_view key = first.first;
+    const yaml::Node& value = first.second;
+
+    if (auto st = parse_operator(key, node, value, scope)) { return std::move(*st); }
+    if (auto st = parse_subscope(key, value))              { return std::move(*st); }
+    if (auto st = parse_com(key, node, value, scope))      { return std::move(*st); }
+    if (auto st = parse_count(key, node, value, scope))    { return std::move(*st); }
+    return parse_leaf(key, node, value, scope);
 }
 
 [[nodiscard]] Expected<std::unique_ptr<Statement>>
@@ -1051,7 +1099,7 @@ RuleParser::parse_count_range(std::string_view text) {
     }
 
     // "N or more"
-    if (ends_with(t, " or more")) {
+    if (t.ends_with(" or more")) {
         const auto head = t.substr(0, t.size() - std::string_view{" or more"}.size());
         const auto n = parse_size_t(head);
         if (!n.has_value()) {
@@ -1061,7 +1109,7 @@ RuleParser::parse_count_range(std::string_view text) {
     }
 
     // "N or fewer" is the inclusive upper-bound dual of "N or more"
-    if (ends_with(t, " or fewer")) {
+    if (t.ends_with(" or fewer")) {
         const auto head = t.substr(0, t.size() - std::string_view{" or fewer"}.size());
         const auto n = parse_size_t(head);
         if (!n.has_value()) {

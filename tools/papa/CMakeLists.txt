@@ -16,9 +16,9 @@ target_link_libraries(papa_cli
 # not the static lib, because registry() locks them from the running module.
 if(MSVC)
     target_sources(papa_cli PRIVATE
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
     set_source_files_properties(
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
         PROPERTIES COMPILE_OPTIONS
-        "/I${CMAKE_SOURCE_DIR}/third_party/flirt_sigs")
+        "/I${PROJECT_SOURCE_DIR}/third_party/flirt_sigs")
 endif()

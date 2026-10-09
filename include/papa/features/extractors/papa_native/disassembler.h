@@ -35,7 +35,6 @@ struct DecodedOperand {
     std::uint8_t  scale         { 0 };
     std::int64_t  disp          { 0 };
     std::uint64_t imm           { 0 };
-    bool          is_signed_imm { false };
     std::size_t   width_bytes   { 0 };
     // True when this memory operand was encoded with a SIB byte
     bool          sib_encoded   { false };
@@ -82,14 +81,12 @@ public:
     [[nodiscard]] static std::string_view
         mnemonic_to_string(ZydisMnemonic m) noexcept;
 
-    // ESP/EBP or RSP/RBP per width
-    // Used to suppress stack-frame false positives in feature extraction
-    [[nodiscard]] std::span<const ZydisRegister>
-        stack_registers() const noexcept;
-
 private:
     ZydisDecoder decoder_ {};
     bool         is_64bit_ { false };
 };
+
+/// True when reg, at any width, is the stack or frame pointer for the given bitness
+[[nodiscard]] bool is_stack_reg(ZydisRegister reg, bool is_64bit) noexcept;
 
 }  // namespace papa::features::extractors::papa_native

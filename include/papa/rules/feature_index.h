@@ -2,7 +2,6 @@
 
 #include "papa/features/feature.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <unordered_map>
@@ -22,9 +21,6 @@ public:
     /// to build, so the caller's topological guarantees still hold
     void select(const features::FeatureSet& fs, std::vector<const Rule*>& out) const;
 
-    [[nodiscard]] std::size_t rule_count() const noexcept { return order_.size(); }
-    [[nodiscard]] std::size_t indexed_count() const noexcept { return indexed_count_; }
-
 private:
     using FeatureToRules = std::unordered_map<features::FeaturePtr,
                                               std::vector<std::uint32_t>,
@@ -34,7 +30,6 @@ private:
     std::vector<const Rule*>   order_;
     std::vector<std::uint8_t>  always_run_;
     FeatureToRules             by_feature_;
-    std::size_t                indexed_count_{0};
 };
 
 }  // namespace papa::rules

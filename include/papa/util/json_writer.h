@@ -42,7 +42,7 @@ private:
     void newline_and_indent();
     void emit_escaped_string(std::string_view s);
 
-    std::ostream*           out_;
+    std::ostream*           out_{nullptr};
     bool                    pretty_;
     std::vector<Context>    stack_;
     bool                    need_comma_{false};   // true if next value needs a leading comma

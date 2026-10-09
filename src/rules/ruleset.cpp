@@ -5,6 +5,7 @@
 #include "papa/features/address.h"
 #include "papa/features/common.h"
 #include "papa/features/feature.h"
+#include "papa/rules/embedded.h"
 #include "papa/rules/optimizer.h"
 #include "papa/rules/parser.h"
 #include "papa/rules/rule.h"
@@ -32,8 +33,6 @@ namespace papa::rules {
 
 namespace {
 
-template <typename T>
-using Expected = ::papa::Expected<T>;
 using ::papa::ErrorKind;
 using ::papa::Unexpected;
 
@@ -44,13 +43,14 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
                           std::vector<std::unique_ptr<Rule>>& spawned) {
     if (slot == nullptr) { return; }
 
-    if (auto* sub = dynamic_cast<engine::Subscope*>(slot.get()); sub != nullptr) {
+    if (slot->kind() == engine::StatementKind::kSubscope) {
+        auto& sub = static_cast<engine::Subscope&>(*slot);
         std::string syn_name(parent_name);
         syn_name.push_back('/');
         syn_name.append(std::to_string(counter++));
 
-        const Scope inner_scope = sub->scope();
-        auto        inner       = sub->take_inner();
+        const Scope inner_scope = sub.scope();
+        auto        inner       = sub.take_inner();
 
         // Recurse into the new rule's inner tree before adopting it. A fresh counter rooted
         // at the new name keeps synthetic names unique and reproducible
@@ -78,28 +78,22 @@ void extract_subscopes_in(std::unique_ptr<engine::Statement>& slot,
     }
 }
 
-// Collect every MatchedRule name referenced anywhere in the statement tree
-// Both leaf FeatureStatement nodes and Range nodes can wrap a MatchedRule
-void collect_match_names(const engine::Statement& s, std::vector<std::string>& out) {
-    if (const auto* fs = dynamic_cast<const engine::FeatureStatement*>(&s); fs != nullptr) {
-        const auto& feat = fs->feature();
-        if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
-            const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
-            out.emplace_back(mr->rule_name());
+// Parse each (path, text) rule file and build the set from the result
+template <typename RuleFiles>
+[[nodiscard]] Expected<RuleSet> parse_rule_files(const RuleFiles& files) {
+    std::vector<std::unique_ptr<Rule>> parsed;
+    for (const auto& [path, text] : files) {
+        auto r = RuleParser::parse(text, path);
+        if (!r) {
+            // Tolerate per-file parse failures so a single malformed rule does not
+            // block the whole corpus from loading
+            std::cerr << "warning: skipping rule " << path
+                      << ": " << r.error().detail << '\n';
+            continue;
         }
+        parsed.push_back(std::move(*r));
     }
-    if (const auto* range = dynamic_cast<const engine::Range*>(&s); range != nullptr) {
-        const auto& feat = range->feature();
-        if (feat && feat->tag() == features::FeatureTag::kMatchedRule) {
-            const auto* mr = static_cast<const features::MatchedRule*>(feat.get());
-            out.emplace_back(mr->rule_name());
-        }
-    }
-    for (const auto& child : s.children()) {
-        if (child) {
-            collect_match_names(*child, out);
-        }
-    }
+    return RuleSet::from_rules(std::move(parsed));
 }
 
 }  // namespace
@@ -227,7 +221,7 @@ Expected<void> RuleSet::validate_dependencies() {
     for (auto& r : rules_) {
         if (r == nullptr) { continue; }
         std::vector<std::string> refs;
-        collect_match_names(r->statement(), refs);
+        engine::collect_match_refs(r->statement(), refs);
         bool ok = true;
         for (const auto& ref : refs) {
             if (by_name_.find(ref) != by_name_.end())      { continue; }
@@ -267,7 +261,7 @@ Expected<void> RuleSet::topologically_sort() {
 
         for (const Rule* r : group) {
             std::vector<std::string> refs;
-            collect_match_names(r->statement(), refs);
+            engine::collect_match_refs(r->statement(), refs);
 
             std::unordered_set<const Rule*> deps_for_r;
             for (const auto& ref : refs) {
@@ -331,7 +325,7 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
             std::string{"rules path is not a directory: "}.append(dir.string()))};
     }
 
-    std::vector<std::unique_ptr<Rule>> parsed;
+    std::vector<std::pair<std::string, std::string>> files;
 
     fs::recursive_directory_iterator it(dir, ec);
     if (ec) {
@@ -360,20 +354,15 @@ Expected<RuleSet> RuleSet::from_directory(const std::filesystem::path& dir) {
         }
         std::stringstream buf;
         buf << ifs.rdbuf();
-        const std::string content = buf.str();
-
-        auto r = RuleParser::parse(content, entry.path().string());
-        if (!r) {
-            // Tolerate per-file parse failures so a single malformed rule does not
-            // block the whole corpus from loading
-            std::cerr << "warning: skipping rule " << entry.path().string()
-                      << ": " << r.error().detail << '\n';
-            continue;
-        }
-        parsed.push_back(std::move(*r));
+        files.emplace_back(entry.path().string(), buf.str());
     }
 
-    return from_rules(std::move(parsed));
+    return parse_rule_files(files);
+}
+
+// compiled-in entry point
+Expected<RuleSet> RuleSet::from_embedded() {
+    return parse_rule_files(embedded_rules());
 }
 
 }  // namespace papa::rules

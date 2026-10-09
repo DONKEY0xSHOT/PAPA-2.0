@@ -10,7 +10,6 @@ namespace papa::constants {
 // PE signatures
 inline constexpr std::uint16_t kImageDosSignature       = 0x5A4D;       // "MZ"
 inline constexpr std::uint32_t kImageNtSignature        = 0x00004550;   // "PE\0\0"
-inline constexpr std::uint32_t kElfSignature            = 0x464C457F;   // "\x7FELF" LE
 
 // PE header offsets
 inline constexpr std::uint32_t kImageDosEofLfanewOffset = 0x3C;
@@ -30,8 +29,6 @@ inline constexpr std::size_t   kImageSizeofShortName    = 8;
 // Data directory indices
 inline constexpr std::uint32_t kImageDirectoryEntryExport        = 0;
 inline constexpr std::uint32_t kImageDirectoryEntryImport        = 1;
-inline constexpr std::uint32_t kImageDirectoryEntryResource      = 2;
-inline constexpr std::uint32_t kImageDirectoryEntryException     = 3;
 inline constexpr std::uint32_t kImageDirectoryEntryBaseReloc     = 5;
 inline constexpr std::uint32_t kImageDirectoryEntryTls           = 9;
 inline constexpr std::uint32_t kImageDirectoryEntryDelayImport   = 13;
@@ -39,7 +36,6 @@ inline constexpr std::uint32_t kImageNumberOfDirectoryEntries    = 16;
 
 // Section characteristics
 inline constexpr std::uint32_t kImageScnMemRead     = 0x40000000u;
-inline constexpr std::uint32_t kImageScnMemWrite    = 0x80000000u;
 inline constexpr std::uint32_t kImageScnMemExecute  = 0x20000000u;
 
 // Import ordinal flags
@@ -55,7 +51,6 @@ inline constexpr std::array<std::string_view, 3> kDllExtensions { ".dll", ".drv"
 inline constexpr std::size_t   kMaxBytesFeatureSize  = 0x100;
 inline constexpr std::uint32_t kMaxStructureSize     = 0x10000;
 inline constexpr std::size_t   kMaxOperandCount      = 5;
-inline constexpr std::size_t   kMaxOperandIndex      = kMaxOperandCount - 1;
 inline constexpr std::size_t   kMinStringLength      = 4;
 
 // CFG recovery caps act as trip-wires against crafted inputs. kMaxInsnsPerFunction
@@ -109,32 +104,20 @@ inline constexpr std::size_t   kEndbranchSkipLen        = 4;
 // RUNTIME_FUNCTION record size (x64 .pdata entry)
 inline constexpr std::size_t   kRuntimeFunctionSize  = 12;
 
-// String constants used by the renderer to label per-image platform. CAPA's report
-// schema uses these literal lowercase tags
+// CAPA's lowercase spellings of the os, arch and format values, shared by the feature
+// extractors and the report metadata
 namespace os_value {
 inline constexpr std::string_view kWindows = "windows";
-inline constexpr std::string_view kLinux   = "linux";
-inline constexpr std::string_view kMacos   = "macos";
-inline constexpr std::string_view kAndroid = "android";
-inline constexpr std::string_view kAny     = "any";
-inline constexpr std::string_view kAuto    = "auto";
 }  // namespace os_value
 
 namespace arch_value {
 inline constexpr std::string_view kI386    = "i386";
 inline constexpr std::string_view kAmd64   = "amd64";
 inline constexpr std::string_view kAarch64 = "aarch64";
-inline constexpr std::string_view kAny     = "any";
 }  // namespace arch_value
 
 namespace format_value {
 inline constexpr std::string_view kPe      = "pe";
-inline constexpr std::string_view kElf     = "elf";
-inline constexpr std::string_view kDotnet  = "dotnet";
-inline constexpr std::string_view kAuto    = "auto";
-inline constexpr std::string_view kSc32    = "sc32";
-inline constexpr std::string_view kSc64    = "sc64";
-inline constexpr std::string_view kUnknown = "unknown";
 }  // namespace format_value
 
 }  // namespace papa::constants

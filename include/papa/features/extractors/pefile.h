@@ -1,16 +1,11 @@
 #pragma once
 
-#include "papa/features/address.h"
-#include "papa/features/feature.h"
+#include "papa/features/extractors/base_extractor.h"
 #include "papa/pe/pe_image.h"
 
-#include <utility>
 #include <vector>
 
 namespace papa::features::extractors::pefile {
-
-// Pair returned by every extractor: the feature and the location it applies to
-using FeatureWithAddress = std::pair<features::FeaturePtr, features::Address>;
 
 // Format("pe") at NoAddress
 [[nodiscard]] std::vector<FeatureWithAddress>

@@ -3,21 +3,18 @@
 #include "papa/exceptions.h"
 #include "papa/features/address.h"
 #include "papa/features/extractors/base_extractor.h"
+#include "papa/features/extractors/global_.h"
 #include "papa/features/extractors/pefile.h"
 #include "papa/features/extractors/papa_native/backend.h"
 #include "papa/features/extractors/papa_native/basic_block.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_classifier.h"
-#include "papa/features/extractors/papa_native/flirt/flirt_matcher.h"
 #include "papa/features/extractors/papa_native/function.h"
-#include "papa/features/extractors/papa_native/global_.h"
 #include "papa/features/extractors/papa_native/insn.h"
+#include "papa/pe/pe_image.h"
 
 #include <cstdint>
-#include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <utility>
 #include <variant>
@@ -67,8 +64,15 @@ insn_from_handle(const base::InsnHandle& ih) {
     return *static_cast<const DecodedInsn*>(ih.inner);
 }
 
-[[nodiscard]] features::Address va_addr(std::uint64_t va) noexcept {
-    return features::Address{features::AbsoluteVirtualAddress{va}};
+// Move one optional feature, or a batch of features, onto the end of out
+void append(std::vector<base::FeatureWithAddress>&   out,
+            std::optional<base::FeatureWithAddress>&& one) {
+    if (one.has_value()) { out.push_back(std::move(*one)); }
+}
+
+void append(std::vector<base::FeatureWithAddress>&  out,
+            std::vector<base::FeatureWithAddress>&& many) {
+    for (auto& fa : many) { out.push_back(std::move(fa)); }
 }
 
 }  // namespace
@@ -82,27 +86,17 @@ PapaNativeStaticExtractor::PapaNativeStaticExtractor(PapaNativeBackend backend)
 }
 
 features::Address PapaNativeStaticExtractor::get_base_address() const {
-    return va_addr(backend_.image().image_base());
+    return va_address(backend_.image().image_base());
 }
 
 std::vector<base::FeatureWithAddress>
 PapaNativeStaticExtractor::extract_global_features() const {
-    auto src = ::papa::features::extractors::papa_native::extract_global_features(
-        backend_.image());
-    std::vector<base::FeatureWithAddress> out;
-    out.reserve(src.size());
-    for (auto& fa : src) { out.push_back(std::move(fa)); }
-    return out;
+    return base::extract_global_features(backend_.image());
 }
 
 std::vector<base::FeatureWithAddress>
 PapaNativeStaticExtractor::extract_file_features() const {
-    auto src = ::papa::features::extractors::pefile::extract_file_features(
-        backend_.image());
-    std::vector<base::FeatureWithAddress> out;
-    out.reserve(src.size());
-    for (auto& fa : src) { out.push_back(std::move(fa)); }
-    return out;
+    return pefile::extract_file_features(backend_.image());
 }
 
 std::vector<base::FunctionHandle>
@@ -112,7 +106,7 @@ PapaNativeStaticExtractor::get_functions() const {
     out.reserve(funcs.size());
     for (const auto& fn : funcs) {
         base::FunctionHandle fh;
-        fh.addr  = va_addr(fn.va);
+        fh.addr  = va_address(fn.va);
         fh.inner = static_cast<const void*>(&fn);
         out.push_back(fh);
     }
@@ -129,12 +123,7 @@ PapaNativeStaticExtractor::extract_function_features(
             symbol = it->second;
         }
     }
-    auto src = ::papa::features::extractors::papa_native::function_::
-        extract_function_features(fn, symbol);
-    std::vector<base::FeatureWithAddress> out;
-    out.reserve(src.size());
-    for (auto& fa : src) { out.push_back(std::move(fa)); }
-    return out;
+    return function_::extract_function_features(fn, symbol);
 }
 
 std::vector<base::BBHandle>
@@ -144,7 +133,7 @@ PapaNativeStaticExtractor::get_basic_blocks(const base::FunctionHandle& fh) cons
     out.reserve(fn.basic_blocks.size());
     for (const auto& bb : fn.basic_blocks) {
         base::BBHandle bbh;
-        bbh.addr  = va_addr(bb.va);
+        bbh.addr  = va_address(bb.va);
         bbh.inner = static_cast<const void*>(&bb);
         out.push_back(bbh);
     }
@@ -156,12 +145,7 @@ PapaNativeStaticExtractor::extract_basic_block_features(
     const base::FunctionHandle& /*fh*/,
     const base::BBHandle&       bbh) const {
     const BasicBlock& bb = basic_block_from_handle(bbh);
-    auto src = ::papa::features::extractors::papa_native::basic_block::
-        extract_basic_block_features(bb, backend_.image().is_64bit());
-    std::vector<base::FeatureWithAddress> out;
-    out.reserve(src.size());
-    for (auto& fa : src) { out.push_back(std::move(fa)); }
-    return out;
+    return basic_block::extract_basic_block_features(bb, backend_.image().is_64bit());
 }
 
 std::vector<base::InsnHandle>
@@ -172,7 +156,7 @@ PapaNativeStaticExtractor::get_instructions(const base::FunctionHandle& /*fh*/,
     out.reserve(bb.instructions.size());
     for (const auto& ins : bb.instructions) {
         base::InsnHandle ih;
-        ih.addr  = va_addr(ins.va);
+        ih.addr  = va_address(ins.va);
         ih.inner = static_cast<const void*>(&ins);
         out.push_back(ih);
     }
@@ -184,66 +168,34 @@ PapaNativeStaticExtractor::extract_insn_features(
     const base::FunctionHandle& fh,
     const base::BBHandle&       bbh,
     const base::InsnHandle&     ih) const {
-    const Function&     fn       = function_from_handle(fh);
-    const BasicBlock&   bb       = basic_block_from_handle(bbh);
-    const DecodedInsn&  ins      = insn_from_handle(ih);
-    const bool          is_64bit = backend_.image().is_64bit();
+    const Function&            fn       = function_from_handle(fh);
+    const BasicBlock&          bb       = basic_block_from_handle(bbh);
+    const DecodedInsn&         ins      = insn_from_handle(ih);
+    const ::papa::pe::PeImage& image    = backend_.image();
+    const bool                 is_64bit = image.is_64bit();
 
     std::vector<base::FeatureWithAddress> out;
     out.reserve(8U);
 
     // Per-scope extractors are aggregated here in a fixed order so output is
     // deterministic across runs
-    if (auto m = ::papa::features::extractors::papa_native::insn::extract_mnemonic(ins);
-        m.has_value()) { out.push_back(std::move(*m)); }
-    if (auto c = ::papa::features::extractors::papa_native::insn::extract_call_plus_5(ins);
-        c.has_value()) { out.push_back(std::move(*c)); }
-    if (auto i = ::papa::features::extractors::papa_native::insn::extract_indirect_call(ins);
-        i.has_value()) { out.push_back(std::move(*i)); }
-    {
-        auto seg = ::papa::features::extractors::papa_native::insn::extract_segment_access(ins);
-        for (auto& fa : seg) { out.push_back(std::move(fa)); }
-    }
-    if (auto p = ::papa::features::extractors::papa_native::insn::extract_peb_access(ins, is_64bit);
-        p.has_value()) { out.push_back(std::move(*p)); }
-    if (auto cs = ::papa::features::extractors::papa_native::insn::extract_cross_section_flow(
-            ins, backend_.image(), backend_.imports());
-        cs.has_value()) { out.push_back(std::move(*cs)); }
-    if (auto nz = ::papa::features::extractors::papa_native::insn::extract_nzxor(
-            fn, bb, ins, is_64bit);
-        nz.has_value()) { out.push_back(std::move(*nz)); }
-    {
-        auto bytes = ::papa::features::extractors::papa_native::insn::extract_bytes(
-            ins, backend_.image());
-        for (auto& fa : bytes) { out.push_back(std::move(fa)); }
-    }
-    {
-        auto nums = ::papa::features::extractors::papa_native::insn::extract_number(
-            ins, backend_.image());
-        for (auto& fa : nums) { out.push_back(std::move(fa)); }
-    }
-    {
-        auto offs = ::papa::features::extractors::papa_native::insn::extract_offset(
-            ins, backend_.image());
-        for (auto& fa : offs) { out.push_back(std::move(fa)); }
-    }
-    {
-        auto strs = ::papa::features::extractors::papa_native::insn::extract_string(
-            ins, backend_.image());
-        for (auto& fa : strs) { out.push_back(std::move(fa)); }
-    }
-    {
-        auto apis = ::papa::features::extractors::papa_native::insn::extract_api_features(
-            fn, bb, ins, backend_.image(), backend_.imports(), backend_.disassembler());
-        for (auto& fa : apis) { out.push_back(std::move(fa)); }
-    }
-    {
-        // capa also emits an api feature for a direct call to a statically linked library
-        // function FLIRT identified, such as _beginthreadex, which is not an import
-        auto flirt_apis = ::papa::features::extractors::papa_native::insn::extract_flirt_call_api(
-            ins, [this](std::uint64_t va) { return flirt_name_at(va); });
-        for (auto& fa : flirt_apis) { out.push_back(std::move(fa)); }
-    }
+    append(out, insn::extract_mnemonic(ins));
+    append(out, insn::extract_call_plus_5(ins));
+    append(out, insn::extract_indirect_call(ins));
+    append(out, insn::extract_segment_access(ins));
+    append(out, insn::extract_peb_access(ins, is_64bit));
+    append(out, insn::extract_cross_section_flow(ins, image, backend_.imports()));
+    append(out, insn::extract_nzxor(fn, bb, ins, is_64bit));
+    append(out, insn::extract_bytes(ins, image));
+    append(out, insn::extract_number(ins, image));
+    append(out, insn::extract_offset(ins, image));
+    append(out, insn::extract_string(ins, image));
+    append(out, insn::extract_api_features(
+        fn, ins, image, backend_.imports(), backend_.disassembler()));
+    // capa also emits an api feature for a direct call to a statically linked library
+    // function FLIRT identified, such as _beginthreadex, which is not an import
+    append(out, insn::extract_flirt_call_api(
+        ins, [this](std::uint64_t va) { return flirt_name_at(va); }));
     return out;
 }
 
@@ -257,11 +209,8 @@ bool PapaNativeStaticExtractor::is_library_function(
     if (it == function_index_.end()) { return false; }
     const Function& fn = backend_.functions()[it->second];
 
-    // CFG-derived hint takes precedence when the recovery layer set it
-    if (fn.likely_library) { return true; }
-
     // Structural thunks are library code regardless of any signature
-    if (LibrarySignatureSet::is_thunk(fn)) { return true; }
+    if (function_::is_thunk(fn)) { return true; }
 
     // FLIRT identified the library functions during analysis, so this is a lookup into
     // that result rather than a second matching pass
@@ -283,10 +232,6 @@ PapaNativeStaticExtractor::get_function_name(const features::Address& addr) cons
     auto it = function_names_.find(*va);
     if (it == function_names_.end()) { return std::nullopt; }
     return it->second;
-}
-
-void PapaNativeStaticExtractor::set_function_name(std::uint64_t va, std::string name) {
-    function_names_.insert_or_assign(va, std::move(name));
 }
 
 }  // namespace papa::features::extractors::papa_native

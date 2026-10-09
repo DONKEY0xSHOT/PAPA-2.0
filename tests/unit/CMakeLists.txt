@@ -7,7 +7,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_pe_builder.cpp
     test_pipeline_synthetic.cpp
     test_disassembler.cpp
-    test_cfg.cpp
+    test_viv_entrypoints.cpp
     test_viv_location_db.cpp
     test_viv_xref_db.cpp
     test_viv_cf_context.cpp
@@ -27,6 +27,7 @@ set(PAPA_UNIT_TEST_SOURCES
     test_optimizer.cpp
     test_feature_index.cpp
     test_com_lookup.cpp
+    test_embedded_rules.cpp
     test_string_utils.cpp
     test_extractor_helpers.cpp
     test_strings_extractor.cpp
@@ -34,14 +35,13 @@ set(PAPA_UNIT_TEST_SOURCES
     test_pefile_extractor.cpp
     test_insn_extractor.cpp
     test_bb_function_extractors.cpp
-    test_backend.cpp
     test_capabilities.cpp
     test_hash.cpp
     test_json_writer.cpp
     test_regex_prefilter.cpp
     test_render.cpp
     test_render_table.cpp
-    test_library_signatures.cpp
+    test_thunk.cpp
     test_flirt_format.cpp
     test_flirt_crc16.cpp
     test_flirt_decompress.cpp
@@ -50,7 +50,6 @@ set(PAPA_UNIT_TEST_SOURCES
     test_flirt_matcher.cpp
     test_flirt_classifier.cpp
     test_flirt_signature_set.cpp
-    test_flirt_integration.cpp
     test_emu_registers.cpp
     test_emu_bits.cpp
     test_emu_memory.cpp
@@ -62,7 +61,8 @@ set(PAPA_UNIT_TEST_SOURCES
     test_emu_workspace.cpp
     test_emu_watcher.cpp
     test_emu_discovery.cpp
-    test_diag.cpp
+    test_main_driver.cpp
+    test_golden.cpp
 )
 
 add_executable(papa_unit_tests ${PAPA_UNIT_TEST_SOURCES})
@@ -78,20 +78,22 @@ target_link_libraries(papa_unit_tests
 # so the unit-test binary must carry the same RCDATA resources as papa.exe.
 if(MSVC)
     target_sources(papa_unit_tests PRIVATE
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
     set_source_files_properties(
-        "${CMAKE_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
+        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
         PROPERTIES COMPILE_OPTIONS
-        "/I${CMAKE_SOURCE_DIR}/third_party/flirt_sigs")
+        "/I${PROJECT_SOURCE_DIR}/third_party/flirt_sigs")
 endif()
 
-add_test(NAME papa_unit_tests COMMAND papa_unit_tests)
+# Run from the source root so tests can read the vendored files by relative path
+add_test(NAME papa_unit_tests COMMAND papa_unit_tests
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
 
-# Phase 1 acceptance: `papa --version` prints a non-empty banner
+# `papa --version` prints the program file name and the release version, like argparse
 add_test(
     NAME papa_cli_version
     COMMAND papa_cli --version
 )
 set_tests_properties(papa_cli_version PROPERTIES
-    PASS_REGULAR_EXPRESSION "PAPA [0-9]+\\.[0-9]+\\.[0-9]+"
+    PASS_REGULAR_EXPRESSION "^papa(\\.exe)? [0-9]+\\.[0-9]+\\.[0-9]+"
 )

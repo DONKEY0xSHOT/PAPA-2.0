@@ -1,5 +1,6 @@
 #include "papa/render/json.h"
 
+#include "papa/exceptions.h"
 #include "papa/features/address.h"
 #include "papa/features/basic_block.h"
 #include "papa/features/common.h"
@@ -13,6 +14,7 @@
 #include "papa/rules/scope.h"
 #include "papa/util/json_writer.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -70,8 +72,7 @@ void emit_string_array(::papa::util::json::Writer& w,
 
 // Emit a bare image-base or similar value as capa's absolute address object
 void emit_absolute(::papa::util::json::Writer& w, std::uint64_t value) {
-    emit_address(w,
-                 ::papa::features::Address{::papa::features::AbsoluteVirtualAddress{value}});
+    emit_address(w, ::papa::features::va_address(value));
 }
 
 // Field order and nesting mirror capa's StaticMetadata / StaticAnalysis so the
@@ -241,6 +242,41 @@ void emit_hex_bytes(::papa::util::json::Writer& w, std::span<const std::byte> by
     w.value_string(s);
 }
 
+// The freeze-format type and value key of each single-string feature, in capa's spelling
+struct ValueFeatureJson {
+    features::FeatureTag tag;
+    std::string_view     type;
+    std::string_view     key;
+};
+
+constexpr std::array kValueFeatureJson{
+    ValueFeatureJson{features::FeatureTag::kOs,             "os",             "os"},
+    ValueFeatureJson{features::FeatureTag::kArch,           "arch",           "arch"},
+    ValueFeatureJson{features::FeatureTag::kFormat,         "format",         "format"},
+    ValueFeatureJson{features::FeatureTag::kMatchedRule,    "match",          "match"},
+    ValueFeatureJson{features::FeatureTag::kCharacteristic, "characteristic", "characteristic"},
+    ValueFeatureJson{features::FeatureTag::kExport,         "export",         "export"},
+    ValueFeatureJson{features::FeatureTag::kImport,         "import",         "import_"},
+    ValueFeatureJson{features::FeatureTag::kSection,        "section",        "section"},
+    ValueFeatureJson{features::FeatureTag::kFunctionName,   "function name",  "function_name"},
+    ValueFeatureJson{features::FeatureTag::kSubstring,      "substring",      "substring"},
+    ValueFeatureJson{features::FeatureTag::kRegex,          "regex",          "regex"},
+    ValueFeatureJson{features::FeatureTag::kString,         "string",         "string"},
+    ValueFeatureJson{features::FeatureTag::kClass,          "class",          "class_"},
+    ValueFeatureJson{features::FeatureTag::kNamespace,      "namespace",      "namespace"},
+    ValueFeatureJson{features::FeatureTag::kApi,            "api",            "api"},
+    ValueFeatureJson{features::FeatureTag::kMnemonic,       "mnemonic",       "mnemonic"},
+};
+
+// Emit the type and value fields of a single-string feature
+void emit_value(::papa::util::json::Writer& w,
+                std::string_view            type,
+                std::string_view            key,
+                std::string_view            value) {
+    w.key("type"); w.value_string(type);
+    w.key(key);    w.value_string(value);
+}
+
 // Serialize one feature in capa's freeze format: {type, <value field>, description?}.
 // Field names follow capa's FeatureModel attribute names (operand_offset, etc.)
 void emit_feature(::papa::util::json::Writer& w, const features::Feature& f) {
@@ -248,65 +284,29 @@ void emit_feature(::papa::util::json::Writer& w, const features::Feature& f) {
     w.begin_object();
     switch (f.tag()) {
         case FeatureTag::kOs:
-            w.key("type"); w.value_string("os");
-            w.key("os");   w.value_string(static_cast<const Os&>(f).value());
-            break;
         case FeatureTag::kArch:
-            w.key("type"); w.value_string("arch");
-            w.key("arch"); w.value_string(static_cast<const Arch&>(f).value());
-            break;
         case FeatureTag::kFormat:
-            w.key("type");   w.value_string("format");
-            w.key("format"); w.value_string(static_cast<const Format&>(f).value());
-            break;
         case FeatureTag::kMatchedRule:
-            w.key("type");  w.value_string("match");
-            w.key("match"); w.value_string(static_cast<const MatchedRule&>(f).rule_name());
-            break;
         case FeatureTag::kCharacteristic:
-            w.key("type");           w.value_string("characteristic");
-            w.key("characteristic"); w.value_string(static_cast<const Characteristic&>(f).value());
-            break;
         case FeatureTag::kExport:
-            w.key("type");   w.value_string("export");
-            w.key("export"); w.value_string(static_cast<const Export&>(f).value());
-            break;
         case FeatureTag::kImport:
-            w.key("type");    w.value_string("import");
-            w.key("import_"); w.value_string(static_cast<const Import&>(f).value());
-            break;
         case FeatureTag::kSection:
-            w.key("type");    w.value_string("section");
-            w.key("section"); w.value_string(static_cast<const Section&>(f).value());
-            break;
         case FeatureTag::kFunctionName:
-            w.key("type");          w.value_string("function name");
-            w.key("function_name"); w.value_string(static_cast<const FunctionName&>(f).value());
-            break;
         case FeatureTag::kSubstring:
-            w.key("type");      w.value_string("substring");
-            w.key("substring"); w.value_string(static_cast<const Substring&>(f).value());
-            break;
         case FeatureTag::kRegex:
-            w.key("type");  w.value_string("regex");
-            w.key("regex"); w.value_string(static_cast<const Regex&>(f).value());
-            break;
         case FeatureTag::kString:
-            w.key("type");   w.value_string("string");
-            w.key("string"); w.value_string(static_cast<const String&>(f).value());
-            break;
         case FeatureTag::kClass:
-            w.key("type");   w.value_string("class");
-            w.key("class_"); w.value_string(static_cast<const Class&>(f).value());
-            break;
         case FeatureTag::kNamespace:
-            w.key("type");      w.value_string("namespace");
-            w.key("namespace"); w.value_string(static_cast<const Namespace&>(f).value());
-            break;
         case FeatureTag::kApi:
-            w.key("type"); w.value_string("api");
-            w.key("api");  w.value_string(static_cast<const Api&>(f).value());
+        case FeatureTag::kMnemonic: {
+            const auto row =
+                std::ranges::find(kValueFeatureJson, f.tag(), &ValueFeatureJson::tag);
+            if (row == kValueFeatureJson.end()) {
+                throw PapaInvariantError("json: a single-string tag has no table row");
+            }
+            emit_value(w, row->type, row->key, static_cast<const ValueFeature&>(f).value());
             break;
+        }
         case FeatureTag::kProperty: {
             const auto& p = static_cast<const Property&>(f);
             w.key("type"); w.value_string("property");
@@ -329,10 +329,6 @@ void emit_feature(::papa::util::json::Writer& w, const features::Feature& f) {
         case FeatureTag::kOffset:
             w.key("type");   w.value_string("offset");
             w.key("offset"); w.value_int(static_cast<const Offset&>(f).value());
-            break;
-        case FeatureTag::kMnemonic:
-            w.key("type");     w.value_string("mnemonic");
-            w.key("mnemonic"); w.value_string(static_cast<const Mnemonic&>(f).value());
             break;
         case FeatureTag::kOperandNumber: {
             const auto& o = static_cast<const OperandNumber&>(f);

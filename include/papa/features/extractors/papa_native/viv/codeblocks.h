@@ -42,7 +42,7 @@ private:
     std::unordered_map<std::uint64_t, CodeBlock>              by_start_;
 };
 
-/// Predicate: true when the instruction at va does not fall through, the envi.
+/// Predicate: true when the instruction at va does not fall through, the envi
 /// IF_NOFALL signal, including a no-return call the noret pass marked
 using NoFallPredicate = std::function<bool(std::uint64_t va)>;
 

@@ -1,40 +1,141 @@
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <fstream>
 #include <ostream>
-#include <sstream>
-#include <string>
-#include <vector>
 
 #include "doctest.h"
 
-#include "fixture_paths.h"
 #include "papa/features/extractors/papa_native/cfg.h"
 #include "papa/features/extractors/papa_native/disassembler.h"
-#include "papa/features/extractors/papa_native/emu/emu_discovery.h"
 #include "papa/features/extractors/papa_native/flirt/flirt.h"
+#include "papa/features/extractors/papa_native/imports.h"
 #include "papa/features/extractors/papa_native/viv/engine.h"
 #include "papa/pe/pe_parser.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <map>
+#include <vector>
+#include "pe_builder.h"
+
 namespace pn = papa::features::extractors::papa_native;
 
-TEST_CASE("discovery engine: recovers the entry point and a non-empty function set") {
-    const auto path = papa_tests::fixture_path("corpus/hostname_x86.exe");
-    if (!papa_tests::fixture_available(path)) {
-        MESSAGE("fixture missing: corpus/hostname_x86.exe");
-        return;
+TEST_CASE("discovery engine: each seed source, direct call and i386 pass contributes its functions") {
+    for (const bool x64 : {true, false}) {
+        CAPTURE(x64);
+        papa_tests::PeBuilder b;
+        b.x64 = x64;
+        // Every function but the last is placed without a .pdata row
+        const auto place = [&b](const std::vector<std::uint8_t>& bytes) {
+            const std::uint32_t at = b.add_function(bytes);
+            b.pdata_functions.pop_back();
+            return at;
+        };
+        const std::vector<std::uint8_t> leaf{0x33, 0xC0, 0xC3};  // xor eax, eax / ret
+        const auto callee    = place(leaf);
+        const auto exported  = place(leaf);
+        const auto tls       = place(leaf);
+        const auto relocated = place(leaf);
+        const auto indirect  = place(leaf);
+        // push ebp / mov ebp, esp / xor eax, eax / pop ebp / ret
+        const auto prologue = place({0x55, 0x8B, 0xEC, 0x33, 0xC0, 0x5D, 0xC3});
+        // call callee / call callee / mov eax, indirect / call eax / ret, with movabs rax on x64
+        std::vector<std::uint8_t> entry_code{0xE8, 0, 0, 0, 0, 0xE8, 0, 0, 0, 0};
+        if (x64) { entry_code.push_back(0x48); }
+        entry_code.push_back(0xB8);
+        entry_code.insert(entry_code.end(), x64 ? 8U : 4U, 0);
+        entry_code.insert(entry_code.end(), {0xFF, 0xD0, 0xC3});
+        const auto entry    = place(entry_code);
+        // Two relocated pointer slots, the second holding a .data address
+        const auto slot     = place(std::vector<std::uint8_t>(16, 0));
+        const auto in_pdata = b.add_function(leaf);
+
+        b.entry_offset       = entry;
+        b.exports            = {{"exported", exported, ""}};
+        b.tls_callbacks      = {tls};
+        b.reloc_code_offsets = {slot, slot + 8U};
+        b.data.assign(8, 0);
+        for (const std::uint32_t call : {entry, entry + 5U}) {
+            papa_tests::detail::poke(
+                b.code, call + 1U,
+                static_cast<std::int32_t>(b.code_va(callee) - b.code_va(call + 5U)));
+        }
+        if (x64) {
+            papa_tests::detail::poke(b.code, entry + 12U, b.code_va(indirect));
+            papa_tests::detail::poke(b.code, slot, b.code_va(relocated));
+            papa_tests::detail::poke(b.code, slot + 8U, b.data_va(0));
+        } else {
+            papa_tests::detail::poke(b.code, entry + 11U,
+                                     static_cast<std::uint32_t>(b.code_va(indirect)));
+            papa_tests::detail::poke(b.code, slot,
+                                     static_cast<std::uint32_t>(b.code_va(relocated)));
+            papa_tests::detail::poke(b.code, slot + 8U,
+                                     static_cast<std::uint32_t>(b.data_va(0)));
+        }
+
+        const auto img = papa::pe::PeParser::parse(b.build());
+        REQUIRE(img.has_value());
+        const pn::Disassembler             disasm(x64);
+        const pn::flirt::FlirtSignatureSet no_sigs;
+        const auto rec = pn::viv::discover_functions(*img, disasm, pn::build_import_table(*img),
+                                                     no_sigs);
+
+        // .pdata seeds only x64. The calling pass, which emulates the indirect call, and
+        // the prologue scan run only on i386
+        std::vector<std::uint32_t> want{callee, exported, tls, relocated, entry};
+        const std::vector<std::uint32_t> only = x64 ? std::vector<std::uint32_t>{in_pdata}
+                                                    : std::vector<std::uint32_t>{indirect, prologue};
+        want.insert(want.end(), only.begin(), only.end());
+        std::vector<std::uint64_t> want_va;
+        for (const std::uint32_t at : want) { want_va.push_back(b.code_va(at)); }
+        std::sort(want_va.begin(), want_va.end());
+
+        std::vector<std::uint64_t>                              got_va;
+        std::map<std::uint64_t, std::vector<std::uint64_t>> callers;
+        for (const pn::Function& f : rec.functions) {
+            got_va.push_back(f.va);
+            if (!f.callers.empty()) { callers.emplace(f.va, f.callers); }
+        }
+        std::sort(got_va.begin(), got_va.end());
+        CHECK(got_va == want_va);
+
+        // The callee's two call sites count once, and no other function has a caller
+        const std::map<std::uint64_t, std::vector<std::uint64_t>> want_callers{
+            {b.code_va(callee), {b.code_va(entry)}}};
+        CHECK(callers == want_callers);
     }
-    auto img = papa::pe::PeParser::parse_file(path);
+}
+
+TEST_CASE("discovery engine: an x64 switch's case targets become blocks of its function") {
+    papa_tests::PeBuilder b;
+    // lea r8, [rip+base] / cmp ecx, 2 / ja default / movsxd rax, ecx /
+    // mov ecx, [r8+rax*4+table] / add rcx, r8 / jmp rcx, then three cases and the default
+    const std::uint32_t f = b.add_function({
+        0x4C, 0x8D, 0x05, 0, 0, 0, 0,  0x83, 0xF9, 0x02,  0x77, 0x22,  0x48, 0x63, 0xC1,
+        0x41, 0x8B, 0x8C, 0x80, 0, 0, 0, 0,  0x49, 0x03, 0xC8,  0xFF, 0xE1,
+        0xB8, 0x01, 0, 0, 0, 0xC3,  0xB8, 0x02, 0, 0, 0, 0xC3,  0xB8, 0x03, 0, 0, 0, 0xC3,
+        0x33, 0xC0, 0xC3});
+    b.data.assign(16, 0);
+    papa_tests::detail::poke(b.code, f + 3U,
+                             static_cast<std::int32_t>(b.base() - b.code_va(f + 7U)));
+    papa_tests::detail::poke(b.code, f + 19U, b.section_rva(".data"));
+    // The offset table holds each case's RVA and ends at an entry that is no code
+    const std::vector<std::uint32_t> cases{f + 28U, f + 34U, f + 40U};
+    for (std::uint32_t i = 0; i < cases.size(); ++i) {
+        papa_tests::detail::poke(b.data, i * 4U, papa_tests::PeBuilder::kTextRva + cases[i]);
+    }
+
+    const auto img = papa::pe::PeParser::parse(b.build());
     REQUIRE(img.has_value());
-    const pn::Disassembler disasm(img->is_64bit());
+    const pn::Disassembler             disasm(true);
+    const pn::flirt::FlirtSignatureSet no_sigs;
+    const auto rec = pn::viv::discover_functions(*img, disasm, pn::build_import_table(*img),
+                                                 no_sigs);
+    REQUIRE(rec.functions.size() == 1);
+    CHECK(rec.functions[0].va == b.code_va(f));
 
-    const std::vector<pn::Function> funcs =
-        pn::viv::discover_functions(*img, disasm, pn::flirt::FlirtSignatureSet::embedded())
-            .functions;
-
-    REQUIRE_FALSE(funcs.empty());
-    const std::uint64_t entry = img->image_base() + img->entry_point_rva();
-    CHECK(std::any_of(funcs.begin(), funcs.end(),
-                      [entry](const pn::Function& f) { return f.va == entry; }));
+    std::vector<std::uint64_t> blocks;
+    for (const pn::BasicBlock& bb : rec.functions[0].basic_blocks) { blocks.push_back(bb.va); }
+    std::sort(blocks.begin(), blocks.end());
+    const std::vector<std::uint64_t> want{b.code_va(f), b.code_va(f + 12U), b.code_va(cases[0]),
+                                          b.code_va(cases[1]), b.code_va(cases[2]),
+                                          b.code_va(f + 46U)};
+    CHECK(blocks == want);
 }

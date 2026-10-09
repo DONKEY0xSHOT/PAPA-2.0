@@ -14,12 +14,16 @@
 #include "papa/rules/rule.h"
 #include "papa/rules/scope.h"
 
+#include "test_support.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 using papa::ErrorKind;
 using papa::engine::And;
@@ -85,130 +89,206 @@ const T& must_be(const Statement& s) {
 
 }  // namespace
 
-// --- helper functions ---------------------------------------------------
-
-TEST_CASE("rules: split_inline_description splits on unquoted ' = '") {
-    const auto [v, d] = RuleParser::split_inline_description("0x10 = MAGIC_CONST");
-    CHECK(v == "0x10");
-    REQUIRE(d.has_value());
-    CHECK(*d == "MAGIC_CONST");
+TEST_CASE("rules: split_inline_description splits on an unquoted ' = ' only") {
+    struct Row {
+        std::string_view                label;
+        std::string_view                text;
+        std::string_view                value;
+        std::optional<std::string_view> description;
+    };
+    const std::vector<Row> rows{
+        {"a value and its description", "0x10 = MAGIC_CONST", "0x10", "MAGIC_CONST"},
+        {"a quoted string is left alone", "\"a = b\"", "\"a = b\"", std::nullopt},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto [v, d] = RuleParser::split_inline_description(row.text);
+        CHECK(v == row.value);
+        CHECK(d.has_value() == row.description.has_value());
+        if (d.has_value() && row.description.has_value()) { CHECK(*d == *row.description); }
+    }
 }
 
-TEST_CASE("rules: split_inline_description leaves quoted strings alone") {
-    const auto [v, d] = RuleParser::split_inline_description("\"a = b\"");
-    CHECK(v == "\"a = b\"");
-    CHECK_FALSE(d.has_value());
+TEST_CASE("rules: parse_number_literal reads hex, decimal, negative and floating point literals") {
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+        NumberValue      expected;
+    };
+    const std::vector<Row> rows{
+        {"hex unsigned", "0x10", std::uint64_t{16}},
+        {"decimal unsigned", "42", std::uint64_t{42}},
+        {"negative", "-1", std::int64_t{-1}},
+        {"floating point", "1.5", 1.5},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse_number_literal(row.text);
+        REQUIRE(r);
+        CHECK(r->index() == row.expected.index());
+        if (r->index() != row.expected.index()) { continue; }
+        if (const auto* d = std::get_if<double>(&row.expected)) {
+            CHECK(std::get<double>(*r) == doctest::Approx(*d));
+        } else {
+            CHECK((*r == row.expected));
+        }
+    }
 }
 
-TEST_CASE("rules: parse_number_literal hex unsigned") {
-    auto r = RuleParser::parse_number_literal("0x10");
-    REQUIRE(r);
-    REQUIRE(std::holds_alternative<std::uint64_t>(*r));
-    CHECK(std::get<std::uint64_t>(*r) == 16U);
+TEST_CASE("rules: parse_count_range reads an exact count, N or more and a (min, max) pair") {
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+        std::size_t      min;
+        std::size_t      max;
+    };
+    const std::vector<Row> rows{
+        {"an integer", "3", 3, 3},
+        {"or more", "2 or more", 2, SIZE_MAX},
+        {"zero or more", "0 or more", 0, SIZE_MAX},
+        {"a pair tuple", "(1, 3)", 1, 3},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse_count_range(row.text);
+        REQUIRE(r);
+        CHECK(r->min == row.min);
+        CHECK(r->max == row.max);
+    }
 }
 
-TEST_CASE("rules: parse_number_literal decimal unsigned") {
-    auto r = RuleParser::parse_number_literal("42");
-    REQUIRE(r);
-    REQUIRE(std::holds_alternative<std::uint64_t>(*r));
-    CHECK(std::get<std::uint64_t>(*r) == 42U);
+TEST_CASE("rules: parse_bytes_literal reads hex bytes and ?? wildcards") {
+    // A negative entry is a wildcard
+    struct Row {
+        std::string_view label;
+        std::string_view text;
+        bool             wildcards;
+        std::vector<int> pattern;
+    };
+    const std::vector<Row> rows{
+        {"hex bytes", "DE AD BE EF", false, {0xDE, 0xAD, 0xBE, 0xEF}},
+        {"a wildcard", "01 02 ?? 04", true, {0x01, 0x02, -1, 0x04}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse_bytes_literal(row.text);
+        REQUIRE(r);
+        CHECK(r->has_wildcards == row.wildcards);
+        CHECK(r->pattern.size() == row.pattern.size());
+        for (std::size_t i = 0; i < r->pattern.size() && i < row.pattern.size(); ++i) {
+            CAPTURE(i);
+            CHECK(r->pattern[i].has_value() == (row.pattern[i] >= 0));
+            if (r->pattern[i].has_value() && row.pattern[i] >= 0) {
+                CHECK(std::to_integer<int>(*r->pattern[i]) == row.pattern[i]);
+            }
+        }
+    }
 }
 
-TEST_CASE("rules: parse_number_literal negative") {
-    auto r = RuleParser::parse_number_literal("-1");
-    REQUIRE(r);
-    REQUIRE(std::holds_alternative<std::int64_t>(*r));
-    CHECK(std::get<std::int64_t>(*r) == -1);
-}
+// Whole-rule parsing
+// Whole-rule parsing
 
-TEST_CASE("rules: parse_number_literal floating point") {
-    auto r = RuleParser::parse_number_literal("1.5");
-    REQUIRE(r);
-    REQUIRE(std::holds_alternative<double>(*r));
-    CHECK(std::get<double>(*r) == doctest::Approx(1.5));
-}
-
-TEST_CASE("rules: parse_count_range integer") {
-    auto r = RuleParser::parse_count_range("3");
-    REQUIRE(r);
-    CHECK(r->min == 3);
-    CHECK(r->max == 3);
-}
-
-TEST_CASE("rules: parse_count_range or-more") {
-    auto r = RuleParser::parse_count_range("2 or more");
-    REQUIRE(r);
-    CHECK(r->min == 2);
-    CHECK(r->max == SIZE_MAX);
-}
-
-TEST_CASE("rules: parse_count_range zero or more") {
-    auto r = RuleParser::parse_count_range("0 or more");
-    REQUIRE(r);
-    CHECK(r->min == 0);
-    CHECK(r->max == SIZE_MAX);
-}
-
-TEST_CASE("rules: parse_count_range pair tuple") {
-    auto r = RuleParser::parse_count_range("(1, 3)");
-    REQUIRE(r);
-    CHECK(r->min == 1);
-    CHECK(r->max == 3);
-}
-
-TEST_CASE("rules: parse_bytes_literal hex bytes") {
-    auto r = RuleParser::parse_bytes_literal("DE AD BE EF");
-    REQUIRE(r);
-    CHECK_FALSE(r->has_wildcards);
-    REQUIRE(r->pattern.size() == 4);
-    REQUIRE(r->pattern[0].has_value());
-    CHECK(static_cast<std::uint8_t>(*r->pattern[0]) == 0xDE);
-    CHECK(static_cast<std::uint8_t>(*r->pattern[3]) == 0xEF);
-}
-
-TEST_CASE("rules: parse_bytes_literal with wildcards") {
-    auto r = RuleParser::parse_bytes_literal("01 02 ?? 04");
-    REQUIRE(r);
-    CHECK(r->has_wildcards);
-    REQUIRE(r->pattern.size() == 4);
-    CHECK_FALSE(r->pattern[2].has_value());
-}
-
-// --- whole-rule parsing -------------------------------------------------
-
-TEST_CASE("rules: minimal rule with single api leaf parses") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: simple rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - api: kernel32.CreateFileA\n";
-    auto r = RuleParser::parse(text, "simple.yml");
-    REQUIRE(r);
-    const Rule& rule = **r;
-    CHECK(rule.meta().name == "simple rule");
-    CHECK(rule.scope() == Scope::kFunction);
-    CHECK(rule.meta().source_path == "simple.yml");
-    const auto& api = must_be<Api>(feat_of(rule.statement()));
-    // api matching is dll-agnostic since capa v7, so the dll part is trimmed
-    CHECK(api.value() == "CreateFileA");
+TEST_CASE("rules: the meta block sets the name, scopes, namespace, authors, description, lib flag and tags") {
+    struct Meta {
+        std::string_view           name;
+        Scope                      scope = Scope::kFunction;
+        std::optional<Scope>       dynamic;
+        std::optional<std::string> namespace_;
+        std::vector<std::string>   authors;
+        std::optional<std::string> description;
+        bool                       lib = false;
+        std::vector<std::string>   att_and_ck;
+        std::vector<std::string>   mbc;
+    };
+    struct Row {
+        std::string_view label;
+        std::string      text;
+        Meta             meta;
+    };
+    const std::vector<Row> rows{
+        {"a minimal rule",
+         "rule:\n"
+         "  meta:\n"
+         "    name: simple rule\n"
+         "    scope: function\n"
+         "  features:\n"
+         "    - api: kernel32.CreateFileA\n",
+         {.name = "simple rule"}},
+        {"a namespace, authors and a description",
+         "rule:\n"
+         "  meta:\n"
+         "    name: anti-vm probe\n"
+         "    namespace: anti-analysis/vm\n"
+         "    authors:\n"
+         "      - alice@example.com\n"
+         "      - bob@example.com\n"
+         "    scope: file\n"
+         "    description: detects VM probing\n"
+         "  features:\n"
+         "    - import: kernel32.IsDebuggerPresent\n",
+         {.name        = "anti-vm probe",
+          .scope       = Scope::kFile,
+          .namespace_  = "anti-analysis/vm",
+          .authors     = {"alice@example.com", "bob@example.com"},
+          .description = "detects VM probing"}},
+        {"a scopes block with static and dynamic scopes",
+         "rule:\n"
+         "  meta:\n"
+         "    name: scoped rule\n"
+         "    scopes:\n"
+         "      static: basic block\n"
+         "      dynamic: process\n"
+         "  features:\n"
+         "    - mnemonic: xor\n",
+         {.name = "scoped rule", .scope = Scope::kBasicBlock, .dynamic = Scope::kProcess}},
+        {"the lib flag",
+         "rule:\n"
+         "  meta:\n"
+         "    name: lib-rule\n"
+         "    scope: function\n"
+         "    lib: true\n"
+         "  features:\n"
+         "    - api: kernel32.CreateFileA\n",
+         {.name = "lib-rule", .lib = true}},
+        {"att&ck and mbc lists",
+         "rule:\n"
+         "  meta:\n"
+         "    name: tagged\n"
+         "    scope: function\n"
+         "    att&ck:\n"
+         "      - Discovery::System Information Discovery [T1082]\n"
+         "    mbc:\n"
+         "      - OS::Environment Variable [B0029]\n"
+         "  features:\n"
+         "    - api: kernel32.GetSystemInfo\n",
+         {.name       = "tagged",
+          .att_and_ck = {"Discovery::System Information Discovery [T1082]"},
+          .mbc        = {"OS::Environment Variable [B0029]"}}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse(row.text, "rule.yml");
+        REQUIRE(r);
+        const auto& m = (*r)->meta();
+        CHECK(m.name == row.meta.name);
+        CHECK(m.source_path == "rule.yml");
+        CHECK((*r)->scope() == row.meta.scope);
+        CHECK(m.scopes.static_scope == row.meta.scope);
+        CHECK(m.scopes.dynamic_scope == row.meta.dynamic);
+        CHECK(m.namespace_ == row.meta.namespace_);
+        CHECK(m.authors == row.meta.authors);
+        CHECK(m.description == row.meta.description);
+        CHECK((*r)->is_lib() == row.meta.lib);
+        CHECK(m.att_and_ck == row.meta.att_and_ck);
+        CHECK(m.mbc == row.meta.mbc);
+    }
 }
 
 TEST_CASE("rules: api leaf trims the dll part like capa") {
     auto api_value = [](std::string_view api_line) -> std::string {
-        std::string text =
-            "rule:\n"
-            "  meta:\n"
-            "    name: r\n"
-            "    scope: function\n"
-            "  features:\n"
-            "    - api: ";
-        text.append(api_line);
-        text.push_back('\n');
-        auto r = RuleParser::parse(text, "r.yml");
-        REQUIRE(r);
-        return must_be<Api>(feat_of((*r)->statement())).value();
+        const auto r = papa_tests::rule(
+            papa_tests::rule_yaml("r", "function", {"api: " + std::string(api_line)}));
+        return must_be<Api>(feat_of(r->statement())).value();
     };
     // single-dot native names drop the dll
     CHECK(api_value("kernel32.GetTickCount") == "GetTickCount");
@@ -221,139 +301,34 @@ TEST_CASE("rules: api leaf trims the dll part like capa") {
     CHECK(api_value("System.Convert::FromBase64String") == "System.Convert::FromBase64String");
 }
 
-TEST_CASE("rules: rule with namespace, authors, and description in meta") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: anti-vm probe\n"
-        "    namespace: anti-analysis/vm\n"
-        "    authors:\n"
-        "      - alice@example.com\n"
-        "      - bob@example.com\n"
-        "    scope: file\n"
-        "    description: detects VM probing\n"
-        "  features:\n"
-        "    - import: kernel32.IsDebuggerPresent\n";
-    auto r = RuleParser::parse(text, "anti-vm.yml");
-    REQUIRE(r);
-    const auto& m = (*r)->meta();
-    CHECK(m.namespace_.value_or("") == "anti-analysis/vm");
-    REQUIRE(m.authors.size() == 2);
-    CHECK(m.authors[0] == "alice@example.com");
-    CHECK(m.authors[1] == "bob@example.com");
-    REQUIRE(m.description.has_value());
-    CHECK(*m.description == "detects VM probing");
-    CHECK((*r)->scope() == Scope::kFile);
-}
-
-TEST_CASE("rules: scopes block accepts static and dynamic") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: scoped rule\n"
-        "    scopes:\n"
-        "      static: basic block\n"
-        "      dynamic: process\n"
-        "  features:\n"
-        "    - mnemonic: xor\n";
-    auto r = RuleParser::parse(text, "scoped.yml");
-    REQUIRE(r);
-    const auto& s = (*r)->meta().scopes;
-    REQUIRE(s.static_scope.has_value());
-    CHECK(*s.static_scope == Scope::kBasicBlock);
-    REQUIRE(s.dynamic_scope.has_value());
-    CHECK(*s.dynamic_scope == Scope::kProcess);
-}
-
-TEST_CASE("rules: missing name is rejected") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - api: foo\n";
-    auto r = RuleParser::parse(text, "noname.yml");
-    REQUIRE_FALSE(r);
-    CHECK(r.error().kind == ErrorKind::kInvalidRule);
-}
-
-TEST_CASE("rules: top-level and statement parses children") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: and-rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - api: kernel32.CreateFileA\n"
-        "      - api: kernel32.WriteFile\n";
-    auto r = RuleParser::parse(text, "and.yml");
-    REQUIRE(r);
-    const auto& and_st = must_be<And>((*r)->statement());
-    REQUIRE(and_st.children().size() == 2);
-}
-
-TEST_CASE("rules: or statement parses children") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: or-rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - or:\n"
-        "      - api: foo\n"
-        "      - api: bar\n";
-    auto r = RuleParser::parse(text, "or.yml");
-    REQUIRE(r);
-    must_be<Or>((*r)->statement());
-}
-
-TEST_CASE("rules: not wraps exactly one child") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: not-rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - not:\n"
-        "      - api: foo\n";
-    auto r = RuleParser::parse(text, "not.yml");
-    REQUIRE(r);
-    const auto& n = must_be<Not>((*r)->statement());
-    REQUIRE(n.children().size() == 1);
-}
-
-TEST_CASE("rules: optional statement maps to Some(0, ...)") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: opt-rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - optional:\n"
-        "      - api: foo\n";
-    auto r = RuleParser::parse(text, "opt.yml");
-    REQUIRE(r);
-    const auto& s = must_be<Some>((*r)->statement());
-    CHECK(s.count() == 0);
-}
-
-TEST_CASE("rules: N or more statement parses count") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: nm-rule\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - 3 or more:\n"
-        "      - api: foo\n"
-        "      - api: bar\n"
-        "      - api: baz\n"
-        "      - api: qux\n";
-    auto r = RuleParser::parse(text, "nm.yml");
-    REQUIRE(r);
-    const auto& s = must_be<Some>((*r)->statement());
-    CHECK(s.count() == 3);
+TEST_CASE("rules: and, or, not, optional and N or more parse into their statements with every child") {
+    struct Row {
+        std::string_view           label;
+        std::string                block;
+        std::string_view           name;
+        std::size_t                children;
+        std::optional<std::size_t> some_count;
+    };
+    const std::vector<Row> rows{
+        {"and", "and:\n      - api: kernel32.CreateFileA\n      - api: kernel32.WriteFile", "and",
+         2, std::nullopt},
+        {"or", "or:\n      - api: foo\n      - api: bar", "or", 2, std::nullopt},
+        {"not wraps exactly one child", "not:\n      - api: foo", "not", 1, std::nullopt},
+        {"optional maps to Some(0, ...)", "optional:\n      - api: foo", "optional", 1, 0},
+        {"3 or more keeps its count",
+         "3 or more:\n      - api: foo\n      - api: bar\n      - api: baz\n      - api: qux",
+         "some", 4, 3},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse(papa_tests::rule_yaml("r", "function", {row.block}),
+                                         "rule.yml");
+        REQUIRE(r);
+        const Statement& st = (*r)->statement();
+        CHECK(st.name() == row.name);
+        CHECK(st.children().size() == row.children);
+        if (row.some_count.has_value()) { CHECK(must_be<Some>(st).count() == *row.some_count); }
+    }
 }
 
 TEST_CASE("rules: count(...) becomes Range with parsed bounds") {
@@ -373,143 +348,72 @@ TEST_CASE("rules: count(...) becomes Range with parsed bounds") {
     CHECK(rg.feature()->tag() == FeatureTag::kApi);
 }
 
-TEST_CASE("rules: leaf features cover every common spelling") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: zoo\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - number: 0x10\n"
-        "      - offset: 0x20\n"
-        "      - mnemonic: xor\n"
-        "      - string: \"hello\"\n"
-        "      - substring: world\n"
-        "      - bytes: DE AD BE EF\n"
-        "      - characteristic: nzxor\n"
-        "      - operand[0].number: 0x100\n"
-        "      - operand[1].offset: 8\n";
-    auto r = RuleParser::parse(text, "zoo.yml");
-    REQUIRE(r);
-    const auto& and_st = must_be<And>((*r)->statement());
-    REQUIRE(and_st.children().size() == 9);
-
-    must_be<Number>(feat_of(*and_st.children()[0]));
-    must_be<Offset>(feat_of(*and_st.children()[1]));
-    must_be<Mnemonic>(feat_of(*and_st.children()[2]));
-    must_be<String>(feat_of(*and_st.children()[3]));
-    must_be<Substring>(feat_of(*and_st.children()[4]));
-    must_be<Bytes>(feat_of(*and_st.children()[5]));
-    must_be<Characteristic>(feat_of(*and_st.children()[6]));
-    const auto& opn = must_be<OperandNumber>(feat_of(*and_st.children()[7]));
-    CHECK(opn.index() == 0);
-    const auto& opo = must_be<OperandOffset>(feat_of(*and_st.children()[8]));
-    CHECK(opo.index() == 1);
-    CHECK(opo.value() == 8);
-}
-
-TEST_CASE("rules: regex literal becomes Regex feature") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: regex-rule\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - string: /he.*o/i\n";
-    auto r = RuleParser::parse(text, "regex.yml");
-    REQUIRE(r);
-    const auto& re = must_be<Regex>(feat_of((*r)->statement()));
-    CHECK(re.case_insensitive());
-    CHECK(re.pattern() == "he.*o");
-}
-
-TEST_CASE("rules: number with inline description retains description") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: inline-desc\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - number: 0x10 = SECTOR_SIZE\n";
-    auto r = RuleParser::parse(text, "inline.yml");
-    REQUIRE(r);
-    const auto& num = must_be<Number>(feat_of((*r)->statement()));
-    CHECK(num.description() == "SECTOR_SIZE");
-}
-
-TEST_CASE("rules: import, export, section, function-name leaves work at file scope") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: file-zoo\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - import: kernel32.CreateFileA\n"
-        "      - export: DllRegisterServer\n"
-        "      - section: .text\n"
-        "      - function-name: my_main\n";
-    auto r = RuleParser::parse(text, "file-zoo.yml");
-    REQUIRE(r);
-    const auto& and_st = must_be<And>((*r)->statement());
-    REQUIRE(and_st.children().size() == 4);
-    must_be<Import>(feat_of(*and_st.children()[0]));
-    must_be<Export>(feat_of(*and_st.children()[1]));
-    must_be<Section>(feat_of(*and_st.children()[2]));
-    must_be<FunctionName>(feat_of(*and_st.children()[3]));
-}
-
-TEST_CASE("rules: property/read and property/write produce Property with access") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: prop-rule\n"
-        "    scope: instruction\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - property/read: System.IO.File::Exists\n"
-        "      - property/write: System.IO.File::Length\n";
-    auto r = RuleParser::parse(text, "prop.yml");
-    REQUIRE(r);
-    const auto& and_st = must_be<And>((*r)->statement());
-    REQUIRE(and_st.children().size() == 2);
-    const auto& pread = must_be<Property>(feat_of(*and_st.children()[0]));
-    CHECK(pread.access() == Property::Access::kRead);
-    const auto& pwrite = must_be<Property>(feat_of(*and_st.children()[1]));
-    CHECK(pwrite.access() == Property::Access::kWrite);
-}
-
-TEST_CASE("rules: match injects MatchedRule feature") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: composite\n"
-        "    scope: file\n"
-        "  features:\n"
-        "    - match: get-system-info\n";
-    auto r = RuleParser::parse(text, "composite.yml");
-    REQUIRE(r);
-    const auto& mr = must_be<MatchedRule>(feat_of((*r)->statement()));
-    CHECK(mr.rule_name() == "get-system-info");
-}
-
-TEST_CASE("rules: os, arch, format leaves work everywhere") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: triple\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - and:\n"
-        "      - os: windows\n"
-        "      - format: pe\n";
-    auto r = RuleParser::parse(text, "triple.yml");
-    REQUIRE(r);
-    const auto& and_st = must_be<And>((*r)->statement());
-    REQUIRE(and_st.children().size() == 2);
-    must_be<Os>(feat_of(*and_st.children()[0]));
-    must_be<Format>(feat_of(*and_st.children()[1]));
+TEST_CASE("rules: each leaf key parses into its feature with its value, index, access and flags") {
+    // rendered is the feature's tag and value, as papa_tests::describe spells them, and
+    // a regex also names its pattern and whether it ignores case
+    struct RegexSpec {
+        std::string_view pattern;
+        bool             case_insensitive;
+    };
+    struct Row {
+        std::string_view                label;
+        std::string_view                scope;
+        std::string                     line;
+        std::string_view                rendered;
+        std::optional<RegexSpec>        regex;
+        std::optional<std::string_view> description;
+    };
+    const std::vector<Row> rows{
+        // api matching is dll-agnostic since capa v7, so the dll part is trimmed
+        {"api", "function", "api: kernel32.CreateFileA", "api CreateFileA", {}, {}},
+        {"number", "function", "number: 0x10", "number 0x10", {}, {}},
+        {"offset", "function", "offset: 0x20", "offset 32", {}, {}},
+        {"mnemonic", "function", "mnemonic: xor", "mnemonic xor", {}, {}},
+        {"string", "function", "string: \"hello\"", "string hello", {}, {}},
+        {"substring", "function", "substring: world", "substring world", {}, {}},
+        {"bytes", "function", "bytes: DE AD BE EF", "bytes deadbeef", {}, {}},
+        {"characteristic", "function", "characteristic: nzxor", "characteristic nzxor", {}, {}},
+        {"operand[0].number", "function", "operand[0].number: 0x100", "operand number 0 0x100", {},
+         {}},
+        {"operand[1].offset", "function", "operand[1].offset: 8", "operand offset 1 8", {}, {}},
+        {"a case-insensitive regex literal", "file", "string: /he.*o/i", "regex /he.*o/i",
+         RegexSpec{"he.*o", true}, {}},
+        {"a regex literal without flags", "file", "string: /abc/", "regex /abc/",
+         RegexSpec{"abc", false}, {}},
+        {"a number with an inline description", "function", "number: 0x10 = SECTOR_SIZE",
+         "number 0x10", {}, "SECTOR_SIZE"},
+        {"import", "file", "import: kernel32.CreateFileA", "import kernel32.CreateFileA", {}, {}},
+        {"export", "file", "export: DllRegisterServer", "export DllRegisterServer", {}, {}},
+        {"section", "file", "section: .text", "section .text", {}, {}},
+        {"function-name", "file", "function-name: my_main", "function-name my_main", {}, {}},
+        {"property/read", "instruction", "property/read: System.IO.File::Exists",
+         "property System.IO.File::Exists 1", {}, {}},
+        {"property/write", "instruction", "property/write: System.IO.File::Length",
+         "property System.IO.File::Length 2", {}, {}},
+        {"match", "file", "match: get-system-info", "match get-system-info", {}, {}},
+        {"os", "function", "os: windows", "os windows", {}, {}},
+        {"format", "function", "format: pe", "format pe", {}, {}},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse(papa_tests::rule_yaml("r", row.scope, {row.line}),
+                                         "rule.yml");
+        REQUIRE(r);
+        const auto* leaf = dynamic_cast<const FeatureStatement*>(&(*r)->statement());
+        REQUIRE(leaf != nullptr);
+        std::string rendered = papa_tests::describe(papa::features::extractors::FeatureWithAddress{
+            leaf->feature(), papa::features::NoAddress{}});
+        rendered.erase(rendered.rfind(" @ "));
+        CHECK(rendered == row.rendered);
+        if (row.regex.has_value()) {
+            const auto& re = must_be<Regex>(*leaf->feature());
+            CHECK(re.pattern() == row.regex->pattern);
+            CHECK(re.case_insensitive() == row.regex->case_insensitive);
+        }
+        if (row.description.has_value()) {
+            CHECK(leaf->feature()->description() == *row.description);
+        }
+    }
 }
 
 TEST_CASE("rules: subscope basic block emits a Subscope statement") {
@@ -529,111 +433,175 @@ TEST_CASE("rules: subscope basic block emits a Subscope statement") {
     CHECK(sub.scope() == Scope::kBasicBlock);
 }
 
-TEST_CASE("rules: feature in incompatible scope is rejected") {
-    // section is a file-only feature, must not appear at function scope
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: bad-scope\n"
-        "    scope: function\n"
-        "  features:\n"
-        "    - section: .text\n";
-    auto r = RuleParser::parse(text, "bad.yml");
-    REQUIRE_FALSE(r);
-    CHECK(r.error().kind == ErrorKind::kInvalidRule);
+TEST_CASE("rules: com/class and com/interface expand to Or(Bytes, String)") {
+    struct Row {
+        std::string_view label;
+        std::string_view line;
+    };
+    const std::vector<Row> rows{
+        {"a class from the CLSID table", "com/class: ShellDesktop"},
+        {"an interface from the IID table", "com/interface: IUnknown"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse(
+            papa_tests::rule_yaml("r", "instruction", {std::string(row.line)}), "rule.yml");
+        REQUIRE(r);
+        const Statement& st = (*r)->statement();
+        CHECK(st.name() == "or");
+        REQUIRE(st.children().size() == 2);
+        // One Bytes child for the binary GUID and one String child for its canonical form
+        const FeatureTag a = feat_of(*st.children()[0]).tag();
+        const FeatureTag b = feat_of(*st.children()[1]).tag();
+        CHECK(((a == FeatureTag::kBytes && b == FeatureTag::kString) ||
+               (a == FeatureTag::kString && b == FeatureTag::kBytes)));
+    }
 }
 
-TEST_CASE("rules: anchored regex flag propagates") {
-    constexpr std::string_view text =
-        "rule:\n"
+TEST_CASE("rules: each malformed rule is rejected as an invalid rule that names its fault") {
+    using papa_tests::rule_yaml;
+    // A whole rule with the given meta and features blocks, each line indented for its place
+    const auto doc = [](std::string_view meta, std::string_view features) {
+        return std::string{"rule:\n"}.append(meta).append(features);
+    };
+    constexpr std::string_view kMeta =
         "  meta:\n"
-        "    name: re-noflag\n"
-        "    scope: file\n"
+        "    name: r\n"
+        "    scopes:\n"
+        "      static: function\n"
+        "      dynamic: unsupported\n";
+    constexpr std::string_view kFeatures =
         "  features:\n"
-        "    - string: /abc/\n";
-    auto r = RuleParser::parse(text, "rn.yml");
-    REQUIRE(r);
-    const auto& re = must_be<Regex>(feat_of((*r)->statement()));
-    CHECK_FALSE(re.case_insensitive());
-}
-
-TEST_CASE("rules: lib flag in meta sets RuleMeta::lib") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: lib-rule\n"
-        "    scope: function\n"
-        "    lib: true\n"
-        "  features:\n"
-        "    - api: kernel32.CreateFileA\n";
-    auto r = RuleParser::parse(text, "lib.yml");
-    REQUIRE(r);
-    CHECK((*r)->is_lib());
-}
-
-TEST_CASE("rules: com/class expands to Or(Bytes, String)") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: com-class-rule\n"
-        "    scope: instruction\n"
-        "  features:\n"
-        "    - com/class: ShellDesktop\n";
-    auto r = RuleParser::parse(text, "com.yml");
-    REQUIRE(r);
-    const auto& or_st = must_be<Or>((*r)->statement());
-    REQUIRE(or_st.children().size() == 2);
-    const Feature& a = feat_of(*or_st.children()[0]);
-    const Feature& b = feat_of(*or_st.children()[1]);
-    // The two children expand to one Bytes (binary GUID) and one String (canonical form)
-    const bool bytes_then_string = (a.tag() == FeatureTag::kBytes && b.tag() == FeatureTag::kString);
-    const bool string_then_bytes = (a.tag() == FeatureTag::kString && b.tag() == FeatureTag::kBytes);
-    CHECK((bytes_then_string || string_then_bytes));
-}
-
-TEST_CASE("rules: com/interface uses the IID table") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: com-iface-rule\n"
-        "    scope: instruction\n"
-        "  features:\n"
-        "    - com/interface: IUnknown\n";
-    auto r = RuleParser::parse(text, "iface.yml");
-    REQUIRE(r);
-    must_be<Or>((*r)->statement());
-}
-
-TEST_CASE("rules: unknown com/class name is rejected") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: bad-com\n"
-        "    scope: instruction\n"
-        "  features:\n"
-        "    - com/class: NotARealClass\n";
-    auto r = RuleParser::parse(text, "bad.yml");
-    REQUIRE_FALSE(r);
-    CHECK(r.error().kind == ErrorKind::kInvalidRule);
-}
-
-TEST_CASE("rules: att&ck and mbc lists collect strings") {
-    constexpr std::string_view text =
-        "rule:\n"
-        "  meta:\n"
-        "    name: tagged\n"
-        "    scope: function\n"
-        "    att&ck:\n"
-        "      - Discovery::System Information Discovery [T1082]\n"
-        "    mbc:\n"
-        "      - OS::Environment Variable [B0029]\n"
-        "  features:\n"
-        "    - api: kernel32.GetSystemInfo\n";
-    auto r = RuleParser::parse(text, "tagged.yml");
-    REQUIRE(r);
-    const auto& m = (*r)->meta();
-    REQUIRE(m.att_and_ck.size() == 1);
-    CHECK(m.att_and_ck[0] == "Discovery::System Information Discovery [T1082]");
-    REQUIRE(m.mbc.size() == 1);
-    CHECK(m.mbc[0] == "OS::Environment Variable [B0029]");
+        "    - api: foo\n";
+    struct Row {
+        std::string_view label;
+        std::string      text;
+        std::string_view detail;
+    };
+    const std::vector<Row> rows{
+        // Document shape
+        {"a document that is a sequence", "- a\n", "rule document must have a top-level mapping"},
+        {"a document without rule", "foo: bar\n", "missing top-level 'rule:'"},
+        {"a rule that is a scalar", "rule: x\n", "'rule:' must be a mapping"},
+        {"a rule without meta", doc("", kFeatures), "rule is missing 'meta:'"},
+        {"a meta that is a scalar", doc("  meta: x\n", kFeatures), "'meta:' must be a mapping"},
+        {"a rule without features", doc(kMeta, ""), "rule is missing 'features:'"},
+        {"a features block that is a scalar", doc(kMeta, "  features: x\n"),
+         "'features:' must be a sequence"},
+        {"a feature item that is a scalar", doc(kMeta, "  features:\n    - just text\n"),
+         "feature item must be a mapping"},
+        // Meta fields
+        {"a name that is a list",
+         doc("  meta:\n    name:\n      - a\n    scopes:\n      static: function\n", kFeatures),
+         "'meta.name' must be scalar"},
+        {"a namespace that is a list",
+         doc(std::string{kMeta}.append("    namespace:\n      - a\n"), kFeatures),
+         "'meta.namespace' must be scalar"},
+        {"a legacy scope that is a list", doc("  meta:\n    name: r\n    scope:\n      - file\n", kFeatures),
+         "'meta.scope' must be scalar"},
+        {"a scopes value that is a scalar", doc("  meta:\n    name: r\n    scopes: function\n", kFeatures),
+         "'meta.scopes' must be a mapping"},
+        {"a scopes entry that is a list",
+         doc("  meta:\n    name: r\n    scopes:\n      static:\n        - function\n", kFeatures),
+         "'meta.scopes' entries must be scalar"},
+        {"an unknown scopes key",
+         doc(std::string{kMeta}.append("      other: file\n"), kFeatures), "unknown scopes key: other"},
+        {"an unknown static scope", rule_yaml("r", "bogus", {"api: foo"}), "unknown scope name: bogus"},
+        {"an att&ck mapping that is not a list",
+         doc(std::string{kMeta}.append("    att&ck: T1082\n"), kFeatures),
+         "meta.att&ck must be a sequence"},
+        // Statements
+        {"an and whose value is a scalar", rule_yaml("r", "function", {"and: x"}),
+         "expected a sequence of child statements"},
+        {"a not with two children",
+         rule_yaml("r", "function", {"not:\n      - api: a\n      - api: b"}),
+         "'not' takes exactly one child"},
+        {"an N or more without an integer", rule_yaml("r", "function", {"x or more:\n      - api: a"}),
+         "malformed N-or-more: x or more"},
+        {"an unknown feature key", rule_yaml("r", "function", {"bogus: x"}),
+         "unknown feature key: bogus"},
+        {"a feature value that is a list", rule_yaml("r", "function", {"api:\n      - a"}),
+         "feature 'api' expects a scalar value"},
+        {"a feature with a description and another sibling key",
+         rule_yaml("r", "function", {"api: foo\n      description: d\n      bogus: x"}),
+         "unexpected sibling key in feature mapping: bogus"},
+        {"a characteristic outside its scope", rule_yaml("r", "basic block", {"characteristic: loop"}),
+         "characteristic 'loop' not allowed at scope basic block"},
+        // Numbers and operands
+        {"an invalid float literal", rule_yaml("r", "function", {"number: 1.5x"}), "invalid float: 1.5x"},
+        {"a bare 0x", rule_yaml("r", "function", {"number: 0x"}), "invalid integer: 0x"},
+        {"an integer with trailing junk", rule_yaml("r", "function", {"number: 12zz"}),
+         "invalid integer: 12zz"},
+        {"an empty operand number", rule_yaml("r", "function", {"operand[0].number:"}),
+         "empty number literal"},
+        {"an operand key without its closing bracket", rule_yaml("r", "function", {"operand[0.number: 1"}),
+         "malformed operand key: operand[0.number"},
+        {"an operand index that is not an integer", rule_yaml("r", "function", {"operand[x].number: 1"}),
+         "operand index out of range: operand[x].number"},
+        {"an unknown operand suffix", rule_yaml("r", "function", {"operand[0].bogus: 1"}),
+         "unknown operand suffix: operand[0].bogus"},
+        {"a floating point operand offset", rule_yaml("r", "function", {"operand[0].offset: 1.5"}),
+         "operand offset cannot be floating point"},
+        {"an unknown property access", rule_yaml("r", "instruction", {"property/bogus: x"}),
+         "unknown property access: property/bogus"},
+        // Bytes
+        {"a bytes value with a wildcard", rule_yaml("r", "function", {"bytes: 01 ?? 02"}),
+         "bytes wildcards are not yet supported in v1"},
+        {"a bytes value with an odd nibble count", rule_yaml("r", "function", {"bytes: ABC"}),
+         "bytes literal has odd nibble count"},
+        {"a bytes value with a pair that is not hex", rule_yaml("r", "function", {"bytes: ZZ"}),
+         "bytes literal has invalid hex pair: ZZ"},
+        {"an empty bytes value", rule_yaml("r", "function", {"bytes:"}), "bytes literal is empty"},
+        // COM
+        {"a com/class value that is a list", rule_yaml("r", "instruction", {"com/class:\n      - ShellDesktop"}),
+         "'com/class' value must be scalar"},
+        {"a com/class at global scope", rule_yaml("r", "global", {"com/class: ShellDesktop"}),
+         "'com/class' not allowed at scope global"},
+        {"an unknown com/interface name", rule_yaml("r", "instruction", {"com/interface: NotAnInterface"}),
+         "unknown COM interface name: NotAnInterface"},
+        // Counts
+        {"a count(basic blocks) value that is a list",
+         rule_yaml("r", "function", {"count(basic blocks):\n      - 1"}),
+         "count(basic blocks) value must be a scalar range"},
+        {"a count of a feature whose value is a list",
+         rule_yaml("r", "function", {"count(api(a)):\n      - 1"}), "count(...) value must be a scalar range"},
+        {"a count of a file feature at function scope",
+         rule_yaml("r", "function", {"count(section(.text)): 1"}),
+         "feature in count(): section not allowed at scope function"},
+        {"a count tuple without a comma", rule_yaml("r", "function", {"count(api(a)): (1 3)"}),
+         "count range tuple missing comma: (1 3)"},
+        {"a count tuple with a part that is not an integer",
+         rule_yaml("r", "function", {"count(api(a)): (a, 3)"}),
+         "count range tuple parts not integral: (a, 3)"},
+        {"a count tuple whose min is above its max", rule_yaml("r", "function", {"count(api(a)): (3, 1)"}),
+         "count range min > max: (3, 1)"},
+        {"an N or more count without an integer", rule_yaml("r", "function", {"count(api(a)): x or more"}),
+         "count range 'N or more' lacks integer: x or more"},
+        {"an N or fewer count without an integer", rule_yaml("r", "function", {"count(api(a)): x or fewer"}),
+         "count range 'N or fewer' lacks integer: x or fewer"},
+        {"a count that is not a number", rule_yaml("r", "function", {"count(api(a)): many"}),
+         "count range value not integral: many"},
+        {"a missing name",
+         "rule:\n"
+         "  meta:\n"
+         "    scope: file\n"
+         "  features:\n"
+         "    - api: foo\n",
+         "missing 'meta.name'"},
+        // section is a file-only feature, so it must not appear at function scope
+        {"a feature in an incompatible scope",
+         papa_tests::rule_yaml("bad-scope", "function", {"section: .text"}),
+         "feature 'section' not allowed at scope function"},
+        {"an unknown com/class name",
+         papa_tests::rule_yaml("bad-com", "instruction", {"com/class: NotARealClass"}),
+         "unknown COM class name: NotARealClass"},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        const auto r = RuleParser::parse(row.text, "bad.yml");
+        CHECK_FALSE(r);
+        if (r) { continue; }
+        CHECK(r.error().kind == ErrorKind::kInvalidRule);
+        CHECK(r.error().detail.find(row.detail) != std::string::npos);
+    }
 }

@@ -4,33 +4,39 @@
 
 #include "papa/features/address.h"
 
-#include <string>
+#include <functional>
+#include <string_view>
 #include <unordered_set>
+#include <variant>
+#include <vector>
 
 using namespace papa::features;
 
 TEST_SUITE("address") {
 
-TEST_CASE("NoAddress instances compare equal") {
-    const Address a = NoAddress{};
-    const Address b = NoAddress{};
-    CHECK(a == b);
-}
-
-TEST_CASE("Concrete addresses compare by payload") {
-    Address a = AbsoluteVirtualAddress{0x401000};
-    Address b = AbsoluteVirtualAddress{0x401000};
-    Address c = AbsoluteVirtualAddress{0x401004};
-    CHECK(a == b);
-    CHECK_FALSE(a == c);
-}
-
-TEST_CASE("Different variant alternatives are not equal even when payload matches") {
-    // AbsoluteVirtualAddress{0x10} vs FileOffsetAddress{0x10} share a payload but live
-    // in different variant slots. Std::variant operator== is index-aware
-    Address a = AbsoluteVirtualAddress{0x10};
-    Address b = FileOffsetAddress{0x10};
-    CHECK_FALSE(a == b);
+TEST_CASE("Addresses compare equal only in one variant slot with one payload, and equal ones hash equal") {
+    struct Row {
+        std::string_view label;
+        Address          a;
+        Address          b;
+        bool             equal;
+    };
+    const std::vector<Row> rows{
+        {"NoAddress instances", NoAddress{}, NoAddress{}, true},
+        {"concrete addresses with one payload", AbsoluteVirtualAddress{0x401000},
+         AbsoluteVirtualAddress{0x401000}, true},
+        {"concrete addresses with different payloads", AbsoluteVirtualAddress{0x401000},
+         AbsoluteVirtualAddress{0x401004}, false},
+        // The payloads match but live in different variant slots, and std::variant
+        // operator== is index-aware
+        {"different variant alternatives", AbsoluteVirtualAddress{0x10}, FileOffsetAddress{0x10},
+         false},
+    };
+    for (const Row& row : rows) {
+        CAPTURE(row.label);
+        CHECK((row.a == row.b) == row.equal);
+        if (row.equal) { CHECK(std::hash<Address>{}(row.a) == std::hash<Address>{}(row.b)); }
+    }
 }
 
 TEST_CASE("linearize yields distinct values for distinct tag and payload") {
@@ -48,12 +54,12 @@ TEST_CASE("linearize yields distinct values for distinct tag and payload") {
     CHECK(rva_1 != file_1);
 }
 
-TEST_CASE("to_string returns a readable form for each variant") {
-    CHECK(to_string(Address{NoAddress{}}).find("none") != std::string::npos);
-    CHECK(to_string(Address{AbsoluteVirtualAddress{0x401000}}) .find("401000") != std::string::npos);
-    CHECK(to_string(Address{RelativeVirtualAddress{0x1000}})   .find("1000")   != std::string::npos);
-    CHECK(to_string(Address{FileOffsetAddress{0x200}})         .find("200")    != std::string::npos);
-    CHECK(to_string(Address{DnTokenAddress{0x06000001}})       .find("6000001")!= std::string::npos);
+TEST_CASE("Each variant alternative keeps its payload") {
+    CHECK(std::holds_alternative<NoAddress>(Address{NoAddress{}}));
+    CHECK(std::get<AbsoluteVirtualAddress>(Address{AbsoluteVirtualAddress{0x401000}}).v == 0x401000U);
+    CHECK(std::get<RelativeVirtualAddress>(Address{RelativeVirtualAddress{0x1000}}).v == 0x1000U);
+    CHECK(std::get<FileOffsetAddress>(Address{FileOffsetAddress{0x200}}).v == 0x200U);
+    CHECK(std::get<DnTokenAddress>(Address{DnTokenAddress{0x06000001}}).token == 0x06000001U);
 }
 
 TEST_CASE("Address can be stored in std::unordered_set") {
