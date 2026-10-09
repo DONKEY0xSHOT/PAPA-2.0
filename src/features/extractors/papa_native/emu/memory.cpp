@@ -15,9 +15,9 @@ void SandboxMemory::add_map(std::uint64_t base, std::uint32_t perms,
 }
 
 void SandboxMemory::init_stack(std::uint64_t base) {
-    // Inserted at the front so find_map reaches it before any image section
-    maps_.insert(maps_.begin(),
-                 Map{base, kStackSize, kMemRead | kMemWrite, {}, true});
+    // Rotated to the front so find_map reaches it before any image section
+    maps_.push_back(Map{base, kStackSize, kMemRead | kMemWrite, {}, true});
+    std::rotate(maps_.rbegin(), maps_.rbegin() + 1, maps_.rend());
 }
 
 const SandboxMemory::Map* SandboxMemory::find_map(std::uint64_t va) const noexcept {
