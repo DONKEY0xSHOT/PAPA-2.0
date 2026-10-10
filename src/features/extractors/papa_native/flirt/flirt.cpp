@@ -61,9 +61,9 @@ FlirtSignatureSet FlirtSignatureSet::make_embedded() {
     }
 
     set.trees_.reserve(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        if (parsed[i].has_value()) {
-            set.trees_.push_back(std::move(parsed[i].value()));
+    for (auto& tree : parsed) {
+        if (tree.has_value()) {
+            set.trees_.push_back(std::move(*tree));
         } else {
             std::cerr << "warning: skipping unparsable FLIRT signature\n";
         }

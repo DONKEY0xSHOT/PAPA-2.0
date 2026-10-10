@@ -574,8 +574,7 @@ split_leaf_description(std::string_view text, std::string description) {
     std::vector<std::byte> bytes;
     bytes.reserve(bl->pattern.size());
     for (const auto& opt : bl->pattern) {
-        // pattern entries are non-null when has_wildcards is false
-        bytes.push_back(*opt);
+        if (opt) { bytes.push_back(*opt); }
     }
     return std::make_shared<const Bytes>(std::move(bytes), std::move(desc));
 }

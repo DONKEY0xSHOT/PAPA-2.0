@@ -323,7 +323,7 @@ constexpr std::uint8_t kNameNegativeOffset     = 0x10;
             if (!names.has_value()) {
                 return Unexpected{names.error()};
             }
-            flags = names.value();
+            flags = *names;
 
             if ((flags & kTailBytes) != 0U) {
                 auto tb = parse_tail_bytes(cur, version, module.tail_bytes);
