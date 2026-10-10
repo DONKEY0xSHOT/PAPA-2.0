@@ -74,17 +74,6 @@ target_link_libraries(papa_unit_tests
         papa_project_options
 )
 
-# The embedded-registry test locks the FLIRT resources from the running exe,
-# so the unit-test binary must carry the same RCDATA resources as papa.exe.
-if(MSVC)
-    target_sources(papa_unit_tests PRIVATE
-        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc")
-    set_source_files_properties(
-        "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs/flirt_sigs.rc"
-        PROPERTIES COMPILE_OPTIONS
-        "/I${PROJECT_SOURCE_DIR}/third_party/flirt_sigs")
-endif()
-
 # Run from the source root so tests can read the vendored files by relative path
 add_test(NAME papa_unit_tests COMMAND papa_unit_tests
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")

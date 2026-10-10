@@ -722,6 +722,15 @@ inline void write_file(const std::filesystem::path& path, std::span<const std::b
     REQUIRE(out.good());
 }
 
+/// The bytes of the file at path, read in one call
+[[nodiscard]] inline std::string read_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::string   out(static_cast<std::size_t>(std::filesystem::file_size(path)), '\0');
+    in.read(out.data(), static_cast<std::streamsize>(out.size()));
+    REQUIRE(in.good());
+    return out;
+}
+
 /// Writes text to path byte for byte, creating its parent directories
 inline void write_file(const std::filesystem::path& path, std::string_view text) {
     write_file(path, text_bytes(text));

@@ -4,6 +4,8 @@
 #include "papa/features/extractors/papa_native/flirt/flirt_reader.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -13,6 +15,19 @@
 #include <vector>
 
 namespace papa::features::extractors::papa_native::flirt {
+
+std::vector<std::uint8_t> embedded::join(const EmbeddedSig& sig) {
+    std::size_t size = 0;
+    for (const std::string_view chunk : sig.chunks) { size += chunk.size(); }
+    std::vector<std::uint8_t> out(size);
+    std::size_t at = 0;
+    for (const std::string_view chunk : sig.chunks) {
+        if (chunk.empty()) { continue; }
+        std::memcpy(out.data() + at, chunk.data(), chunk.size());
+        at += chunk.size();
+    }
+    return out;
+}
 
 FlirtSignatureSet FlirtSignatureSet::make_embedded() {
     const std::span<const embedded::EmbeddedSig> sigs = embedded::registry();
@@ -28,7 +43,7 @@ FlirtSignatureSet FlirtSignatureSet::make_embedded() {
 
     const auto parse_one = [&](std::size_t i) {
         try {
-            auto tree = parse_sig_buffer({sigs[i].data, sigs[i].size});
+            auto tree = parse_sig_buffer(embedded::join(sigs[i]));
             if (tree.has_value()) { parsed[i] = std::move(tree.value()); }
         } catch (...) {
             errors[i] = std::current_exception();

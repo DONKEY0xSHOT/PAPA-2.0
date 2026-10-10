@@ -8,10 +8,13 @@
 
 #include "test_support.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -102,18 +105,23 @@ TEST_CASE("flirt_signature_set: an empty set has no trees and classifies nothing
     CHECK_FALSE(set.classify(good));
 }
 
-TEST_CASE("flirt_signature_set: embedded registry loads every bundled sig") {
-#if defined(_WIN32) && defined(_MSC_VER)
-    auto reg = flirt::embedded::registry();
-    REQUIRE(reg.size() == 3U);
-    for (const auto& e : reg) {
-        CHECK(e.data != nullptr);
-        CHECK(e.size > 100U);
+TEST_CASE("flirt_signature_set: the embedded registry holds the vendored packs in order, byte for byte") {
+    const std::filesystem::path dir = "third_party/flirt_sigs";
+    REQUIRE_MESSAGE(std::filesystem::is_directory(dir),
+                    "third_party/flirt_sigs not found, run the tests from the repository root");
+    constexpr std::array<std::string_view, 3> kPacks = {
+        "1_flare_msvc_rtf_32_64.sig", "2_flare_msvc_atlmfc_32_64.sig", "3_flare_common_libs.sig"};
+
+    const auto reg = flirt::embedded::registry();
+    REQUIRE(reg.size() == kPacks.size());
+    for (std::size_t i = 0; i < kPacks.size(); ++i) {
+        CAPTURE(kPacks[i]);
+        CHECK(reg[i].path == kPacks[i]);
+        for (const std::string_view chunk : reg[i].chunks) { CHECK(chunk.size() < 65535U); }
+        const std::vector<std::uint8_t> joined = flirt::embedded::join(reg[i]);
+        const std::string               file   = papa_tests::read_file(dir / kPacks[i]);
+        CHECK(std::equal(joined.begin(), joined.end(), file.begin(), file.end(),
+                         [](std::uint8_t a, char b) { return a == static_cast<std::uint8_t>(b); }));
     }
-    const auto& set = papa_tests::shared_flirt_sigs();
-    CHECK(set.tree_count() == reg.size());  // all 3 parse with zero drops
-#else
-    MESSAGE("FLIRT embedding is MSVC-only; registry is empty off MSVC");
-    CHECK(flirt::embedded::registry().empty());
-#endif
+    CHECK(papa_tests::shared_flirt_sigs().tree_count() == kPacks.size());
 }

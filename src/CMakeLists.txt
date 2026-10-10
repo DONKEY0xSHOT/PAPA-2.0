@@ -44,7 +44,6 @@ set(PAPA_LIB_SOURCES
     features/extractors/papa_native/flirt/flirt_matcher.cpp
     features/extractors/papa_native/flirt/flirt_classifier.cpp
     features/extractors/papa_native/flirt/flirt.cpp
-    features/extractors/papa_native/flirt/embedded_sigs.cpp
     features/extractors/papa_native/emu/registers.cpp
     features/extractors/papa_native/emu/memory.cpp
     features/extractors/papa_native/emu/intel_emulator.cpp
@@ -114,6 +113,38 @@ add_custom_command(
 )
 list(APPEND PAPA_LIB_SOURCES "${PAPA_EMBEDDED_RULES}")
 
+# capa's FLIRT packs in registry order, compiled in as chunked literals
+set(PAPA_FLIRT_DIR "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs")
+set(PAPA_FLIRT_PATHS
+    1_flare_msvc_rtf_32_64.sig
+    2_flare_msvc_atlmfc_32_64.sig
+    3_flare_common_libs.sig
+)
+list(TRANSFORM PAPA_FLIRT_PATHS PREPEND "${PAPA_FLIRT_DIR}/" OUTPUT_VARIABLE PAPA_FLIRT_FILES)
+set(PAPA_FLIRT_LIST "${PROJECT_BINARY_DIR}/generated/embedded_flirt.list")
+file(WRITE "${PAPA_FLIRT_LIST}.tmp" "${PAPA_FLIRT_PATHS}")
+file(COPY_FILE "${PAPA_FLIRT_LIST}.tmp" "${PAPA_FLIRT_LIST}" ONLY_IF_DIFFERENT)
+file(REMOVE "${PAPA_FLIRT_LIST}.tmp")
+
+set(PAPA_EMBEDDED_FLIRT "${PROJECT_BINARY_DIR}/generated/embedded_flirt.cpp")
+add_custom_command(
+    OUTPUT "${PAPA_EMBEDDED_FLIRT}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DBASE_DIR=${PAPA_FLIRT_DIR}"
+        "-DFILE_LIST=${PAPA_FLIRT_LIST}"
+        "-DOUTPUT=${PAPA_EMBEDDED_FLIRT}"
+        -DHEADER=papa/features/extractors/papa_native/flirt/flirt.h
+        -DNAMESPACE=papa::features::extractors::papa_native::flirt::embedded
+        -DTYPE=EmbeddedSig
+        -DFUNCTION=registry
+        -DCHUNK_BYTES=60000
+        -P "${PROJECT_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+    DEPENDS ${PAPA_FLIRT_FILES} "${PAPA_FLIRT_LIST}" "${PROJECT_SOURCE_DIR}/cmake/EmbedFiles.cmake"
+    COMMENT "Embedding the FLIRT signature packs"
+    VERBATIM
+)
+list(APPEND PAPA_LIB_SOURCES "${PAPA_EMBEDDED_FLIRT}")
+
 add_library(papa_lib STATIC ${PAPA_LIB_SOURCES})
 add_library(papa::lib ALIAS papa_lib)
 
@@ -125,14 +156,6 @@ target_include_directories(papa_lib
     PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
 )
-
-# embedded_sigs.cpp includes the FLIRT resource id header on MSVC.
-if(MSVC)
-    target_include_directories(papa_lib
-        PRIVATE
-            "${PROJECT_SOURCE_DIR}/third_party/flirt_sigs"
-    )
-endif()
 
 target_link_libraries(papa_lib
     PUBLIC

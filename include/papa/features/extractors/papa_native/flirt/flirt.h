@@ -12,16 +12,17 @@ namespace papa::features::extractors::papa_native::flirt {
 
 namespace embedded {
 
-/// One signature blob embedded in the binary. registry() in embedded_sigs.cpp reads
-/// them from the executable's resources on MSVC builds
+/// One signature pack compiled into the binary as consecutive chunks of its bytes
 struct EmbeddedSig {
-    std::string_view    name;
-    const std::uint8_t* data{nullptr};
-    std::size_t         size{0};
+    std::string_view                  path{};
+    std::span<const std::string_view> chunks{};
 };
 
-/// The compile-time set of embedded signature blobs
+/// The signature packs compiled into the binary, in registry order
 [[nodiscard]] std::span<const EmbeddedSig> registry() noexcept;
+
+/// The pack's chunks joined into one buffer
+[[nodiscard]] std::vector<std::uint8_t> join(const EmbeddedSig& sig);
 
 }  // namespace embedded
 

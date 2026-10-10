@@ -24,7 +24,7 @@ mirroring capa's behaviour.
 
 ## Embedding
 
-On MSVC the three `.sig` files are embedded into the PAPA executables as
-RCDATA resources via `flirt_sigs.rc`, so the binary stays self-contained. At
-runtime the registry locks them out of the loaded module. On non-MSVC
-toolchains the registry is empty and FLIRT classification is inactive.
+The build compiles the three `.sig` files into the PAPA executables as generated
+source (`cmake/EmbedFiles.cmake`, in chunks below the compiler's literal limit), so
+the binary stays self-contained on every toolchain. At runtime the registry joins
+each pack's chunks before it is parsed.
