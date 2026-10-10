@@ -15,16 +15,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   standards:
     name: Coding standards
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The rules a compiler cannot catch: comment style, non-ASCII, and personal
       # paths. The language subset and warnings are enforced by the build itself
@@ -35,9 +38,13 @@ jobs:
     name: clang-tidy
     needs: standards
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Pinned to a version rather than the image default. clang-tidy check
       # behaviour changes between releases, so an unpinned tool moves the gate
@@ -66,9 +73,13 @@ jobs:
     name: ASan (Windows, MSVC)
     needs: clang-tidy
     runs-on: windows-2022
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Debug, because the sanitizer flags are gated on that configuration. The
       # static CRT is the pairing whose ASan thunk the toolset actually ships
@@ -108,9 +119,13 @@ jobs:
     name: Build and test (Windows, Release)
     needs: asan
     runs-on: windows-2022
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The build flags live in the project's CMake and warnings are errors. The version
       # is the release job's tag number, so the released papa.exe reports its own tag
@@ -161,6 +176,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # A release is cut only when the push touched code
       - name: Detect code changes
