@@ -90,6 +90,10 @@ private:
 /// hash apart
 [[nodiscard]] std::size_t hash_number_value(const Number::Value& v) noexcept;
 
+/// True when both number values hold the same alternative with equal payloads, so
+/// 1u64, 1i64 and 1.0 differ
+[[nodiscard]] bool number_values_equal(const Number::Value& a, const Number::Value& b) noexcept;
+
 // Offset is stored signed because negative struct offsets are valid inputs
 class Offset : public Feature {
 public:

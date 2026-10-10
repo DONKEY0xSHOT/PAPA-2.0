@@ -45,7 +45,7 @@ std::size_t OperandNumber::hash() const noexcept {
 bool OperandNumber::equals(const Feature& o) const noexcept {
     if (o.tag() != FeatureTag::kOperandNumber) { return false; }
     const auto& rhs = static_cast<const OperandNumber&>(o);
-    return index_ == rhs.index_ && value_ == rhs.value_;
+    return index_ == rhs.index_ && number_values_equal(value_, rhs.value_);
 }
 
 // OperandOffset

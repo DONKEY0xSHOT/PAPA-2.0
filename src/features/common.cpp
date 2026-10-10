@@ -13,7 +13,6 @@
 #include <regex>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -186,15 +185,23 @@ Number::Number(Value v, std::string desc)
 std::size_t hash_number_value(const Number::Value& v) noexcept {
     // Treat the double alternative bitwise so NaN values hash stably and
     // the distinct variant alternatives 1u64 vs 1i64 vs 1.0 mix to different seeds
-    const std::size_t payload = std::visit([](auto x) noexcept -> std::size_t {
-        using T = std::decay_t<decltype(x)>;
-        if constexpr (std::is_same_v<T, double>) {
-            return util::hashing::hash_double_bits(x);
-        } else {
-            return std::hash<T>{}(x);
-        }
-    }, v);
+    std::size_t payload = 0;
+    if (const auto* u = std::get_if<std::uint64_t>(&v)) {
+        payload = std::hash<std::uint64_t>{}(*u);
+    } else if (const auto* i = std::get_if<std::int64_t>(&v)) {
+        payload = std::hash<std::int64_t>{}(*i);
+    } else if (const auto* d = std::get_if<double>(&v)) {
+        payload = util::hashing::hash_double_bits(*d);
+    }
     return util::hashing::hash_combine(payload, v.index());
+}
+
+bool number_values_equal(const Number::Value& a, const Number::Value& b) noexcept {
+    if (a.index() != b.index()) { return false; }
+    if (const auto* u = std::get_if<std::uint64_t>(&a)) { return *u == *std::get_if<std::uint64_t>(&b); }
+    if (const auto* i = std::get_if<std::int64_t>(&a)) { return *i == *std::get_if<std::int64_t>(&b); }
+    if (const auto* d = std::get_if<double>(&a)) { return *d == *std::get_if<double>(&b); }
+    return true;
 }
 
 std::size_t Number::hash() const noexcept {
@@ -204,9 +211,7 @@ std::size_t Number::hash() const noexcept {
 bool Number::equals(const Feature& o) const noexcept {
     if (o.tag() != tag_) { return false; }
     const auto& rhs = static_cast<const Number&>(o);
-    // std::variant::operator== compares by active alternative first
-    // Differing alternatives always compare unequal even when payloads match
-    return value_ == rhs.value_;
+    return number_values_equal(value_, rhs.value_);
 }
 
 // Offset

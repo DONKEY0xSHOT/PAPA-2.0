@@ -22,21 +22,18 @@ std::uint64_t linearize(const Address& a) noexcept {
     // with identical payload bytes never land on the same linearized value
     const std::uint64_t tag = static_cast<std::uint64_t>(tag_of(a));
     std::uint64_t payload = 0;
-    std::visit(
-        [&payload](const auto& v) noexcept {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, NoAddress>) {
-                payload = 0;
-            } else if constexpr (std::is_same_v<T, DnTokenOffsetAddress>) {
-                // Token and offset are independent spaces
-                payload = v.token ^ (v.offset * util::hashing::kGoldenRatio64);
-            } else if constexpr (std::is_same_v<T, DnTokenAddress>) {
-                payload = v.token;
-            } else {
-                payload = v.v;
-            }
-        },
-        a);
+    if (const auto* to = std::get_if<DnTokenOffsetAddress>(&a)) {
+        // Token and offset are independent spaces
+        payload = to->token ^ (to->offset * util::hashing::kGoldenRatio64);
+    } else if (const auto* t = std::get_if<DnTokenAddress>(&a)) {
+        payload = t->token;
+    } else if (const auto* va = std::get_if<AbsoluteVirtualAddress>(&a)) {
+        payload = va->v;
+    } else if (const auto* rva = std::get_if<RelativeVirtualAddress>(&a)) {
+        payload = rva->v;
+    } else if (const auto* off = std::get_if<FileOffsetAddress>(&a)) {
+        payload = off->v;
+    }
     return (tag << 56) ^ payload;
 }
 
