@@ -141,13 +141,11 @@ constexpr std::string_view kInlineDescSep = " = ";
         case FeatureTag::kSection:
             return Scope::kFile;
 
+        // Function names, classes and namespaces are file or instruction in capa,
+        // modelled here as instruction with function and basic block disallowed below
         case FeatureTag::kFunctionName:
         case FeatureTag::kClass:
         case FeatureTag::kNamespace:
-            // file or instruction in capa
-            // We model as instruction-origin and disallow function/BB explicitly below
-            return Scope::kInstruction;
-
         case FeatureTag::kApi:
         case FeatureTag::kMnemonic:
         case FeatureTag::kNumber:
@@ -158,11 +156,11 @@ constexpr std::string_view kInlineDescSep = " = ";
         case FeatureTag::kProperty:
             return Scope::kInstruction;
 
+        // Characteristics follow per-value rules, and the basic block tag never
+        // appears in a rule
         case FeatureTag::kCharacteristic:
-            return std::nullopt;            // per-value rules apply
-
         case FeatureTag::kBasicBlock:
-            return std::nullopt;            // extractor-only tag, never legal in rules
+            return std::nullopt;
     }
     return std::nullopt;
 }

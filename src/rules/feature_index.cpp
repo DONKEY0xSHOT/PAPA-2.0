@@ -94,8 +94,8 @@ using features::FeatureTag;
         case FeatureTag::kOperandOffset: return 4;
         case FeatureTag::kMnemonic:      return 2;
         case FeatureTag::kBasicBlock:    return 1;
-        case FeatureTag::kFormat:        return 0;
-        // Never indexable, so never scored
+        // Format scores 0, and the rest are never indexable, so never scored
+        case FeatureTag::kFormat:
         case FeatureTag::kSubstring:
         case FeatureTag::kRegex:
         case FeatureTag::kBytes:
