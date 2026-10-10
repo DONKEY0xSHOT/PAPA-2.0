@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <type_traits>
 #include <utility>
@@ -67,15 +68,15 @@ public:
         return std::move(std::get<0>(storage_));
     }
 
-    [[nodiscard]] constexpr const E& error() const& noexcept { return std::get<1>(storage_); }
-    [[nodiscard]] constexpr E&       error() & noexcept       { return std::get<1>(storage_); }
-    [[nodiscard]] constexpr E&&      error() && noexcept      { return std::move(std::get<1>(storage_)); }
+    [[nodiscard]] constexpr const E& error() const& noexcept { return *checked<1>(); }
+    [[nodiscard]] constexpr E&       error() & noexcept       { return *checked<1>(); }
+    [[nodiscard]] constexpr E&&      error() && noexcept      { return std::move(*checked<1>()); }
 
-    [[nodiscard]] constexpr const T& operator*() const& noexcept { return std::get<0>(storage_); }
-    [[nodiscard]] constexpr T&       operator*() & noexcept       { return std::get<0>(storage_); }
+    [[nodiscard]] constexpr const T& operator*() const& noexcept { return *checked<0>(); }
+    [[nodiscard]] constexpr T&       operator*() & noexcept       { return *checked<0>(); }
 
-    [[nodiscard]] constexpr const T* operator->() const noexcept { return &std::get<0>(storage_); }
-    [[nodiscard]] constexpr T*       operator->() noexcept       { return &std::get<0>(storage_); }
+    [[nodiscard]] constexpr const T* operator->() const noexcept { return checked<0>(); }
+    [[nodiscard]] constexpr T*       operator->() noexcept       { return checked<0>(); }
 
     template <typename U>
     [[nodiscard]] constexpr T value_or(U&& fallback) const& {
@@ -83,6 +84,20 @@ public:
     }
 
 private:
+    // The alternative I, stopping the program when the other one is held
+    template <std::size_t I>
+    [[nodiscard]] constexpr auto* checked() noexcept {
+        auto* held = std::get_if<I>(&storage_);
+        if (held == nullptr) { std::abort(); }
+        return held;
+    }
+    template <std::size_t I>
+    [[nodiscard]] constexpr const auto* checked() const noexcept {
+        const auto* held = std::get_if<I>(&storage_);
+        if (held == nullptr) { std::abort(); }
+        return held;
+    }
+
     std::variant<T, E> storage_;
 };
 
