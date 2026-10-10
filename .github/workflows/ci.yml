@@ -1,7 +1,7 @@
 name: CI
 
-# One gate in four stages, each depending on the one before it: coding
-# standards, clang-tidy, ASan, then the release build, test and publish
+# The blocking checks run in parallel. A push to main that changes code then
+# publishes a release once every check has passed
 
 on:
   push:
@@ -36,7 +36,6 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
-    needs: standards
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,7 +70,6 @@ jobs:
 
   asan:
     name: ASan (Windows, MSVC)
-    needs: clang-tidy
     runs-on: windows-2022
     permissions:
       contents: read
@@ -117,7 +115,6 @@ jobs:
 
   build-and-test:
     name: Build and test (Windows, Release)
-    needs: asan
     runs-on: windows-2022
     permissions:
       contents: read
@@ -166,7 +163,7 @@ jobs:
 
   release:
     name: Release on code change
-    needs: build-and-test
+    needs: [standards, clang-tidy, asan, build-and-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     permissions:
