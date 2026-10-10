@@ -13,6 +13,7 @@ Checks: >
   portability-*,
   readability-*,
   -bugprone-easily-swappable-parameters,
+  -cert-dcl58-cpp,
   -cert-err58-cpp,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
@@ -29,9 +30,9 @@ Checks: >
   -readability-magic-numbers,
   -readability-named-parameter
 
-# Only the path-sensitive analyzer blocks a merge.
+# The analyzer, bugprone and cert families block a merge.
 # The style families above stay enabled for reporting
-WarningsAsErrors: 'clang-analyzer-*,-clang-analyzer-core.uninitialized.Assign'
+WarningsAsErrors: 'bugprone-*,cert-*,clang-analyzer-*,-clang-analyzer-core.uninitialized.Assign'
 HeaderFilterRegex: '.*papa/.*\.h$'
 
 CheckOptions:
